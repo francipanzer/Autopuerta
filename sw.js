@@ -1,4 +1,4 @@
-const CACHE_NAME = 'autopuerta-v60';  // globos grises, partes asignados
+const CACHE_NAME = 'autopuerta-v62';  // globos grises, partes asignados
 
 // ═══════════════════════════════════════════════════════════
 //  INSTALL

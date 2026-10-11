@@ -827,7 +827,7 @@ window.showParteForm = async function(id, prefill) {
   // Matrícula preseleccionada: directa (p.matricula) o vía vehiculoId
   let matriculaSel = p.matricula || '';
   if (!matriculaSel && p.vehiculoId) {
-    matriculaSel = vehiculos.find(v => v.id === p.vehiculoId)?.matricula || '';
+    matriculaSel = vehiculos.find(v => v.id === p.vehiculoId || normMatricula(v.matricula) === normMatricula(p.vehiculoId))?.matricula || '';
   }
 
   // Fotos del formulario: las ya guardadas más las nuevas (todas como imagen comprimida)
@@ -857,7 +857,7 @@ window.showParteForm = async function(id, prefill) {
     '</div>' +
     '<div class="form-group"><label>Horas</label><input id="pt_horas" type="number" step="0.5" class="only-num-dec" value="' + (p.horas || '') + '" placeholder="Ej: 1.5"></div>' +
     '<div class="form-group"><label>Vehículo *</label><select id="pt_vehiculo"><option value="">— Seleccionar vehículo —</option>' +
-        vehiculos.map(v => '<option value="' + escapeHtml(v.matricula) + '" ' + (matriculaSel === v.matricula ? 'selected' : '') + '>' + escapeHtml(v.matricula) + ' - ' + escapeHtml(v.marca) + ' ' + escapeHtml(v.modelo) + '</option>').join('') +
+        vehiculos.map(v => '<option value="' + escapeHtml(v.id) + '" data-matricula="' + escapeHtml(v.matricula) + '" ' + (normMatricula(matriculaSel) === normMatricula(v.matricula) ? 'selected' : '') + '>' + escapeHtml(v.matricula) + ' - ' + escapeHtml(v.marca) + ' ' + escapeHtml(v.modelo) + '</option>').join('') +
     '</select></div>' +
     '<div class="form-group"><label>Estado</label><select id="pt_estado">' +
       ['abierto', 'en_ruta', 'en_taller', 'completado'].map(e => '<option value="' + e + '" ' + (p.estado === e ? 'selected' : '') + '>' + getStatusLabel(e) + '</option>').join('') +
@@ -1899,27 +1899,39 @@ async function calcularKmJornada(partesDelDia){
 // ═══════════════════════════════════════════════════
 //  RECALCULO DE KMS DE VEHÍCULOS
 // ═══════════════════════════════════════════════════
+window.normMatricula = m => String(m || '').replace(/\s/g, '').toUpperCase();
+
+/** Partes con la matrícula resuelta a la del vehículo (también los antiguos, que la guardaban vacía). */
+window.cargarPartesConMatricula = async function(vehiculos) {
+  vehiculos = vehiculos || await dbGetAll('vehiculos');
+  const partes = await dbGetAll('partesTrabajo');
+  return partes.map(p => {
+    const ref = p.matricula || p.vehiculoId;
+    const veh = vehiculos.find(v => String(v.id) === String(ref) || normMatricula(v.matricula) === normMatricula(ref));
+    return veh ? { ...p, matricula: veh.matricula } : p;
+  });
+};
+
 /** Recalcular KMs de un vehículo por matrícula. */
-window.recalcVehicleKms = async function(matricula) {
+window.recalcVehicleKms = async function(matricula, silent) {
   if (!matricula) return null;
   try {
-    // Index compuesto: matricula + fecha
-    const range = IDBKeyRange.bound([matricula, ''], [matricula, '\uffff'], false, false);
-    const partes = await dbGetByIndexRange('partesTrabajo', 'matricula_fecha', range);
-
     const vehiculos = await dbGetAll('vehiculos');
-    const vehiculo = vehiculos.find(v => v.matricula === matricula);
+    const vehiculo = vehiculos.find(v => normMatricula(v.matricula) === normMatricula(matricula));
     if (!vehiculo) {
       console.warn('[recalcVehicleKms] Vehículo no encontrado:', matricula);
       return null;
     }
+    const partes = (await cargarPartesConMatricula(vehiculos))
+      .filter(p => p.matricula === vehiculo.matricula);
 
-    // ── Fijar base SIEMPRE en km_inicial (si no existe, tomar el valor actual una vez) ──
-    if (vehiculo.km_inicial == null) {
-      vehiculo.km_inicial = Number(vehiculo.km) || 0;
-      await dbPut('vehiculos', vehiculo);
+    // ── Base fija en km_inicial (si no existe, se toma el km actual una sola vez) ──
+    let kmIncial = vehiculo.kmInicial ?? vehiculo.km_inicial;
+    if (kmIncial == null) {
+      kmIncial = Number(vehiculo.km) || 0;
+      vehiculo.kmInicial = kmIncial;
     }
-    const kmIncial = Number(vehiculo.km_inicial);
+    kmIncial = Number(kmIncial);
 
     // ── Agrupar partes por fecha (jornadas) ──
     const jornadas = {};
@@ -1945,9 +1957,11 @@ window.recalcVehicleKms = async function(matricula) {
     // ── Resultado final ──
     const nuevoKm = kmIncial + sumaDesplazamientos;
 
-    if (Number(vehiculo.km) !== nuevoKm) {
+    const cambioBase = (vehiculo.kmInicial ?? vehiculo.km_inicial) !== kmIncial || Number(vehiculo.km) !== nuevoKm;
+    if (cambioBase && window.isAdmin?.() !== false) {
       vehiculo.km = nuevoKm;
-      vehiculo.km_actualizado = new Date().toISOString();
+      vehiculo.kmInicial = kmIncial;
+      delete vehiculo.km_inicial;
       await dbPut('vehiculos', vehiculo);
     }
 
@@ -1958,19 +1972,19 @@ window.recalcVehicleKms = async function(matricula) {
     return vehiculo;
   } catch (err) {
     console.error('[recalcVehicleKms]', err);
-    showToast('Error al recalcular KMs: ' + err.message, 'error');
+    if (!silent) showToast('Error al recalcular KMs: ' + err.message, 'error');
     return null;
   }
 };
 
 /** Recalcula TODA la flota (llamada puntual). */
-window.recalcAllFleetKms = async function() {
+window.recalcAllFleetKms = async function(silent) {
   const vehiculos = await dbGetAll('vehiculos');
   for (const v of vehiculos) {
-    if (v.matricula) await recalcVehicleKms(v.matricula);
-  }                                              // ← este } CIERRA el for
-  showToast('KMs de flota recalculados');
-};                                               // ← y este la función
+    if (v.matricula) await recalcVehicleKms(v.matricula, silent);
+  }
+  if (!silent) showToast('KMs de flota recalculados');
+};
 // ============================================================
 // INFORME DIARIO DE FLOTA
 // ============================================================
@@ -1982,8 +1996,7 @@ window.recalcAllFleetKms = async function() {
 window.generateDailyReport = async function(dateStr = todayStr()) {
   try {
     // 1. Obtener TODOS los partes del día (una sola query por índice compuesto)
-    const range = IDBKeyRange.bound(['', dateStr], ['\uffff', '\uffff'], false, false);
-    const partesHoy = await dbGetByIndexRange('partesTrabajo', 'matricula_fecha', range);
+    const partesHoy = (await cargarPartesConMatricula()).filter(p => String(p.fecha || '').slice(0, 10) === dateStr);
 
     // 2. Obtener todos los vehículos
     const vehiculos = await dbGetAll('vehiculos');

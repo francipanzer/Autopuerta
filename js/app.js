@@ -23,6 +23,10 @@ window.setCurrentCadenId = (id) => syncCurrentCadenaId(id);
 window.__onStoreChanged = (store, payload) => {
   console.log('[App] Store cambiado:', store);
   if (store === 'partesTrabajo' || store === 'solicitudesMaterial') window.refreshAdminNotifications?.();
+  if (store === 'partesTrabajo' && window.isAdmin?.()) {
+    clearTimeout(window.__kmsTimer);
+    window.__kmsTimer = setTimeout(() => window.recalcAllFleetKms?.(true), 1500);
+  }
   const me = window.authState;
   if (store === 'partesTrabajo' && payload?.eventType === 'INSERT' && window.isTechnician?.() && me?.employee &&
       String(payload.new?.empleadoid) === String(me.employee.id) && String(payload.new?.createdby) !== String(me.user?.id)) {
@@ -179,7 +183,7 @@ function navigateTo(page, arg) {
     i.classList.toggle('active', i.dataset.page === page));
 
   // cerrar menú móvil
-  setBubblesMenu(false);
+  setBubblesMenu();
   document.getElementById('sidebar')?.classList.remove('open');
   const bd = document.querySelector('.sidebar-backdrop');
   if (bd) bd.classList.remove('show');
@@ -208,23 +212,11 @@ function navigateTo(page, arg) {
 
 // ── Badge de pendientes en el nav ──────────────────────────
 async function actualizarBadgeRevisiones() {
-  const navItem = document.querySelector('.nav-item[data-page="revisionesProgramadas"]');
-  if (!navItem || typeof getPendientesRevision !== 'function') return;
+  if (typeof getPendientesRevision !== 'function' || !window.setNavBadge) return;
 
   try {
     const p = await getPendientesRevision();
-    let span = navItem.querySelector('.nav-badge');
-    if (p.length > 0) {
-      if (!span) {
-        span = document.createElement('span');
-        span.className = 'nav-badge';
-        span.style.cssText = 'background:#e11d48;color:#fff;font-size:10px;padding:1px 6px;border-radius:10px;margin-left:6px;';
-        navItem.appendChild(span);
-      }
-      span.textContent = p.length;
-    } else if (span) {
-      span.remove();
-    }
+    window.setNavBadge('revisionesProgramadas', p.length);
   } catch (e) {
     console.warn('[badge] getPendientesRevision falló:', e.message);
   }
@@ -381,13 +373,16 @@ async function checkVehiculoAlerts() {
 // ── Menú móvil de globos ───────────────────────────────────
 const isMobileView = () => window.innerWidth <= 900;
 
-function setBubblesMenu(open) {
-  document.getElementById('sidebar')?.classList.toggle('bubbles-open', open);
+// En móvil la pantalla de globos es el inicio: dentro de una sección, la X vuelve a ella.
+function setBubblesMenu() {
   const fab = document.getElementById('menuFab');
-  if (fab) fab.classList.toggle('is-open', open);
-  if (fab) fab.innerHTML = open
-    ? '<i class="fas fa-xmark"></i><span>Cerrar</span>'
-    : '<i class="fas fa-grip"></i><span>Menú</span>';
+  const onSection = isMobileView() && !!window.currentPage && window.currentPage !== 'dashboard';
+  document.body.classList.toggle('on-section', onSection);
+  if (!fab) return;
+  fab.classList.toggle('fab-hidden', !onSection);
+  fab.classList.add('is-open');
+  fab.setAttribute('aria-label', 'Volver al inicio');
+  fab.innerHTML = '<i class="fas fa-xmark"></i><span>Inicio</span>';
 }
 
 function setupMenuFab() {
@@ -396,12 +391,9 @@ function setupMenuFab() {
   fab.id = 'menuFab';
   fab.type = 'button';
   fab.className = 'menu-fab';
-  fab.setAttribute('aria-label', 'Abrir menú');
   document.body.appendChild(fab);
-  setBubblesMenu(false);
-  fab.addEventListener('click', () => {
-    setBubblesMenu(!document.getElementById('sidebar').classList.contains('bubbles-open'));
-  });
+  setBubblesMenu();
+  fab.addEventListener('click', () => navigateTo('dashboard'));
 }
 
 // Globos de acceso rápido al principio del inicio (solo móvil)
@@ -433,7 +425,7 @@ document.addEventListener('click', e => {
   if (item) { e.preventDefault(); e.stopImmediatePropagation(); }
 }, true);
 
-window.addEventListener('resize', () => { if (!isMobileView()) setBubblesMenu(false); });
+window.addEventListener('resize', () => setBubblesMenu());
 // ── Cierre de modales (excluye overlays de gestión) ────────
 function closeAllModals() {
   document.querySelectorAll('.modal-overlay').forEach(m => {

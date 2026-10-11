@@ -1,4 +1,4 @@
-const TECH_PAGES = new Set(['dashboard', 'incidencias', 'partesTrabajo', 'presupuestos', 'informesKms', 'revisionesProgramadas', 'almacen', 'ayuda']);
+const TECH_PAGES = new Set(['dashboard', 'incidencias', 'partesTrabajo', 'presupuestos', 'informesKms', 'revisionesProgramadas', 'almacen', 'vehiculos', 'ayuda']);
 const HELP_GUIDES = [
   { page: 'dashboard', title: 'Panel de control', roles: ['admin', 'technician'], text: 'Consulta el resumen general. Los técnicos ven sus partes recientes y avisos operativos; administración ve los indicadores de toda la empresa.' },
   { page: 'partesTrabajo', title: 'Partes de trabajo', roles: ['admin', 'technician'], text: 'Crea un parte, elige cliente, ubicación, puerta y vehículo, completa el trabajo y guarda. Los técnicos pueden ver todos los partes, pero editar o eliminar solo los propios. DNI, firmas y fotos se muestran solo en los propios.' },
@@ -705,7 +705,24 @@ window.render_dashboard = async function(container, arg) {
   bar.innerHTML = '<button type="button" class="btn btn-outline btn-sm push-toggle-btn" hidden></button>';
   container.prepend(bar);
   window.renderHomeBubbles?.(container);
+  if (mobile) {
+    const footer = document.createElement('div');
+    footer.className = 'home-account';
+    const profile = window.authState.profile;
+    footer.innerHTML = `
+      <div class="home-account-name">${authEscape(profile.full_name)} · ${profile.role === 'admin' ? 'Administrador' : 'Técnico'}</div>
+      <div class="home-account-actions">
+        <button type="button" class="btn btn-outline btn-sm" data-home-theme><i class="fas fa-circle-half-stroke"></i> Tema</button>
+        <button type="button" class="btn btn-outline btn-sm" data-home-logout><i class="fas fa-right-from-bracket"></i> Cerrar sesión</button>
+      </div>`;
+    footer.querySelector('[data-home-theme]').addEventListener('click', () => document.getElementById('themeToggle')?.click());
+    footer.querySelector('[data-home-logout]').addEventListener('click', () => window.supabaseDB.auth.signOut());
+    container.appendChild(footer);
+  }
   window.initPushButton?.();
+  window.refreshAdminNotifications?.();
+  window.refreshIncidenciasBadge?.();
+  if (typeof actualizarBadgeRevisiones === 'function') actualizarBadgeRevisiones();
 };
 
 // Al girar el móvil o cambiar el tamaño cruzando el umbral, repinta el inicio
@@ -716,7 +733,6 @@ window.addEventListener('resize', () => {
   if (main.dataset.dashboardMode !== mode) window.render_dashboard(main);
 });
 
-const ADMIN_SEEN_SECTIONS = { partesTrabajo: 'partes', presupuestos: 'presupuestos' };
 window.setNavBadge = (page, count) => paintNavBadge(page, count);
 
 function paintNavBadge(page, count) {
@@ -736,31 +752,92 @@ function paintNavBadge(page, count) {
   });
 }
 
-window.refreshAdminNotifications = async function() {
-  if (!window.isAdmin()) {
-    Object.keys(ADMIN_SEEN_SECTIONS).forEach(page => setNavBadge(page, 0));
-    return;
+// Números de novedades: se calculan en el propio dispositivo (sin depender de funciones del servidor)
+const NEW_SECTIONS = { partesTrabajo: 'partesTrabajo', presupuestos: 'solicitudesMaterial' };
+
+function seenKey(page) { return `valgom_seen_${window.authState.user.id}_${page}`; }
+function seenAt(page) {
+  let value = localStorage.getItem(seenKey(page));
+  if (!value) { value = String(Date.now()); localStorage.setItem(seenKey(page), value); }
+  return Number(value);
+}
+function markSeen(page) { localStorage.setItem(seenKey(page), String(Date.now())); }
+
+async function countNewRecords(page) {
+  const me = String(window.authState.user.id);
+  const since = seenAt(page);
+  const isNew = record => record.createdBy && String(record.createdBy) !== me && Date.parse(record.createdAt) > since;
+  if (page === 'partesTrabajo') {
+    const parts = await dbGetAll('partesTrabajo');
+    if (window.isAdmin()) return parts.filter(isNew).length;
+    const myEmployee = window.authState.employee?.id;
+    return myEmployee ? parts.filter(part => isNew(part) && String(part.empleadoId) === String(myEmployee)).length : 0;
   }
-  const { data, error } = await window.supabaseDB.rpc('get_admin_unseen_counts');
-  if (error) return console.warn('[Avisos] No se pudieron cargar los contadores:', error.message);
-  const current = ADMIN_SEEN_SECTIONS[window.currentPage];
-  Object.entries(ADMIN_SEEN_SECTIONS).forEach(([page, section]) => {
-    setNavBadge(page, section === current ? 0 : Number(data?.[section]) || 0);
-  });
-  if (current) await window.supabaseDB.rpc('mark_admin_seen', { p_section: current });
+  if (page === 'presupuestos' && window.isAdmin()) {
+    return (await dbGetAll('solicitudesMaterial')).filter(isNew).length;
+  }
+  return 0;
+}
+
+window.refreshAdminNotifications = async function() {
+  if (!window.authState?.user) return;
+  for (const page of Object.keys(NEW_SECTIONS)) {
+    try {
+      if (window.currentPage === page) { markSeen(page); setNavBadge(page, 0); continue; }
+      setNavBadge(page, await countNewRecords(page));
+    } catch (error) {
+      console.warn('[Avisos] No se pudo calcular', page, error.message);
+    }
+  }
+  try {
+    const vehicles = await dbGetAll('vehiculos');
+    setNavBadge('vehiculos', vehicles.filter(v => {
+      const days = diasHastaFechaITV(v.fechaITV || v.itv || v.fecha_itv);
+      return days !== null && days <= 30;
+    }).length);
+  } catch (error) {
+    console.warn('[Avisos] No se pudo calcular la ITV:', error.message);
+  }
 };
 
-window.onValgomNavigate = async function(page) {
-  const section = ADMIN_SEEN_SECTIONS[page];
-  if (!section || !window.isAdmin()) return;
+window.onValgomNavigate = function(page) {
+  if (!NEW_SECTIONS[page] || !window.authState?.user) return;
+  markSeen(page);
   setNavBadge(page, 0);
-  const { error } = await window.supabaseDB.rpc('mark_admin_seen', { p_section: section });
-  if (error) console.warn('[Avisos] No se pudo marcar como visto:', error.message);
 };
 
+window.addEventListener('valgom:authenticated', () => {
+  if (window.isAdmin()) setTimeout(() => window.recalcAllFleetKms?.(true), 3000);
+});
 window.addEventListener('valgom:authenticated', () => window.refreshAdminNotifications());
 setInterval(() => { if (window.authState?.user && !document.hidden) window.refreshAdminNotifications(); }, 60000);
 document.addEventListener('visibilitychange', () => { if (!document.hidden && window.authState?.user) window.refreshAdminNotifications(); });
+
+function itvAlertsCard(vehicles) {
+  const alerts = vehicles.map(vehicle => {
+    const date = vehicle.fechaITV || vehicle.itv || vehicle.fecha_itv;
+    return { vehicle, date: String(date || '').slice(0, 10), days: date ? diasHastaFechaITV(date) : null };
+  }).filter(item => item.days !== null && item.days <= 30).sort((a, b) => a.days - b.days);
+  return `<div class="card"><div class="card-header"><h3><i class="fas fa-triangle-exclamation" style="color:#f59e0b;margin-right:8px"></i>Avisos de ITV (${alerts.length})</h3></div>
+    <div class="card-body">${alerts.map(({ vehicle, date, days }) => `<div class="itv-alert-item" style="padding:12px;border-radius:6px;margin-bottom:8px;border-left:4px solid ${days < 0 ? '#ef4444' : '#f59e0b'};background-color:${days < 0 ? 'rgba(239,68,68,.1)' : 'rgba(245,158,11,.1)'};"><strong style="display:block;">${authEscape(vehicle.marca)} ${authEscape(vehicle.modelo)}</strong><span style="font-weight:bold;color:#2563eb;letter-spacing:1px;">${authEscape(vehicle.matricula)}</span><small style="display:block;margin-top:2px;"><span class="itv-countdown" data-date="${authEscape(date)}">${textoCuentaAtrasITV(days)}</span></small></div>`).join('') || '<p>No hay ITV caducadas ni próximas en los siguientes 30 días.</p>'}
+    ${alerts.length && window.isTechnician() ? '<p class="help-notice">Si ves una ITV caducada o próxima, avisa al encargado.</p>' : ''}</div></div>`;
+}
+
+const originalVehiclesPage = window.render_vehiculos;
+window.render_vehiculos = async function(container, arg) {
+  const vehicles = await dbGetAll('vehiculos');
+  if (window.isTechnician()) {
+    container.innerHTML = `<div class="page-header"><div><h2>Vehículos</h2><p>Avisos de ITV de la flota</p></div></div>
+      ${itvAlertsCard(vehicles)}
+      <div class="card"><div class="table-wrapper"><table><thead><tr><th>Matrícula</th><th>Marca</th><th>Modelo</th><th>Próxima ITV</th></tr></thead><tbody>
+        ${vehicles.map(v => `<tr><td><strong>${authEscape(v.matricula)}</strong></td><td>${authEscape(v.marca)}</td><td>${authEscape(v.modelo)}</td><td>${authEscape(formatDate(v.fechaITV || v.itv || v.fecha_itv) || '—')}</td></tr>`).join('') || '<tr><td colspan="4">Sin vehículos</td></tr>'}
+      </tbody></table></div></div>`;
+  } else {
+    await originalVehiclesPage(container, arg);
+    container.querySelector('.page-header')?.insertAdjacentHTML('afterend', itvAlertsCard(vehicles));
+  }
+  actualizarCuentaAtrasITV();
+};
 
 window.viewTechnicianPart = function(part) {
   const fotos = (Array.isArray(part.fotos) ? part.fotos : []).filter(f => typeof f === 'string' && /^(data:image\/|https?:)/.test(f));

@@ -167,7 +167,7 @@ async function cargarTablaKms() {
   const busqueda = document.getElementById('searchVehiculo')?.value?.toLowerCase().trim() || '';
 
   // Obtener partes filtrados
-  let partes = await window.db.dbGetAll('partesTrabajo');
+  let partes = await window.cargarPartesConMatricula();
   partes = partes.filter(p => {
     return p.fecha >= desde && p.fecha <= hasta &&
            (estado === 'todos' || p.estado === estado);
@@ -212,7 +212,7 @@ async function cargarTablaKms() {
   tbody.closest('table').style.display = '';
 
   for (const v of vehiculosConDatos) {
-    const kmInicial = v.km_inicial || 0;
+    const kmInicial = (v.kmInicial ?? v.km_inicial) || 0;
     const kmSuma = totales[v.matricula] || 0;
     const kmTotal = kmInicial + kmSuma;
 
@@ -248,14 +248,14 @@ async function verMensual(matricula) {
   const hasta = document.getElementById('filterHasta')?.value || window.utils?.todayStr?.() || new Date().toISOString().slice(0,10);
 
   // Obtener partes del vehículo en el periodo
-  const partes = (await window.db.dbGetAll('partesTrabajo'))
+  const partes = (await window.cargarPartesConMatricula())
     .filter(p => p.matricula === matricula && p.fecha >= desde && p.fecha <= hasta);
 
   const vehiculos = await window.db.dbGetAll('vehiculos');
   const veh = vehiculos.find(v => v.matricula === matricula);
   if (!veh) return;
 
-  const kmInicial = Number(veh.km_inicial) || 0;
+  const kmInicial = Number(veh.kmInicial ?? veh.km_inicial) || 0;
 
   // Agrupar KMs por día
   const porDia = {};
@@ -371,7 +371,7 @@ async function verDetalleVehiculo(matricula) {
   const desde = document.getElementById('filterDesde')?.value || window.utils?.todayStr?.() || new Date().toISOString().slice(0,10);
   const hasta = document.getElementById('filterHasta')?.value || window.utils?.todayStr?.() || new Date().toISOString().slice(0,10);
 
-  const partes = (await window.db.dbGetAll('partesTrabajo'))
+  const partes = (await window.cargarPartesConMatricula())
     .filter(p => p.matricula === matricula && p.fecha >= desde && p.fecha <= hasta);
 
   const vehiculos = await window.db.dbGetAll('vehiculos');
@@ -424,7 +424,7 @@ async function generarPDF() {
   const hasta = document.getElementById('filterHasta').value;
   const estado = document.getElementById('filterEstado').value;
 
-  const partes = (await window.db.dbGetAll('partesTrabajo'))
+  const partes = (await window.cargarPartesConMatricula())
     .filter(p => p.fecha >= desde && p.fecha <= hasta &&
                  (estado === 'todos' || p.estado === estado));
 
@@ -488,7 +488,7 @@ async function generarPDF() {
 
   let kmTotalGeneral = 0;
   for (const v of vehiculosConDatos) {
-    const kmInicial = v.km_inicial || 0;
+    const kmInicial = (v.kmInicial ?? v.km_inicial) || 0;
     const kmSuma = totales[v.matricula] || 0;
     const kmTotal = kmInicial + kmSuma;
     kmTotalGeneral += kmTotal;
