@@ -236,7 +236,7 @@ function updateAuthNavigation() {
     <div class="auth-account-name" title="${authEscape(profile.email)}">${authEscape(profile.full_name)}</div>
     <div class="auth-account-role">${profile.role === 'admin' ? 'Administrador' : 'Técnico'}</div>
     <button type="button" class="auth-link auth-account-email" id="changeAccountEmail">Cambiar correo</button>
-    <button type="button" class="auth-link" id="pushToggle" hidden></button>
+    <button type="button" class="auth-link auth-push" id="pushToggle" hidden></button>
     <button type="button" class="auth-link auth-logout" id="logoutButton"><i class="fas fa-right-from-bracket"></i> Cerrar sesión</button>`;
   account.querySelector('#logoutButton').addEventListener('click', () => window.supabaseDB.auth.signOut());
   account.querySelector('#changeAccountEmail').addEventListener('click', openChangeAccountEmail);

@@ -55,6 +55,8 @@ body{font-family:'Segoe UI Variable','Segoe UI',system-ui,sans-serif;background:
 .auth-link:hover{color:#fff}
 .auth-account-email{display:block;font-size:11px;margin-top:6px}
 .auth-logout{font-size:12px;margin-top:8px}
+.auth-push{display:block;font-size:11px;margin-top:6px;white-space:nowrap;text-decoration:none;width:100%;text-align:left}
+.auth-push:disabled{opacity:.6;cursor:wait}
 #authScreen[hidden],.app-container[hidden]{display:none!important}
 #authScreen{position:fixed;inset:0;z-index:1000;display:grid;place-items:center;overflow:auto;padding:24px;background:var(--bg)}
 .auth-card{width:min(100%,440px);padding:32px;background:var(--surface);border:1px solid var(--border);border-radius:18px;box-shadow:var(--shadow-lg)}

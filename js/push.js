@@ -19,10 +19,19 @@
     const permission = await Notification.requestPermission();
     if (permission !== 'granted') throw new Error('Permiso de notificaciones denegado en el navegador.');
     const reg = await navigator.serviceWorker.ready;
-    const sub = (await reg.pushManager.getSubscription()) || await reg.pushManager.subscribe({
-      userVisibleOnly: true,
-      applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY)
-    });
+    const options = { userVisibleOnly: true, applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY) };
+    let sub = await reg.pushManager.getSubscription();
+    if (!sub) {
+      try {
+        sub = await reg.pushManager.subscribe(options);
+      } catch (err) {
+        console.error('[Push] subscribe', err);
+        const brave = !!(navigator.brave && await navigator.brave.isBrave?.().catch(() => false));
+        throw new Error(brave
+          ? 'Brave bloquea los avisos: activa "Usar Google Services para mensajes push" en brave://settings/privacy y reinicia.'
+          : 'Este navegador no ha podido registrar los avisos (servicio push bloqueado). Prueba con Chrome/Edge normal (no incógnito), sin VPN ni bloqueadores, o desde el móvil con la app instalada.');
+      }
+    }
     const json = sub.toJSON();
     const { error } = await window.supabaseDB.rpc('save_push_subscription', {
       p_endpoint: json.endpoint, p_p256dh: json.keys.p256dh, p_auth: json.keys.auth
@@ -43,8 +52,8 @@
     const active = !!sub && Notification.permission === 'granted';
     button.dataset.active = active ? '1' : '0';
     button.innerHTML = active
-      ? '<i class="fas fa-bell-slash"></i> Desactivar avisos en este dispositivo'
-      : '<i class="fas fa-bell"></i> Activar avisos en este dispositivo';
+      ? '<i class="fas fa-bell-slash"></i> Desactivar avisos'
+      : '<i class="fas fa-bell"></i> Activar avisos';
   }
 
   window.initPushButton = function () {
