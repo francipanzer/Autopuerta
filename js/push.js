@@ -1,7 +1,6 @@
 // Notificaciones push (administradores): activar/desactivar en este dispositivo.
 (function () {
-  const VAPID_PUBLIC_KEY = 'BEiNXiLGXK9aVd01sTyKCej9dc3LA9-cmbeU-F-jvRjxSC6GDeZcHCvtCzi4cZw5OeSLFgB42FmyPahXEveXh10
-';
+  const VAPID_PUBLIC_KEY = 'BEiNXiLGXK9aVd01sTyKCej9dc3LA9-cmbeU-F-jvRjxSC6GDeZcHCvtCzi4cZw5OeSLFgB42FmyPahXEveXh10';
 
   const supported = () => 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
 
