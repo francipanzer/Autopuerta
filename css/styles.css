@@ -17,6 +17,12 @@ body.light {
 }
 
 /* ===== BASE ===== */
+:root{color-scheme:dark}
+body.light{color-scheme:light}
+select,select option,select optgroup{background-color:var(--surface);color:var(--text)}
+.firma-box{background:var(--surface-alt);border:1px solid var(--border);border-radius:6px;overflow:hidden}
+.firma-box canvas{display:block;width:100%;border:0!important;background:transparent!important}
+body:not(.light) .firma-box canvas{filter:invert(1)}
 *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 html,body{height:100%}
 body{font-family:'Segoe UI Variable','Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(--text);overflow:hidden;transition:background .3s,color .3s}

@@ -387,22 +387,25 @@ function firmaVolcarEnLienzo(canvas, strokes, sourceWidth){
 // Pantalla completa para firmar con el dedo. Devuelve una promesa con los trazos, o null si se cancela.
 function abrirPadFirma(titulo){
   return new Promise(resolve => {
+    const light = document.body.classList.contains('light');
+    const padBg = light ? '#ffffff' : '#1e293b';
+    const padInk = light ? '#111' : '#f8fafc';
     const overlay = document.createElement('div');
-    overlay.style.cssText = 'position:fixed;inset:0;z-index:3000;background:#0f172a;display:flex;flex-direction:column;padding:12px;gap:10px;touch-action:none;';
+    overlay.style.cssText = 'position:fixed;top:0;left:0;width:100vw;height:100vh;height:100dvh;z-index:20000;background:#0f172a;display:flex;flex-direction:column;padding:12px;padding-top:max(12px,env(safe-area-inset-top));padding-bottom:max(12px,env(safe-area-inset-bottom));gap:10px;touch-action:none;box-sizing:border-box;';
     overlay.innerHTML =
-      '<div style="display:flex;justify-content:space-between;align-items:center;color:#fff;gap:12px">' +
+      '<div style="display:flex;justify-content:space-between;align-items:center;color:#fff;gap:12px;flex:0 0 auto">' +
         '<strong style="font-size:16px">' + escapeHtml(titulo || 'Firma') + '</strong>' +
         '<small style="opacity:.75;text-align:right">Firma con el dedo dentro del recuadro</small>' +
       '</div>' +
-      '<div id="padWrap" style="flex:1;min-height:0;position:relative;background:#fff;border-radius:12px;overflow:hidden">' +
+      '<div id="padWrap" style="flex:1 1 0;min-height:0;position:relative;background:' + padBg + ';border-radius:12px;overflow:hidden;border:1px solid #334155">' +
         '<canvas id="padCanvas" style="position:absolute;inset:0;width:100%;height:100%;touch-action:none;display:block"></canvas>' +
-        '<div style="position:absolute;left:5%;right:5%;bottom:22%;border-bottom:2px dashed #cbd5e1;pointer-events:none"></div>' +
-        '<div style="position:absolute;left:5%;bottom:calc(22% + 6px);color:#94a3b8;font-size:20px;pointer-events:none">✕</div>' +
+        '<div style="position:absolute;left:5%;right:5%;bottom:22%;border-bottom:2px dashed #64748b;pointer-events:none"></div>' +
+        '<div style="position:absolute;left:5%;bottom:calc(22% + 6px);color:#64748b;font-size:20px;pointer-events:none">✕</div>' +
       '</div>' +
-      '<div style="display:flex;gap:10px">' +
-        '<button type="button" class="btn btn-outline" id="padClear" style="flex:1;min-height:48px">Borrar</button>' +
-        '<button type="button" class="btn btn-outline" id="padCancel" style="flex:1;min-height:48px">Cancelar</button>' +
-        '<button type="button" class="btn btn-primary" id="padOk" style="flex:2;min-height:48px" disabled>Aceptar</button>' +
+      '<div style="display:flex;gap:10px;flex:0 0 auto">' +
+        '<button type="button" id="padClear" style="flex:1;min-height:52px;border:1px solid #64748b;border-radius:10px;background:transparent;color:#fff;font:inherit;font-size:15px">Borrar</button>' +
+        '<button type="button" id="padCancel" style="flex:1;min-height:52px;border:1px solid #64748b;border-radius:10px;background:transparent;color:#fff;font:inherit;font-size:15px">Cancelar</button>' +
+        '<button type="button" id="padOk" style="flex:2;min-height:52px;border:0;border-radius:10px;background:#16a34a;color:#fff;font:inherit;font-size:16px;font-weight:600" disabled>Aceptar</button>' +
       '</div>';
     document.body.appendChild(overlay);
     const prevOverflow = document.body.style.overflow;
@@ -420,7 +423,7 @@ function abrirPadFirma(titulo){
       const dpr = window.devicePixelRatio || 1;
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       ctx.clearRect(0, 0, cssW, cssH);
-      firmaDibujarTrazos(ctx, strokes, p => ({ x: p.x * cssW, y: p.y * cssH }), LINE, '#111');
+      firmaDibujarTrazos(ctx, strokes, p => ({ x: p.x * cssW, y: p.y * cssH }), LINE, padInk);
     }
     function resize(){
       const rect = canvas.getBoundingClientRect();
@@ -495,6 +498,19 @@ function initFirmaCanvas(canvasId, opts = {}){
   canvas.style.height = 'auto';
   canvas.style.aspectRatio = FIRMA_W + ' / ' + FIRMA_H;
   canvas.style.touchAction = 'none';
+
+  // El recuadro toma el fondo de la app; en tema oscuro se invierte solo el trazo para verse claro (la imagen guardada sigue siendo oscura).
+  if(!canvas.parentElement.classList.contains('firma-box')){
+    const box = document.createElement('div');
+    box.className = 'firma-box';
+    canvas.parentElement.insertBefore(box, canvas);
+    box.appendChild(canvas);
+  }
+
+  if(opts.readOnly){
+    canvas.style.cursor = 'default';
+    return { clear: ()=>{}, getDataURL: ()=> canvas.toDataURL('image/png'), hasSignature: ()=> hasSignature(canvasId) };
+  }
   canvas.style.cursor = 'pointer';
 
   const coarse = window.matchMedia && window.matchMedia('(pointer: coarse)').matches;

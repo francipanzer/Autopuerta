@@ -1,8 +1,8 @@
-﻿const CACHE_NAME = 'autopuerta-v44'; // nuevo icono
+const CACHE_NAME = 'autopuerta-v45'; // nuevo icono
 
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ═══════════════════════════════════════════════════════════
 //  INSTALL
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ═══════════════════════════════════════════════════════════
 self.addEventListener('install', e => {
   e.waitUntil(
     caches.open(CACHE_NAME).then(cache => {
@@ -10,21 +10,21 @@ self.addEventListener('install', e => {
         './',
         'index.html',
         'css/styles.css',
-        'manifest.json',                                  // âž• aÃ±adido
+        'manifest.json',                                  // ➕ añadido
         'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css'
-        // âš ï¸ QUITADOS los js/*.js: ahora se cachean solos bajo demanda
-        //    con network-first (ver fetch). AsÃ­ nunca instalas JS viejo.
+        // ⚠️ QUITADOS los js/*.js: ahora se cachean solos bajo demanda
+        //    con network-first (ver fetch). Así nunca instalas JS viejo.
       ];
       return cache.addAll(assets);
     })
-      .then(() => self.skipWaiting())                     // âž• CLAVE: activa sin esperar
-      .catch(err => console.warn('[SW] install parcial:', err)) // âž• no revienta en silencio
+      .then(() => self.skipWaiting())                     // ➕ CLAVE: activa sin esperar
+      .catch(err => console.warn('[SW] install parcial:', err)) // ➕ no revienta en silencio
   );
 });
 
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ═══════════════════════════════════════════════════════════
 //  ACTIVATE (limpieza de caches viejas)
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ═══════════════════════════════════════════════════════════
 self.addEventListener('activate', e => {
   e.waitUntil(
     caches.keys().then(keys =>
@@ -33,13 +33,13 @@ self.addEventListener('activate', e => {
           if (key !== CACHE_NAME) return caches.delete(key);
         })
       )
-    ).then(() => self.clients.claim())                    // âž• toma el control YA
+    ).then(() => self.clients.claim())                    // ➕ toma el control YA
   );
 });
 
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ═══════════════════════════════════════════════════════════
 //  PUSH
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ═══════════════════════════════════════════════════════════
 self.addEventListener('push', e => {
   let data = {};
   try { data = e.data ? e.data.json() : {}; } catch (_) { data = { body: e.data && e.data.text() }; }
@@ -66,22 +66,22 @@ self.addEventListener('notificationclick', e => {
   }));
 });
 
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ═══════════════════════════════════════════════════════════
 //  FETCH
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ═══════════════════════════════════════════════════════════
 self.addEventListener('fetch', event => {
   const url = new URL(event.request.url);
 
   if (url.protocol !== 'http:' && url.protocol !== 'https:') return;
   if (event.request.method !== 'GET') return;
 
-  // âž• AÃ‘ADIDO: Supabase SIEMPRE directo a red, jamÃ¡s por cachÃ©.
+  // ➕ AÑADIDO: Supabase SIEMPRE directo a red, jamás por caché.
   //    Tus datos en la nube no deben leerse nunca de una copia vieja.
   if (url.hostname.endsWith('.supabase.co')) return;
 
   const isHtml = event.request.mode === 'navigate'
     || event.request.headers.get('accept')?.includes('text/html');
-  const isCode = /\.(js|css)$/i.test(url.pathname);       // ðŸ”§ separado del resto
+  const isCode = /\.(js|css)$/i.test(url.pathname);       // 🔧 separado del resto
   const isMedia = /\.(png|jpg|jpeg|svg|ico|webp|woff2?)$/i.test(url.pathname);
 
   const networkFirst = () =>
@@ -104,8 +104,8 @@ self.addEventListener('fetch', event => {
       })
     );
 
-  if (isHtml)      event.respondWith(networkFirst());     // siempre Ãºltima versiÃ³n
-  else if (isCode) event.respondWith(networkFirst());     // ðŸ”§ ANTES cache-first â†’ causa del bug
+  if (isHtml)      event.respondWith(networkFirst());     // siempre última versión
+  else if (isCode) event.respondWith(networkFirst());     // 🔧 ANTES cache-first → causa del bug
   else if (isMedia) event.respondWith(cacheFirst());      // iconos/fuentes: cache-first OK
   else             event.respondWith(networkFirst());
 });

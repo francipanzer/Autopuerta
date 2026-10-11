@@ -571,11 +571,13 @@ window.convertMaterialRequest = async function(id) {
 
 window.openUserManagement = async function() {
   try {
-    const [{ data: profiles, error }, employees] = await Promise.all([
+    const [{ data: profiles, error }, employeesResult] = await Promise.all([
       window.supabaseDB.from('user_profiles').select('*').order('created_at'),
-      dbGetAll('empleados')
+      window.supabaseDB.from('empleados').select('*')
     ]);
     if (error) throw error;
+    if (employeesResult.error) console.warn('[Usuarios] empleados:', employeesResult.error.message);
+    const employees = employeesResult.error ? await dbGetAll('empleados') : fromJSArray(employeesResult.data || []);
     openModal('Usuarios y permisos', `
       <div class="user-list">${(profiles || []).map(profile => `
         <article class="user-row">

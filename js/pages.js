@@ -870,18 +870,15 @@ window.showParteForm = async function(id, prefill) {
       '<div>' +
         '<label style="display:block;margin-bottom:6px;font-weight:600">Firma del Técnico</label>' +
         '<div style="border:2px dashed var(--border);border-radius:8px;padding:8px">' +
-          '<canvas id="pt_firma_tecnico" data-firma-titulo="Firma del técnico" style="border:1px solid var(--border);border-radius:4px;display:block;width:100%;background:#fff"></canvas>' +
-          '<div style="margin-top:8px;display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">' +
-            '<button type="button" class="btn btn-outline btn-sm" onclick="clearFirmaCanvas(\'pt_firma_tecnico\')"><i class="fas fa-eraser"></i> Limpiar firma</button>' +
-            '<small class="firma-hint" style="color:var(--text-muted)">Toca el recuadro para firmar</small>' +
-          '</div>' +
+          '<canvas id="pt_firma_tecnico" data-firma-titulo="Firma del técnico" style="display:block;width:100%"></canvas>' +
+          '<div style="margin-top:8px"><small class="firma-hint" style="color:var(--text-muted)">Se carga automáticamente desde la ficha del empleado</small></div>' +
         '</div>' +
-        '<div class="form-group" style="margin-top:10px"><label>DNI Técnico</label><input id="pt_dni_tecnico" value="' + escapeHtml(p.empleadoDni || '') + '" placeholder="12345678Z" readonly></div>' +
+        '<div class="form-group" style="margin-top:10px"><label>DNI Técnico</label><input id="pt_dni_tecnico" value="' + escapeHtml(p.empleadoDni || '') + '" placeholder="Se rellena con el técnico" readonly></div>' +
       '</div>' +
       '<div>' +
         '<label style="display:block;margin-bottom:6px;font-weight:600">Firma del Cliente</label>' +
         '<div style="border:2px dashed var(--border);border-radius:8px;padding:8px">' +
-          '<canvas id="pt_firma_cliente" data-firma-titulo="Firma del cliente" style="border:1px solid var(--border);border-radius:4px;display:block;width:100%;background:#fff"></canvas>' +
+          '<canvas id="pt_firma_cliente" data-firma-titulo="Firma del cliente" style="display:block;width:100%"></canvas>' +
           '<div style="margin-top:8px;display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">' +
             '<button type="button" class="btn btn-outline btn-sm" onclick="clearFirmaCanvas(\'pt_firma_cliente\')"><i class="fas fa-eraser"></i> Limpiar firma</button>' +
             '<small class="firma-hint" style="color:var(--text-muted)">Toca el recuadro para firmar</small>' +
@@ -956,15 +953,20 @@ window.showParteForm = async function(id, prefill) {
         pintarFirmaEnCanvas('pt_firma_tecnico', emp?.firma || null);
       });
     }
-    initFirmaCanvas('pt_firma_tecnico');
+    initFirmaCanvas('pt_firma_tecnico', { readOnly: true });
     initFirmaCanvas('pt_firma_cliente');
 
-    if (p.empleadoId) {
-      (window.isTechnician?.()
-        ? Promise.resolve(window.authState.employee)
-        : dbGet('empleados', p.empleadoId)).then(emp => {
-        if (emp?.firma && !p.firmaTecnico) pintarFirmaEnCanvas('pt_firma_tecnico', emp.firma);
-      });
+    // DNI y firma del técnico salen siempre de su ficha de empleado
+    const fillTecnico = emp => {
+      if (!emp) return;
+      const dniInput = document.getElementById('pt_dni_tecnico');
+      if (dniInput && emp.dni) dniInput.value = emp.dni;
+      if (emp.firma && !p.firmaTecnico) pintarFirmaEnCanvas('pt_firma_tecnico', emp.firma);
+    };
+    if (window.isTechnician?.()) {
+      fillTecnico(window.authState.employee);
+    } else if (p.empleadoId) {
+      dbGet('empleados', p.empleadoId).then(fillTecnico);
     }
     if (p.firmaTecnico) {
       pintarFirmaEnCanvas('pt_firma_tecnico', p.firmaTecnico);
