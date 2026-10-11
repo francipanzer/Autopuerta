@@ -374,11 +374,12 @@ async function checkVehiculoAlerts() {
 // En móvil el menú es una barra inferior fija: no hace falta abrirlo automáticamente.
 
 // ── Menú móvil de globos ───────────────────────────────────
-const isMobileView = () => window.innerWidth <= 768;
+const isMobileView = () => window.innerWidth <= 900;
 
 function setBubblesMenu(open) {
   document.getElementById('sidebar')?.classList.toggle('bubbles-open', open);
   const fab = document.getElementById('menuFab');
+  if (fab) fab.classList.toggle('is-open', open);
   if (fab) fab.innerHTML = open
     ? '<i class="fas fa-xmark"></i><span>Cerrar</span>'
     : '<i class="fas fa-grip"></i><span>Menú</span>';

@@ -700,7 +700,7 @@ window.render_dashboard = async function(container, arg) {
   bar.innerHTML = '<button type="button" class="btn btn-outline btn-sm push-toggle-btn" hidden></button>';
   container.prepend(bar);
   window.renderHomeBubbles?.(container);
-  if (window.innerWidth <= 768) [...container.children].forEach(el => { if (!el.classList.contains('home-bubbles') && !el.classList.contains('push-mobile-bar')) el.remove(); });
+  if (window.innerWidth <= 900) [...container.children].forEach(el => { if (!el.classList.contains('home-bubbles') && !el.classList.contains('push-mobile-bar')) el.remove(); });
   window.initPushButton?.();
 };
 
