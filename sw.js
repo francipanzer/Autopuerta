@@ -1,4 +1,4 @@
-const CACHE_NAME = 'autopuerta-v36'; // ⬆️ subido: incluye la vista de Tableros
+const CACHE_NAME = 'autopuerta-v37'; // ⬆️ subido: avisos de novedades (admin) y ITV (técnico)
 
 // ═══════════════════════════════════════════════════════════
 //  INSTALL

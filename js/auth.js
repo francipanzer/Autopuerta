@@ -361,7 +361,11 @@ window.render_ayuda = async function(container) {
 };
 
 window.renderTechnicianDashboard = async function(container) {
-  const [parts, revisions] = await Promise.all([dbGetAll('partesTrabajo'), dbGetAll('puertas')]);
+  const [parts, revisions, vehicles] = await Promise.all([dbGetAll('partesTrabajo'), dbGetAll('puertas'), dbGetAll('vehiculos')]);
+  const itvAlerts = vehicles.map(vehicle => {
+    const date = vehicle.fechaITV || vehicle.itv || vehicle.fecha_itv;
+    return { vehicle, date: String(date || '').slice(0, 10), days: date ? diasHastaFechaITV(date) : null };
+  }).filter(item => item.days !== null && item.days <= 30).sort((a, b) => a.days - b.days);
   const ownParts = parts.filter(part => String(part.createdBy) === String(window.authState.user.id));
   const pendingParts = ownParts.filter(part => part.estado !== 'completado');
   const recent = ownParts.slice().sort((a, b) => String(b.fecha || '').localeCompare(String(a.fecha || ''))).slice(0, 6);
@@ -379,7 +383,14 @@ window.renderTechnicianDashboard = async function(container) {
     </div>
     <div class="card"><div class="card-header"><h3>Avisos de revisiones</h3><button class="btn btn-outline btn-sm" onclick="navigateTo('revisionesProgramadas')">Ver revisiones</button></div>
       <div class="card-body">${due.slice(0, 8).map(door => `<p class="help-notice"><strong>${authEscape(door.clienteNombre || door.nombre || 'Puerta')}</strong> · Próxima revisión: ${authEscape(formatDate(door.proximaRevision))}</p>`).join('') || '<p>No hay revisiones próximas en los siguientes 30 días.</p>'}</div>
+    </div>
+    <div class="card"><div class="card-header"><h3>Avisos de ITV</h3></div>
+      <div class="card-body">
+        ${itvAlerts.map(({ vehicle, date, days }) => `<div class="itv-alert-item" style="padding:12px;border-radius:6px;margin-bottom:8px;border-left:4px solid ${days < 0 ? '#ef4444' : '#f59e0b'};background-color:${days < 0 ? 'rgba(239,68,68,.1)' : 'rgba(245,158,11,.1)'};"><strong style="display:block;">${authEscape(vehicle.marca)} ${authEscape(vehicle.modelo)}</strong><span style="font-weight:bold;color:#2563eb;letter-spacing:1px;">${authEscape(vehicle.matricula)}</span><small style="display:block;margin-top:2px;"><span class="itv-countdown" data-date="${authEscape(date)}">${textoCuentaAtrasITV(days)}</span></small></div>`).join('') || '<p>No hay ITV caducadas ni próximas en los siguientes 30 días.</p>'}
+        ${itvAlerts.length ? '<p class="help-notice">Si ves una ITV caducada o próxima, avisa al encargado.</p>' : ''}
+      </div>
     </div>`;
+  actualizarCuentaAtrasITV();
 };
 
 window.renderTechnicianWarehouse = async function(container) {
@@ -677,6 +688,51 @@ window.render_dashboard = async function(container, arg) {
   if (window.isTechnician()) return window.renderTechnicianDashboard(container);
   return originalDashboardRenderer(container, arg);
 };
+
+const ADMIN_SEEN_SECTIONS = { partesTrabajo: 'partes', presupuestos: 'presupuestos' };
+
+function setNavBadge(page, count) {
+  const navItem = document.querySelector(`.nav-item[data-page="${page}"]`);
+  if (!navItem) return;
+  let badge = navItem.querySelector('.nav-badge');
+  if (count > 0) {
+    if (!badge) {
+      badge = document.createElement('span');
+      badge.className = 'nav-badge';
+      badge.style.cssText = 'background:#e11d48;color:#fff;font-size:10px;padding:1px 6px;border-radius:10px;margin-left:6px;';
+      navItem.appendChild(badge);
+    }
+    badge.textContent = count > 99 ? '99+' : count;
+  } else if (badge) {
+    badge.remove();
+  }
+}
+
+window.refreshAdminNotifications = async function() {
+  if (!window.isAdmin()) {
+    Object.keys(ADMIN_SEEN_SECTIONS).forEach(page => setNavBadge(page, 0));
+    return;
+  }
+  const { data, error } = await window.supabaseDB.rpc('get_admin_unseen_counts');
+  if (error) return console.warn('[Avisos] No se pudieron cargar los contadores:', error.message);
+  const current = ADMIN_SEEN_SECTIONS[window.currentPage];
+  Object.entries(ADMIN_SEEN_SECTIONS).forEach(([page, section]) => {
+    setNavBadge(page, section === current ? 0 : Number(data?.[section]) || 0);
+  });
+  if (current) await window.supabaseDB.rpc('mark_admin_seen', { p_section: current });
+};
+
+window.onValgomNavigate = async function(page) {
+  const section = ADMIN_SEEN_SECTIONS[page];
+  if (!section || !window.isAdmin()) return;
+  setNavBadge(page, 0);
+  const { error } = await window.supabaseDB.rpc('mark_admin_seen', { p_section: section });
+  if (error) console.warn('[Avisos] No se pudo marcar como visto:', error.message);
+};
+
+window.addEventListener('valgom:authenticated', () => window.refreshAdminNotifications());
+setInterval(() => { if (window.authState?.user && !document.hidden) window.refreshAdminNotifications(); }, 60000);
+document.addEventListener('visibilitychange', () => { if (!document.hidden && window.authState?.user) window.refreshAdminNotifications(); });
 
 window.renderTechnicianParts = async function(container) {
   const parts = await dbGetAll('partesTrabajo');

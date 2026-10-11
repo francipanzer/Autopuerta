@@ -22,6 +22,7 @@ window.setCurrentCadenId = (id) => syncCurrentCadenaId(id);
 // Suscribirse a cambios de cualquier store
 window.__onStoreChanged = (store, payload) => {
   console.log('[App] Store cambiado:', store);
+  if (store === 'partesTrabajo' || store === 'solicitudesMaterial') window.refreshAdminNotifications?.();
   const page = document.querySelector('.nav-item.active')?.dataset.page || currentPage || 'dashboard';
   const storeToPage = {
     'empleados': 'empleados',
@@ -157,6 +158,7 @@ function navigateTo(page, arg) {
   }
   currentPage = page;
   window.currentPage = page;
+  window.onValgomNavigate?.(page);
 
   if (page === 'rutas' && arg) {
     window.setCurrentCadenId(arg);
