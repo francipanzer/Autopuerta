@@ -699,6 +699,7 @@ window.render_dashboard = async function(container, arg) {
   bar.className = 'push-mobile-bar';
   bar.innerHTML = '<button type="button" class="btn btn-outline btn-sm push-toggle-btn" hidden></button>';
   container.prepend(bar);
+  window.renderHomeBubbles?.(container);
   window.initPushButton?.();
 };
 
@@ -706,20 +707,20 @@ const ADMIN_SEEN_SECTIONS = { partesTrabajo: 'partes', presupuestos: 'presupuest
 window.setNavBadge = (page, count) => paintNavBadge(page, count);
 
 function paintNavBadge(page, count) {
-  const navItem = document.querySelector(`.nav-item[data-page="${page}"]`);
-  if (!navItem) return;
-  let badge = navItem.querySelector('.nav-badge');
-  if (count > 0) {
-    if (!badge) {
-      badge = document.createElement('span');
-      badge.className = 'nav-badge';
-      badge.style.cssText = 'background:#e11d48;color:#fff;font-size:10px;padding:1px 6px;border-radius:10px;margin-left:6px;';
-      navItem.appendChild(badge);
+  document.querySelectorAll(`.nav-item[data-page="${page}"], .home-bubble[data-page="${page}"]`).forEach(navItem => {
+    let badge = navItem.querySelector('.nav-badge');
+    if (count > 0) {
+      if (!badge) {
+        badge = document.createElement('span');
+        badge.className = 'nav-badge';
+        badge.style.cssText = 'background:#e11d48;color:#fff;font-size:10px;padding:1px 6px;border-radius:10px;margin-left:6px;';
+        navItem.appendChild(badge);
+      }
+      badge.textContent = count > 99 ? '99+' : count;
+    } else if (badge) {
+      badge.remove();
     }
-    badge.textContent = count > 99 ? '99+' : count;
-  } else if (badge) {
-    badge.remove();
-  }
+  });
 }
 
 window.refreshAdminNotifications = async function() {

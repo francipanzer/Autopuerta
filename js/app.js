@@ -70,6 +70,7 @@ async function bootAuthenticatedApp() {
   if (!appShellInitialized) {
     setupNavigation();
     setupMobileMenu();
+    setupMenuFab();
     updateSyncStatus();
     initTheme();
     appShellInitialized = true;
@@ -173,6 +174,7 @@ function navigateTo(page, arg) {
     i.classList.toggle('active', i.dataset.page === page));
 
   // cerrar menú móvil
+  setBubblesMenu(false);
   document.getElementById('sidebar')?.classList.remove('open');
   const bd = document.querySelector('.sidebar-backdrop');
   if (bd) bd.classList.remove('show');
@@ -371,37 +373,53 @@ async function checkVehiculoAlerts() {
 
 // En móvil el menú es una barra inferior fija: no hace falta abrirlo automáticamente.
 
-// Blindaje sidebar en móvil
-(function () {
-  function forceMobileMenu() {
-    if (window.innerWidth > 768) return;
-    const sb = document.getElementById('sidebar');
-    if (!sb) return;
-    sb.style.position = 'fixed';
-    sb.style.bottom = '0';
-    sb.style.top = 'auto';
-    sb.style.left = '0';
-    sb.style.right = '0';
-    sb.style.transform = 'none';
-    sb.style.margin = '0';
-    sb.style.width = '100%';
-    sb.style.display = 'flex';
-    sb.style.visibility = 'visible';
-    sb.style.opacity = '1';
-    const btn = document.querySelector('.menu-toggle');
-    if (btn) { btn.style.position = 'fixed'; btn.style.top = '-9999px'; btn.style.left = '-9999px'; }
-  }
-  window.addEventListener('load', forceMobileMenu);
-  document.addEventListener('click', e => {
-    if (e.target.closest('.nav-item')) setTimeout(forceMobileMenu, 100);
-  });
-  let resizeTimer;
-  window.addEventListener('resize', () => {
-    clearTimeout(resizeTimer);
-    resizeTimer = setTimeout(forceMobileMenu, 200);
-  });
-})();
+// ── Menú móvil de globos ───────────────────────────────────
+const isMobileView = () => window.innerWidth <= 768;
 
+function setBubblesMenu(open) {
+  document.getElementById('sidebar')?.classList.toggle('bubbles-open', open);
+  const fab = document.getElementById('menuFab');
+  if (fab) fab.innerHTML = open
+    ? '<i class="fas fa-xmark"></i><span>Cerrar</span>'
+    : '<i class="fas fa-grip"></i><span>Menú</span>';
+}
+
+function setupMenuFab() {
+  if (document.getElementById('menuFab')) return;
+  const fab = document.createElement('button');
+  fab.id = 'menuFab';
+  fab.type = 'button';
+  fab.className = 'menu-fab';
+  fab.setAttribute('aria-label', 'Abrir menú');
+  document.body.appendChild(fab);
+  setBubblesMenu(false);
+  fab.addEventListener('click', () => {
+    setBubblesMenu(!document.getElementById('sidebar').classList.contains('bubbles-open'));
+  });
+}
+
+// Globos de acceso rápido al principio del inicio (solo móvil)
+window.renderHomeBubbles = function (container) {
+  container.querySelector('.home-bubbles')?.remove();
+  if (!isMobileView()) return;
+  const grid = document.createElement('div');
+  grid.className = 'home-bubbles';
+  document.querySelectorAll('.nav-menu .nav-item').forEach(item => {
+    if (item.hidden || item.dataset.page === 'dashboard') return;
+    const bubble = document.createElement('button');
+    bubble.type = 'button';
+    bubble.className = 'home-bubble';
+    bubble.dataset.page = item.dataset.page;
+    bubble.innerHTML = item.querySelector('i').outerHTML + '<span>' + item.querySelector('span').textContent + '</span>';
+    const badge = item.querySelector('.nav-badge');
+    if (badge) bubble.insertAdjacentHTML('beforeend', '<span class="nav-badge" style="background:#e11d48;color:#fff;font-size:11px;padding:2px 8px;border-radius:10px">' + badge.textContent + '</span>');
+    bubble.onclick = () => navigateTo(bubble.dataset.page);
+    grid.appendChild(bubble);
+  });
+  container.prepend(grid);
+};
+
+window.addEventListener('resize', () => { if (!isMobileView()) setBubblesMenu(false); });
 // ── Cierre de modales (excluye overlays de gestión) ────────
 function closeAllModals() {
   document.querySelectorAll('.modal-overlay').forEach(m => {
