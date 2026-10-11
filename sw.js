@@ -1,4 +1,4 @@
-const CACHE_NAME = 'autopuerta-v55'; // nuevo icono
+const CACHE_NAME = 'autopuerta-v56'; // inicio móvil solo globos
 
 // ═══════════════════════════════════════════════════════════
 //  INSTALL

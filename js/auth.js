@@ -692,17 +692,28 @@ window.render_almacen = async function(container, arg) {
 
 const originalDashboardRenderer = window.render_dashboard;
 window.render_dashboard = async function(container, arg) {
-  if (window.isTechnician()) await window.renderTechnicianDashboard(container);
+  const mobile = window.innerWidth <= 900;
+  // En móvil el inicio son solo los globos: no se renderiza el panel de control
+  if (mobile) container.innerHTML = '';
+  else if (window.isTechnician()) await window.renderTechnicianDashboard(container);
   else await originalDashboardRenderer(container, arg);
+  container.dataset.dashboardMode = mobile ? 'mobile' : 'desktop';
   // En móvil el pie del menú está oculto: botón de avisos accesible desde el inicio
   const bar = document.createElement('div');
   bar.className = 'push-mobile-bar';
   bar.innerHTML = '<button type="button" class="btn btn-outline btn-sm push-toggle-btn" hidden></button>';
   container.prepend(bar);
   window.renderHomeBubbles?.(container);
-  if (window.innerWidth <= 900) [...container.children].forEach(el => { if (!el.classList.contains('home-bubbles') && !el.classList.contains('push-mobile-bar')) el.remove(); });
   window.initPushButton?.();
 };
+
+// Al girar el móvil o cambiar el tamaño cruzando el umbral, repinta el inicio
+window.addEventListener('resize', () => {
+  const main = document.getElementById('mainContent');
+  if (!main || window.currentPage !== 'dashboard' || !main.dataset.dashboardMode) return;
+  const mode = window.innerWidth <= 900 ? 'mobile' : 'desktop';
+  if (main.dataset.dashboardMode !== mode) window.render_dashboard(main);
+});
 
 const ADMIN_SEEN_SECTIONS = { partesTrabajo: 'partes', presupuestos: 'presupuestos' };
 window.setNavBadge = (page, count) => paintNavBadge(page, count);

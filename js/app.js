@@ -406,16 +406,15 @@ window.renderHomeBubbles = function (container) {
   const grid = document.createElement('div');
   grid.className = 'home-bubbles';
   document.querySelectorAll('.nav-menu .nav-item').forEach(item => {
-    if (item.dataset.page === 'dashboard') return;
+    if (item.dataset.page === 'dashboard' || item.hidden) return;
     const bubble = document.createElement('button');
     bubble.type = 'button';
-    bubble.className = 'home-bubble' + (item.hidden ? ' disabled' : '');
+    bubble.className = 'home-bubble';
     bubble.dataset.page = item.dataset.page;
     bubble.innerHTML = item.querySelector('i').outerHTML + '<span>' + item.querySelector('span').textContent + '</span>';
     const badge = item.querySelector('.nav-badge');
     if (badge) bubble.insertAdjacentHTML('beforeend', '<span class="nav-badge" style="background:#e11d48;color:#fff;font-size:11px;padding:2px 8px;border-radius:10px">' + badge.textContent + '</span>');
-    if (item.hidden) bubble.setAttribute('aria-disabled', 'true');
-    else bubble.onclick = () => navigateTo(bubble.dataset.page);
+    bubble.onclick = () => navigateTo(bubble.dataset.page);
     grid.appendChild(bubble);
   });
   container.prepend(grid);
