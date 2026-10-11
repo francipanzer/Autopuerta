@@ -23,6 +23,11 @@ window.setCurrentCadenId = (id) => syncCurrentCadenaId(id);
 window.__onStoreChanged = (store, payload) => {
   console.log('[App] Store cambiado:', store);
   if (store === 'partesTrabajo' || store === 'solicitudesMaterial') window.refreshAdminNotifications?.();
+  const me = window.authState;
+  if (store === 'partesTrabajo' && payload?.eventType === 'INSERT' && window.isTechnician?.() && me?.employee &&
+      String(payload.new?.empleadoid) === String(me.employee.id) && String(payload.new?.createdby) !== String(me.user?.id)) {
+    window.showToast?.('Tienes un nuevo parte de trabajo asignado');
+  }
   if (store === 'incidencias') window.refreshIncidenciasBadge?.();
   const page = document.querySelector('.nav-item.active')?.dataset.page || currentPage || 'dashboard';
   const storeToPage = {
@@ -406,15 +411,17 @@ window.renderHomeBubbles = function (container) {
   const grid = document.createElement('div');
   grid.className = 'home-bubbles';
   document.querySelectorAll('.nav-menu .nav-item').forEach(item => {
-    if (item.dataset.page === 'dashboard' || item.hidden) return;
+    if (item.dataset.page === 'dashboard') return;
+    const locked = item.hidden;
     const bubble = document.createElement('button');
     bubble.type = 'button';
-    bubble.className = 'home-bubble';
+    bubble.className = 'home-bubble' + (locked ? ' locked' : '');
     bubble.dataset.page = item.dataset.page;
+    if (locked) { bubble.disabled = true; bubble.setAttribute('aria-disabled', 'true'); }
     bubble.innerHTML = item.querySelector('i').outerHTML + '<span>' + item.querySelector('span').textContent + '</span>';
     const badge = item.querySelector('.nav-badge');
     if (badge) bubble.insertAdjacentHTML('beforeend', '<span class="nav-badge" style="background:#e11d48;color:#fff;font-size:11px;padding:2px 8px;border-radius:10px">' + badge.textContent + '</span>');
-    bubble.onclick = () => navigateTo(bubble.dataset.page);
+    if (!locked) bubble.onclick = () => navigateTo(bubble.dataset.page);
     grid.appendChild(bubble);
   });
   container.prepend(grid);

@@ -1,4 +1,4 @@
-const CACHE_NAME = 'autopuerta-v58';  // fotos en incidencias y partes
+const CACHE_NAME = 'autopuerta-v59';  // globos grises, partes asignados
 
 // ═══════════════════════════════════════════════════════════
 //  INSTALL

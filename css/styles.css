@@ -356,7 +356,7 @@ textarea{resize:vertical;min-height:70px}
   .home-bubbles{display:grid;grid-template-columns:repeat(2,1fr);gap:14px;margin-bottom:20px}
   .home-bubble{position:relative;overflow:hidden;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;min-height:112px;padding:14px 8px;border:1px solid rgba(255,255,255,.14);border-radius:30px;background:radial-gradient(circle at 30% 18%,rgba(255,255,255,.22),rgba(255,255,255,0) 45%),linear-gradient(145deg,#334155,#0f172a);color:#fff;font:inherit;font-size:14px;font-weight:600;text-align:center;box-shadow:0 12px 24px rgba(0,0,0,.45),inset 0 2px 3px rgba(255,255,255,.28),inset 0 -6px 12px rgba(0,0,0,.35);cursor:pointer;-webkit-tap-highlight-color:transparent;transition:transform .1s}
   .home-bubble span{position:relative}
-  .home-bubble.disabled{opacity:.38;filter:grayscale(.8);cursor:default}
+  .home-bubble.disabled,.home-bubble.locked{opacity:.38;filter:grayscale(.8);cursor:not-allowed;pointer-events:none}
   .home-bubble i{font-size:2rem;color:var(--primary-light);position:relative;text-shadow:0 3px 8px rgba(0,0,0,.5)}
   .home-bubble .nav-badge{position:absolute;top:10px;right:14px}
 

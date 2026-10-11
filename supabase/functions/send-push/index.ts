@@ -37,7 +37,16 @@ Deno.serve(async (request: Request) => {
     let targetIds: string[] = [];
     let payload: Record<string, string>;
 
-    if (kind === "incidencia_asignada") {
+    if (kind === "parte_asignado") {
+      const { data: techs } = await service.from("user_profiles")
+        .select("id").eq("employee_id", String(body.empleadoid || "")).eq("role", "technician").eq("is_active", true);
+      targetIds = (techs || []).map((t: { id: string }) => t.id);
+      payload = {
+        title: "Nuevo parte de trabajo asignado",
+        body: `${body.cliente || "Cliente"}: ${body.descripcion || ""}`,
+        page: "partesTrabajo",
+      };
+    } else if (kind === "incidencia_asignada") {
       const { data: techs } = await service.from("user_profiles")
         .select("id").eq("employee_id", String(body.empleadoid || "")).eq("role", "technician").eq("is_active", true);
       targetIds = (techs || []).map((t: { id: string }) => t.id);

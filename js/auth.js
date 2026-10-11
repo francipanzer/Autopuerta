@@ -762,6 +762,22 @@ window.addEventListener('valgom:authenticated', () => window.refreshAdminNotific
 setInterval(() => { if (window.authState?.user && !document.hidden) window.refreshAdminNotifications(); }, 60000);
 document.addEventListener('visibilitychange', () => { if (!document.hidden && window.authState?.user) window.refreshAdminNotifications(); });
 
+window.viewTechnicianPart = function(part) {
+  const fotos = (Array.isArray(part.fotos) ? part.fotos : []).filter(f => typeof f === 'string' && /^(data:image\/|https?:)/.test(f));
+  const row = (label, value) => `<div class="form-group"><label>${label}</label><div>${authEscape(value || '—')}</div></div>`;
+  const body = `<div class="form-grid">
+    ${row('Parte', part.id)}${row('Cliente', part.clienteNombre)}${row('Ubicación', part.ubicacionNombre)}
+    ${row('Técnico', part.empleadoNombre)}${row('Tipo de puerta', part.tipoPuerta)}${row('Estado', getStatusLabel(part.estado))}
+    ${row('Fecha', formatDate(part.fecha))}${row('Kms', (part.kms || 0) + ' km')}${row('Horas', part.horas)}
+    <div class="form-group full"><label>Descripción del trabajo</label><div style="white-space:pre-wrap">${authEscape(part.descripcion || '—')}</div></div>
+    <div class="form-group full"><label>Notas</label><div style="white-space:pre-wrap">${authEscape(part.notas || '—')}</div></div>
+    <div class="form-group full"><label>📷 Fotos</label>${fotos.length
+      ? `<div style="display:flex;gap:8px;flex-wrap:wrap">${fotos.map(f => `<img class="inc-foto" src="${authEscape(f)}" style="width:96px;height:96px;object-fit:cover;border-radius:8px;border:1px solid var(--border);cursor:zoom-in">`).join('')}</div>`
+      : '<div class="muted">Sin fotos</div>'}</div>
+  </div>`;
+  openModal('Parte ' + part.id, body, '<button class="btn btn-outline" onclick="closeModal()">Cerrar</button>');
+};
+
 window.renderTechnicianParts = async function(container) {
   const parts = await dbGetAll('partesTrabajo');
   container.innerHTML = `
@@ -780,10 +796,16 @@ window.renderTechnicianParts = async function(container) {
         ? `<button type="button" class="btn btn-outline btn-sm" data-action="edit-parte" data-id="${authEscape(part.id)}" title="Editar mi parte"><i class="fas fa-pen"></i></button>
            <button type="button" class="btn btn-outline btn-sm" onclick="generatePDF_partes('${authEscape(part.id)}')" title="Descargar PDF"><i class="fas fa-file-pdf"></i></button>
            <button type="button" class="btn btn-outline btn-sm" onclick="confirmDelete('Parte ${authEscape(part.id)}',()=>deleteParte('${authEscape(part.id)}'))" title="Eliminar mi parte"><i class="fas fa-trash"></i></button>`
-        : '<span class="muted">Solo lectura</span>';
+        : `<button type="button" class="btn btn-outline btn-sm" data-view-part="${authEscape(part.id)}" title="Ver parte"><i class="fas fa-eye"></i> Ver</button>`;
       return `<tr><td><strong>${authEscape(part.id)}</strong></td><td>${authEscape(part.clienteNombre)}</td><td>${authEscape(part.ubicacionNombre || '—')}</td><td>${authEscape(part.empleadoNombre || '—')}</td><td>${authEscape(part.tipoPuerta || part.descripcion || '—')}</td><td>${authEscape(part.kms || 0)} km</td><td><span class="badge ${authEscape(getBadgeClass(part.estado))}">${authEscape(getStatusLabel(part.estado))}</span></td><td>${authEscape(formatDate(part.fecha))}</td><td class="actions-cell">${actions}</td></tr>`;
     }).join('') || '<tr><td colspan="9">No hay partes que coincidan.</td></tr>';
   };
+  container.querySelector('#technicianPartRows').addEventListener('click', e => {
+    const btn = e.target.closest('[data-view-part]');
+    if (!btn) return;
+    const part = parts.find(p => String(p.id) === btn.dataset.viewPart);
+    if (part) window.viewTechnicianPart(part);
+  });
   container.querySelector('#newTechnicianPart').addEventListener('click', () => window.showParteForm());
   container.querySelector('#technicianPartSearch').addEventListener('input', paint);
   paint();
