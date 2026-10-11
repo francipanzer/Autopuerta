@@ -246,7 +246,7 @@ textarea{resize:vertical;min-height:70px}
 /* ===== MODALES ===== */
 .modal-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.65);z-index:300;align-items:center;justify-content:center;padding:14px}
 .modal-overlay.open{display:flex}
-.modal{background:linear-gradient(180deg,var(--surface),rgba(15,23,42,.04));border:1px solid rgba(148,163,184,.2);border-radius:22px;width:100%;max-width:760px;max-height:92vh;display:flex;flex-direction:column;box-shadow:var(--shadow-lg)}
+.modal{background:var(--surface);border:1px solid rgba(148,163,184,.2);border-radius:22px;width:100%;max-width:760px;max-height:92vh;display:flex;flex-direction:column;box-shadow:var(--shadow-lg)}
 .modal-header{padding:18px 22px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;background:linear-gradient(180deg,var(--surface-alt),rgba(15,23,42,.03))}
 .modal-header .header-actions{display:flex;gap:8px;align-items:center}
 .modal-header .header-actions .btn{padding:8px 14px;font-size:13px}
@@ -334,7 +334,7 @@ textarea{resize:vertical;min-height:70px}
   /* --- Menú de globos (pantalla completa, se abre con el botón flotante) --- */
   .app-container{flex-direction:column}
   .main-content{padding:16px 12px 110px 12px!important}
-  .sidebar{display:none!important;position:fixed!important;inset:0!important;width:100%!important;height:100%!important;max-height:none!important;z-index:9998!important;background:var(--sidebar-bg,#0f172a)!important;transform:none!important;overflow-y:auto!important;padding:20px 14px 120px!important;flex-direction:column!important}
+  .sidebar{display:none!important;position:fixed!important;inset:0!important;width:100%!important;height:100%!important;max-height:none!important;z-index:9998!important;background:var(--bg)!important;transform:none!important;overflow-y:auto!important;padding:20px 14px 120px!important;flex-direction:column!important}
   .sidebar.bubbles-open{display:flex!important}
   .sidebar-header{display:none!important}
   .nav-menu{display:grid!important;grid-template-columns:repeat(2,1fr)!important;gap:14px!important;padding:0!important;overflow:visible!important;flex:0 0 auto!important}
@@ -366,7 +366,7 @@ textarea{resize:vertical;min-height:70px}
   .menu-fab:active{transform:scale(.95)}
 
   /* --- Modales --- */
-  .modal-overlay.open{position:fixed!important;inset:0!important;z-index:10000!important;display:flex!important;align-items:flex-end!important;background:rgba(0,0,0,.5)!important;padding-bottom:0!important}
+  .modal-overlay.open{position:fixed!important;inset:0!important;z-index:10000!important;display:flex!important;align-items:flex-end!important;background:var(--bg)!important;padding-bottom:0!important}
   .modal-overlay.open .modal{width:100%!important;max-width:100%!important;max-height:90vh!important;margin:0!important;border-radius:16px 16px 0 0!important;display:flex!important;flex-direction:column!important;overflow:hidden!important}
   .modal-header{flex:0 0 auto!important}
   .modal-body{flex:1 1 auto!important;overflow-y:auto!important}
