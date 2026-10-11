@@ -1,4 +1,4 @@
-const CACHE_NAME = 'autopuerta-v59';  // globos grises, partes asignados
+const CACHE_NAME = 'autopuerta-v60';  // globos grises, partes asignados
 
 // ═══════════════════════════════════════════════════════════
 //  INSTALL
@@ -48,7 +48,9 @@ self.addEventListener('push', e => {
     icon: 'icons/icon-192.png',
     badge: 'icons/icon-192.png',
     data: { page: data.page || '' },
-    tag: data.page || 'valgom'
+    tag: data.page || 'valgom',
+    renotify: true,
+    vibrate: [200, 100, 200]
   }));
 });
 
