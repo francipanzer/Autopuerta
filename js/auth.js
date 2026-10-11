@@ -1,6 +1,6 @@
-const TECH_PAGES = new Set(['dashboard', 'partesTrabajo', 'presupuestos', 'informesKms', 'revisionesProgramadas', 'almacen', 'ayuda']);
+const TECH_PAGES = new Set(['dashboard', 'incidencias', 'partesTrabajo', 'presupuestos', 'informesKms', 'revisionesProgramadas', 'almacen', 'ayuda']);
 const HELP_GUIDES = [
-  { page: 'dashboard', title: 'Dashboard', roles: ['admin', 'technician'], text: 'Consulta el resumen general. Los técnicos ven sus partes recientes y avisos operativos; administración ve los indicadores de toda la empresa.' },
+  { page: 'dashboard', title: 'Panel de control', roles: ['admin', 'technician'], text: 'Consulta el resumen general. Los técnicos ven sus partes recientes y avisos operativos; administración ve los indicadores de toda la empresa.' },
   { page: 'partesTrabajo', title: 'Partes de trabajo', roles: ['admin', 'technician'], text: 'Crea un parte, elige cliente, ubicación, puerta y vehículo, completa el trabajo y guarda. Los técnicos pueden ver todos los partes, pero editar o eliminar solo los propios. DNI, firmas y fotos se muestran solo en los propios.' },
   { page: 'presupuestos', title: 'Solicitudes de material y presupuestos', roles: ['admin', 'technician'], text: 'Los técnicos envían solicitudes con cliente, artículos y cantidades; no ven precios. Oficina revisa cada solicitud y la convierte en presupuesto para completar precios y enviarlo al cliente.' },
   { page: 'informesKms', title: 'Informes KMs', roles: ['admin', 'technician'], text: 'El kilometraje se calcula a partir de los partes de trabajo. El informe permite consultar y exportar los kilómetros de los vehículos del equipo.' },
@@ -225,6 +225,9 @@ function updateAuthNavigation() {
     if (item.dataset.page === 'presupuestos') {
       item.querySelector('span').textContent = window.isTechnician() ? 'Solicitudes de material' : 'Presupuestos';
     }
+    if (item.dataset.page === 'incidencias') {
+      item.querySelector('span').textContent = window.isTechnician() ? 'Mis incidencias' : 'Incidencias';
+    }
   });
   const account = document.getElementById('authAccount');
   if (!account) return;
@@ -233,9 +236,11 @@ function updateAuthNavigation() {
     <div class="auth-account-name" title="${authEscape(profile.email)}">${authEscape(profile.full_name)}</div>
     <div class="auth-account-role">${profile.role === 'admin' ? 'Administrador' : 'Técnico'}</div>
     <button type="button" class="auth-link auth-account-email" id="changeAccountEmail">Cambiar correo</button>
+    <button type="button" class="auth-link" id="pushToggle" hidden></button>
     <button type="button" class="auth-link auth-logout" id="logoutButton"><i class="fas fa-right-from-bracket"></i> Cerrar sesión</button>`;
   account.querySelector('#logoutButton').addEventListener('click', () => window.supabaseDB.auth.signOut());
   account.querySelector('#changeAccountEmail').addEventListener('click', openChangeAccountEmail);
+  window.initPushButton?.();
 }
 
 function openChangeAccountEmail() {
@@ -690,6 +695,7 @@ window.render_dashboard = async function(container, arg) {
 };
 
 const ADMIN_SEEN_SECTIONS = { partesTrabajo: 'partes', presupuestos: 'presupuestos' };
+window.setNavBadge = (page, count) => setNavBadge(page, count);
 
 function setNavBadge(page, count) {
   const navItem = document.querySelector(`.nav-item[data-page="${page}"]`);

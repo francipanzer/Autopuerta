@@ -23,6 +23,7 @@ window.setCurrentCadenId = (id) => syncCurrentCadenaId(id);
 window.__onStoreChanged = (store, payload) => {
   console.log('[App] Store cambiado:', store);
   if (store === 'partesTrabajo' || store === 'solicitudesMaterial') window.refreshAdminNotifications?.();
+  if (store === 'incidencias') window.refreshIncidenciasBadge?.();
   const page = document.querySelector('.nav-item.active')?.dataset.page || currentPage || 'dashboard';
   const storeToPage = {
     'empleados': 'empleados',
@@ -30,6 +31,7 @@ window.__onStoreChanged = (store, payload) => {
     'partesTrabajo': 'partesTrabajo',
     'tableros': 'tableros',
     'tarjetasTablero': 'tableros',
+    'incidencias': 'incidencias',
     'vehiculos': 'vehiculos',
     'presupuestos': 'presupuestos',
     'almacen': 'almacen',
