@@ -25,6 +25,56 @@
     return '';
   }
 
+  const MAX_FOTOS = 4;
+
+  // Reduce la foto a JPEG de ~150 KB para guardarla dentro de la incidencia
+  async function compressPhoto(file) {
+    const source = await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = () => reject(reader.error);
+      reader.readAsDataURL(file);
+    });
+    const image = await new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => resolve(img);
+      img.onerror = () => reject(new Error('No se pudo leer la imagen'));
+      img.src = source;
+    });
+    let scale = Math.min(1, 1280 / Math.max(image.width, image.height));
+    let quality = .7;
+    let result = '';
+    for (let attempt = 0; attempt < 8; attempt++) {
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.max(1, Math.round(image.width * scale));
+      canvas.height = Math.max(1, Math.round(image.height * scale));
+      canvas.getContext('2d').drawImage(image, 0, 0, canvas.width, canvas.height);
+      result = canvas.toDataURL('image/jpeg', quality);
+      if (result.length * .75 <= 150 * 1024) return result;
+      if (quality > .5) quality -= .08;
+      else scale *= .82;
+    }
+    return result;
+  }
+
+  const fotosOf = inc => (Array.isArray(inc.fotos) ? inc.fotos : []).filter(f => typeof f === 'string' && f.startsWith('data:image/'));
+
+  function fotosHtml(inc, size = 72) {
+    return fotosOf(inc).map((src, i) =>
+      `<img class="inc-foto" src="${esc(src)}" alt="Foto ${i + 1}" style="width:${size}px;height:${size}px;object-fit:cover;border-radius:8px;border:1px solid var(--border);cursor:zoom-in">`).join('');
+  }
+
+  // Ver una foto a pantalla completa al pulsarla
+  document.addEventListener('click', event => {
+    const img = event.target.closest('img.inc-foto');
+    if (!img) return;
+    const overlay = document.createElement('div');
+    overlay.style.cssText = 'position:fixed;inset:0;z-index:20000;background:rgba(0,0,0,.92);display:flex;align-items:center;justify-content:center;padding:12px;cursor:zoom-out';
+    overlay.innerHTML = `<img src="${esc(img.src)}" alt="Foto de la incidencia" style="max-width:100%;max-height:100%;object-fit:contain">`;
+    overlay.onclick = () => overlay.remove();
+    document.body.appendChild(overlay);
+  });
+
   function telHref(phone) {
     const clean = String(phone || '').replace(/[^\d+]/g, '');
     return clean ? `tel:${clean}` : '';
@@ -74,7 +124,7 @@
         ${shown.map(i => `<tr>
           <td>${esc(formatDate(String(i.createdAt || '').slice(0, 10)))}</td>
           <td><strong>${esc(i.clienteNombre)}</strong><div style="font-size:12px;color:var(--text-muted)">${esc(i.direccion)}</div></td>
-          <td style="max-width:280px">${esc(i.descripcion)}${i.notaTecnico ? `<div style="font-size:12px;color:var(--text-muted)">Técnico: ${esc(i.notaTecnico)}</div>` : ''}</td>
+          <td style="max-width:280px">${esc(i.descripcion)}${i.notaTecnico ? `<div style="font-size:12px;color:var(--text-muted)">Técnico: ${esc(i.notaTecnico)}</div>` : ''}${fotosOf(i).length ? `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px">${fotosHtml(i, 48)}</div>` : ''}</td>
           <td>${prioridadBadge(i.prioridad)}</td>
           <td>${i.empleadoNombre ? esc(i.empleadoNombre) : '<span style="color:#dc2626">Sin asignar</span>'}</td>
           <td>${estadoBadge(i.estado)}</td>
@@ -113,6 +163,7 @@
     ]);
     const inc = existing || { prioridad: 'normal', estado: 'pendiente' };
     let coords = inc.lat && inc.lng ? { lat: inc.lat, lng: inc.lng } : null;
+    let fotos = fotosOf(inc);
 
     const form = `<div class="form-grid">
       <div class="form-group full"><label>Cliente</label><select id="inc_cliente">
@@ -123,6 +174,10 @@
       <div class="form-group full"><label>Dirección / ubicación</label><input id="inc_dir" value="${esc(inc.direccion)}" placeholder="Calle, número, localidad">
         <small id="inc_geo" style="color:var(--text-muted);font-size:11px">${coords ? '✅ Con coordenadas' : 'El técnico verá un botón “Cómo llegar” con esta dirección'}</small></div>
       <div class="form-group full"><label>Descripción de la incidencia *</label><textarea id="inc_desc" rows="3">${esc(inc.descripcion)}</textarea></div>
+      <div class="form-group full"><label>Fotos (máx. ${MAX_FOTOS})</label>
+        <div id="inc_fotos" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px"></div>
+        <button type="button" class="btn btn-outline btn-sm" id="inc_foto_btn"><i class="fas fa-camera"></i> Añadir fotos</button>
+        <input id="inc_foto_input" type="file" accept="image/*" multiple hidden></div>
       <div class="form-group"><label>Prioridad</label><select id="inc_prio">
         <option value="normal" ${inc.prioridad !== 'urgente' ? 'selected' : ''}>Normal</option>
         <option value="urgente" ${inc.prioridad === 'urgente' ? 'selected' : ''}>🚨 Urgente</option></select></div>
@@ -143,6 +198,30 @@
       $('inc_dir').value = cliente.direccion || '';
       coords = cliente.lat && cliente.lng ? { lat: cliente.lat, lng: cliente.lng } : null;
       $('inc_geo').textContent = coords ? '✅ Con coordenadas' : 'El técnico verá un botón “Cómo llegar” con esta dirección';
+    };
+    const paintFotos = () => {
+      $('inc_fotos').innerHTML = fotos.map((src, i) =>
+        `<div style="position:relative;width:80px;height:80px"><img class="inc-foto" src="${esc(src)}" alt="Foto ${i + 1}" style="width:100%;height:100%;object-fit:cover;border-radius:8px;border:2px solid var(--primary)">
+          <button type="button" data-inc-foto-del="${i}" style="position:absolute;top:2px;right:2px;width:22px;height:22px;border-radius:50%;background:#dc2626;color:#fff;border:none;cursor:pointer;font-size:13px">×</button></div>`).join('');
+      $('inc_fotos').querySelectorAll('[data-inc-foto-del]').forEach(btn => btn.onclick = () => {
+        fotos.splice(Number(btn.dataset.incFotoDel), 1);
+        paintFotos();
+      });
+      $('inc_foto_btn').disabled = fotos.length >= MAX_FOTOS;
+    };
+    paintFotos();
+    $('inc_foto_btn').onclick = () => $('inc_foto_input').click();
+    $('inc_foto_input').onchange = async event => {
+      const files = [...event.target.files].slice(0, MAX_FOTOS - fotos.length);
+      event.target.value = '';
+      for (const file of files) {
+        try {
+          fotos.push(await compressPhoto(file));
+        } catch (error) {
+          showToast(error.message || 'No se pudo procesar la foto', 'error');
+        }
+      }
+      paintFotos();
     };
     $('inc_dir').oninput = () => { coords = null; $('inc_geo').textContent = 'El técnico verá un botón “Cómo llegar” con esta dirección'; };
 
@@ -169,6 +248,8 @@
         estado: reassigned ? 'pendiente' : ($('inc_estado')?.value || 'pendiente'),
         createdBy: existing?.createdBy || window.authState.user.id
       };
+      // Solo se envía "fotos" si hay o había, así sigue funcionando hasta ejecutar el SQL de fotos
+      if (fotos.length || existing?.fotos !== undefined) data.fotos = fotos;
       if (data.estado !== 'resuelta') data.resueltaAt = null;
       $('incSave').disabled = true;
       try {
@@ -201,6 +282,7 @@
           <strong style="font-size:16px">${esc(inc.clienteNombre)}</strong><span>${prioridadBadge(inc.prioridad)} ${estadoBadge(inc.estado)}</span></div>
         <p style="margin:6px 0">${esc(inc.descripcion)}</p>
         ${inc.direccion ? `<p style="margin:4px 0;color:var(--text-muted)"><i class="fas fa-location-dot"></i> ${esc(inc.direccion)}</p>` : ''}
+        ${fotosOf(inc).length ? `<div style="display:flex;gap:8px;flex-wrap:wrap;margin:8px 0">${fotosHtml(inc, 84)}</div>` : ''}
         ${inc.notaTecnico ? `<p style="margin:4px 0;font-size:13px"><em>Tu nota: ${esc(inc.notaTecnico)}</em></p>` : ''}
         <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">
           ${maps ? `<a class="btn btn-outline" target="_blank" rel="noopener" href="${esc(maps)}"><i class="fas fa-route"></i> Cómo llegar</a>` : ''}

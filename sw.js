@@ -1,4 +1,4 @@
-const CACHE_NAME = 'autopuerta-v56'; // inicio móvil solo globos
+const CACHE_NAME = 'autopuerta-v58';  // fotos en incidencias y partes
 
 // ═══════════════════════════════════════════════════════════
 //  INSTALL

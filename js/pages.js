@@ -798,10 +798,8 @@ window.renderPartes = async function(){
     '<td>'+(p.horas ? p.horas+' h' : '—')+'</td>'+
     '<td>' + (p.fotos?.length
   ? p.fotos.map(f =>
-      '<a href="'+f+'" target="_blank" title="Ver foto">' +
-        '<img src="'+f+'" style="width:42px;height:42px;object-fit:cover;' +
-        'border-radius:6px;margin-right:4px;border:1px solid var(--border);vertical-align:middle">' +
-      '</a>').join('')
+      '<img class="inc-foto" src="'+escapeHtml(f)+'" title="Ver foto" style="width:42px;height:42px;object-fit:cover;' +
+        'border-radius:6px;margin-right:4px;border:1px solid var(--border);vertical-align:middle;cursor:zoom-in">').join('')
   : '—') + '</td>' +
     '<td><span class="badge '+getBadgeClass(p.estado)+'">'+getStatusLabel(p.estado)+'</span></td>'+
     '<td>'+formatDate(p.fecha)+'</td>'+
@@ -831,6 +829,9 @@ window.showParteForm = async function(id, prefill) {
   if (!matriculaSel && p.vehiculoId) {
     matriculaSel = vehiculos.find(v => v.id === p.vehiculoId)?.matricula || '';
   }
+
+  // Fotos del formulario: las ya guardadas más las nuevas (todas como imagen comprimida)
+  window.__fotosParte = { form: Array.isArray(p.fotos) ? p.fotos.filter(f => typeof f === 'string' && f.startsWith('data:image/')) : [] };
 
   const form = '<div class="form-grid">' +
     '<div class="form-group"><label>ID</label><input id="pt_id" value="' + escapeHtml(nextId) + '"></div>' +
@@ -863,6 +864,13 @@ window.showParteForm = async function(id, prefill) {
     '</select></div>' +
     '<div class="form-group"><label>Fecha</label><input id="pt_fecha" type="date" value="' + (p.fecha || getToday()) + '"></div>' +
     '<div class="form-group full"><label>Notas</label><textarea id="pt_notas">' + escapeHtml(p.notas || '') + '</textarea></div>' +
+    '<div class="form-group full"><label>📷 Fotos (máx. ' + MAX_FOTOS_PARTE + ')</label>' +
+      '<div id="pt_fotos_thumbs" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px">' +
+        window.__fotosParte.form.map((f,i) => '<div style="position:relative;width:80px;height:80px;border-radius:8px;overflow:hidden;border:2px solid var(--primary)"><img class="inc-foto" src="' + f + '" style="width:100%;height:100%;object-fit:cover;cursor:zoom-in"><button type="button" onclick="eliminarFotoParte(' + i + ')" style="position:absolute;top:2px;right:2px;width:20px;height:20px;border-radius:50%;background:#dc2626;color:#fff;border:none;cursor:pointer;font-size:12px;">×</button></div>').join('') +
+      '</div>' +
+      '<button type="button" class="btn btn-outline btn-sm" onclick="document.getElementById(\'pt_foto_input\').click()"><i class="fas fa-camera"></i> Añadir fotos</button>' +
+      '<input type="file" id="pt_foto_input" accept="image/*" multiple style="display:none" onchange="addFotosParte(this)">' +
+    '</div>' +
   '</div>' +
   '<div style="margin-top:24px;padding-top:20px;border-top:2px solid var(--border)">' +
     '<h3 style="margin-bottom:16px;font-size:16px;color:var(--primary)">Firmas y validación</h3>' +
@@ -890,7 +898,6 @@ window.showParteForm = async function(id, prefill) {
   '</div>';
 
   const footer = '<button class="btn btn-outline" onclick="closeModal()">Cancelar</button>' +
-    '<button type="button" class="btn btn-outline btn-sm" onclick="tomarFotoParte(\'' + (id || 'nuevo') + '\')"><i class="fas fa-camera"></i> Foto</button>' +
     '<button class="btn btn-primary btn-save-parte" data-action="save-parte" data-id="' + (id ? escapeHtml(id) : '') + '"><i class="fas fa-save"></i> Guardar</button>';
 
   openModal(id ? 'Editar Parte' : 'Nuevo Parte', form, footer);
@@ -1100,7 +1107,7 @@ window.saveParte = async function(id){
       matricula: (matriculaRaw || '').replace(/\s/g, '').toUpperCase(),
       kms: parseInt(document.getElementById('pt_kms').value)||0,
       horas: parseFloat(document.getElementById('pt_horas').value)||0,
-      fotos: window.__fotosParte[id || 'new'] || [],
+      fotos: window.__fotosParte?.form || [],
       firmaTecnico: firmaTecnico,
       firmaCliente: firmaCliente,
       estado: document.getElementById('pt_estado').value,
@@ -1114,12 +1121,12 @@ window.saveParte = async function(id){
 
     // 1. Guardar fotos PRIMERO
     try{
-      parteData.fotos = await guardarFotosParte(id || 'nuevo');
+      parteData.fotos = await guardarFotosParte();
     }catch(e){
       console.error('Error subiendo fotos:', e);
       showToast('Parte guardado pero sin fotos','error');
     }
-    window.__fotosParte = {};
+    window.__fotosParte = { form: [] };
 
     // 2. Persistir en DB
     let parteGuardado;
@@ -1544,56 +1551,38 @@ window.clearAllData = function(){
 
 window.__fotosParte = {};
 
-window.tomarFotoParte = function(parteId){
-  abrirCamara(parteId, function(base64){
-    if(!window.__fotosParte[parteId]) window.__fotosParte[parteId] = [];
-    window.__fotosParte[parteId].push(base64);
-    showToast('Foto capturada (' + window.__fotosParte[parteId].length + ')');
-    actualizarMiniaturas(parteId);
-  });
+const MAX_FOTOS_PARTE = 4;
+
+window.addFotosParte = async function(input){
+  const files = Array.from(input.files || []);
+  input.value = '';
+  const list = window.__fotosParte.form;
+  for(const file of files){
+    if(list.length >= MAX_FOTOS_PARTE){ showToast('Máximo ' + MAX_FOTOS_PARTE + ' fotos','error'); break; }
+    try{ list.push(await compressDoticsPhoto(file)); }
+    catch(e){ showToast('No se pudo procesar una foto','error'); }
+  }
+  actualizarMiniaturas();
 };
 
-function actualizarMiniaturas(parteId){
-  let container = document.getElementById('fotos_' + parteId.replace(/[^a-zA-Z0-9]/g,'_'));
-  if(!container){
-    const form = document.querySelector('.form-grid');
-    if(form){
-      container = document.createElement('div');
-      container.id = 'fotos_' + parteId.replace(/[^a-zA-Z0-9]/g,'_');
-      container.style.cssText = 'margin-top:12px;';
-      container.innerHTML = '<label>Fotos</label><div style="display:flex;gap:8px;flex-wrap:wrap" id="thumbs_' + parteId.replace(/[^a-zA-Z0-9]/g,'_') + '"></div>';
-      form.appendChild(container);
-    }
-  }
-  const thumbs = document.getElementById('thumbs_' + parteId.replace(/[^a-zA-Z0-9]/g,'_'));
+function actualizarMiniaturas(){
+  const thumbs = document.getElementById('pt_fotos_thumbs');
   if(!thumbs) return;
-  thumbs.innerHTML = (window.__fotosParte[parteId]||[]).map((f,i)=>
+  thumbs.innerHTML = (window.__fotosParte.form||[]).map((f,i)=>
     '<div style="position:relative;width:80px;height:80px;border-radius:8px;overflow:hidden;border:2px solid var(--primary)">'+
-      '<img src="'+f+'" style="width:100%;height:100%;object-fit:cover;">'+
-      '<button type="button" onclick="eliminarFotoParte(\''+parteId+'\','+i+')" style="position:absolute;top:2px;right:2px;width:20px;height:20px;border-radius:50%;background:#dc2626;color:#fff;border:none;cursor:pointer;font-size:12px;">×</button>'+
+      '<img class="inc-foto" src="'+f+'" style="width:100%;height:100%;object-fit:cover;cursor:zoom-in">'+
+      '<button type="button" onclick="eliminarFotoParte('+i+')" style="position:absolute;top:2px;right:2px;width:20px;height:20px;border-radius:50%;background:#dc2626;color:#fff;border:none;cursor:pointer;font-size:12px;">×</button>'+
     '</div>'
-  ).join('') || '';
+  ).join('');
+}
+
+window.eliminarFotoParte = function(idx){
+  window.__fotosParte.form.splice(idx, 1);
+  actualizarMiniaturas();
 };
 
-window.eliminarFotoParte = function(parteId, idx){
-  if(window.__fotosParte[parteId]){
-    window.__fotosParte[parteId].splice(idx, 1);
-    actualizarMiniaturas(parteId);
-  }
-};
-
-window.guardarFotosParte = async function(parteId){
-  if(!window.__fotosParte[parteId] || !window.__fotosParte[parteId].length) return [];
-  const urls = [];
-  for(const foto of window.__fotosParte[parteId]){
-    try{
-      const url = await subirFoto(parteId, foto);
-      urls.push(url);
-    }catch(e){
-      console.error('Error al subir foto:', e);
-    }
-  }
-  return urls;
+window.guardarFotosParte = async function(){
+  return (window.__fotosParte.form || []).slice();
 };
 
 // ═══════════════════════════════════════════════════════════
