@@ -222,6 +222,7 @@ async function loadAuthProfile(user) {
 function updateAuthNavigation() {
   document.querySelectorAll('.nav-item').forEach(item => {
     item.hidden = !window.canAccessPage(item.dataset.page);
+    if (item.dataset.page === 'dashboard') item.querySelector('span').textContent = 'Resumen';
     if (item.dataset.page === 'presupuestos') {
       item.querySelector('span').textContent = window.isTechnician() ? 'Solicitudes de material' : 'Presupuestos';
     }

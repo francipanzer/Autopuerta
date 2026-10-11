@@ -334,7 +334,7 @@ async function dbAdd(store,data){
   }
   try{
     const insertQuery=supabaseDB.from(tableName).insert(obj);
-    const {data:result,error}=await (store==='partesTrabajo' && window.isTechnician?.()
+    const {data:result,error}=await (store==='partesTrabajo'
       ? insertQuery.select('id').maybeSingle()
       : insertQuery.select().maybeSingle());
     if(error) {
@@ -384,7 +384,7 @@ async function dbPut(store,data){
   }
   try{
     const upsertQuery=supabaseDB.from(tableName).upsert(obj);
-    const {data:result,error}=await (store==='partesTrabajo' && window.isTechnician?.()
+    const {data:result,error}=await (store==='partesTrabajo'
       ? upsertQuery.select('id').maybeSingle()
       : upsertQuery.select().maybeSingle());
     if(error) {
