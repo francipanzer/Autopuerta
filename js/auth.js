@@ -703,9 +703,9 @@ window.render_dashboard = async function(container, arg) {
 };
 
 const ADMIN_SEEN_SECTIONS = { partesTrabajo: 'partes', presupuestos: 'presupuestos' };
-window.setNavBadge = (page, count) => setNavBadge(page, count);
+window.setNavBadge = (page, count) => paintNavBadge(page, count);
 
-function setNavBadge(page, count) {
+function paintNavBadge(page, count) {
   const navItem = document.querySelector(`.nav-item[data-page="${page}"]`);
   if (!navItem) return;
   let badge = navItem.querySelector('.nav-badge');
