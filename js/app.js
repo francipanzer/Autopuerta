@@ -405,19 +405,26 @@ window.renderHomeBubbles = function (container) {
   const grid = document.createElement('div');
   grid.className = 'home-bubbles';
   document.querySelectorAll('.nav-menu .nav-item').forEach(item => {
-    if (item.hidden || item.dataset.page === 'dashboard') return;
+    if (item.dataset.page === 'dashboard') return;
     const bubble = document.createElement('button');
     bubble.type = 'button';
-    bubble.className = 'home-bubble';
+    bubble.className = 'home-bubble' + (item.hidden ? ' disabled' : '');
     bubble.dataset.page = item.dataset.page;
     bubble.innerHTML = item.querySelector('i').outerHTML + '<span>' + item.querySelector('span').textContent + '</span>';
     const badge = item.querySelector('.nav-badge');
     if (badge) bubble.insertAdjacentHTML('beforeend', '<span class="nav-badge" style="background:#e11d48;color:#fff;font-size:11px;padding:2px 8px;border-radius:10px">' + badge.textContent + '</span>');
-    bubble.onclick = () => navigateTo(bubble.dataset.page);
+    if (item.hidden) bubble.setAttribute('aria-disabled', 'true');
+    else bubble.onclick = () => navigateTo(bubble.dataset.page);
     grid.appendChild(bubble);
   });
   container.prepend(grid);
 };
+
+// Globos inhabilitados: no hacen nada al pulsarlos
+document.addEventListener('click', e => {
+  const item = e.target.closest('.nav-item[hidden]');
+  if (item) { e.preventDefault(); e.stopImmediatePropagation(); }
+}, true);
 
 window.addEventListener('resize', () => { if (!isMobileView()) setBubblesMenu(false); });
 // ── Cierre de modales (excluye overlays de gestión) ────────
