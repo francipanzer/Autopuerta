@@ -369,13 +369,7 @@ async function checkVehiculoAlerts() {
   });
 }
 
-// En móvil: abrir el menú automáticamente al cargar
-window.addEventListener('load', () => {
-  if (window.innerWidth <= 768) {
-    const btn = document.querySelector('.menu-toggle');
-    if (btn) setTimeout(() => btn.click(), 300);
-  }
-});
+// En móvil el menú es una barra inferior fija: no hace falta abrirlo automáticamente.
 
 // Blindaje sidebar en móvil
 (function () {

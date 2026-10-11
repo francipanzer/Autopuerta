@@ -2626,7 +2626,7 @@ async function render_revisionesProgramadas(main) {
       if (e.target.closest('.btn-ver-cadena,.btn-dotics-visit,.btn-hiperber-review')) return;
       revContent.style.display = revContent.style.display === 'none' ? 'block' : 'none';
     });
-    verCadenaBtn.addEventListener('click', (e) => {
+    verCadenaBtn?.addEventListener('click', (e) => {
       e.stopPropagation();
       showRutasForCadena(cadena.id);
     });

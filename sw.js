@@ -1,4 +1,4 @@
-const CACHE_NAME = 'autopuerta-v46'; // nuevo icono
+const CACHE_NAME = 'autopuerta-v47'; // nuevo icono
 
 // ═══════════════════════════════════════════════════════════
 //  INSTALL

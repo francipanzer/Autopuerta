@@ -1,6 +1,7 @@
 // Notificaciones push (administradores): activar/desactivar en este dispositivo.
 (function () {
-  const VAPID_PUBLIC_KEY = 'BCDjIGYgi-KY7RJoeCkTnYBmdrHC51RLPAshZBN008bGqmZMxz0VPMfAxg2Gwj8mSWJ65NyuAYKlSEtZJR1rYH8';
+  const VAPID_PUBLIC_KEY = 'BEiNXiLGXK9aVd01sTyKCej9dc3LA9-cmbeU-F-jvRjxSC6GDeZcHCvtCzi4cZw5OeSLFgB42FmyPahXEveXh10
+';
 
   const supported = () => 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
 
@@ -57,10 +58,17 @@
   }
 
   window.initPushButton = function () {
-    const button = document.getElementById('pushToggle');
-    if (!button) return;
-    if (!supported() || !(window.isAdmin?.() || window.isTechnician?.())) { button.hidden = true; return; }
+    document.querySelectorAll('#pushToggle, .push-toggle-btn').forEach(initOne);
+  };
+
+  function initOne(button) {
+    if (!(window.isAdmin?.() || window.isTechnician?.())) { button.hidden = true; return; }
     button.hidden = false;
+    if (!supported()) {
+      button.innerHTML = '<i class="fas fa-bell"></i> Activar avisos';
+      button.onclick = () => showToast('Este navegador no admite avisos. En iPhone: Compartir > "Añadir a pantalla de inicio" y abre la app desde ese icono. En Android usa Chrome.', 'error');
+      return;
+    }
     refreshButton(button);
     button.onclick = async () => {
       button.disabled = true;
@@ -75,7 +83,7 @@
         refreshButton(button);
       }
     };
-  };
+  }
 
   // Al tocar una notificación: ir a la pantalla correspondiente
   if ('serviceWorker' in navigator) {

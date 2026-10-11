@@ -311,7 +311,7 @@ textarea{resize:vertical;min-height:70px}
 @media print{body *{visibility:hidden}#pdfArea,#pdfArea *{visibility:visible}#pdfArea{position:absolute;left:0;top:0;width:100%;display:block!important}.no-print{display:none!important}}
 /* ===== MÓVIL: tablet (≤900px) — sidebar lateral se convierte en drawer ===== */
 @media(max-width:900px){
-  .menu-toggle{display:flex;align-items:center;justify-content:center}
+  .menu-toggle{display:none!important}
   .sidebar{position:fixed;left:0;top:0;bottom:0;transform:translateX(-100%)}
   .sidebar.open{transform:translateX(0)}
   .sidebar-backdrop.show{display:block}

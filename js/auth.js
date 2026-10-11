@@ -382,8 +382,8 @@ window.renderTechnicianDashboard = async function(container) {
       <div class="stat-card"><div class="stat-icon"><i class="fas fa-calendar-check"></i></div><div class="stat-info"><h3>${due.length}</h3><p>Revisiones próximas</p></div></div>
     </div>
     <div class="card"><div class="card-header"><h3>Mis partes recientes</h3><button class="btn btn-outline btn-sm" onclick="navigateTo('partesTrabajo')">Ver todos</button></div>
-      <div class="table-wrapper"><table><thead><tr><th>Parte</th><th>Cliente</th><th>Trabajo</th><th>Estado</th><th>Fecha</th></tr></thead><tbody>
-        ${recent.map(part => `<tr><td>${authEscape(part.id)}</td><td>${authEscape(part.clienteNombre)}</td><td>${authEscape(part.tipoPuerta)}</td><td>${authEscape(getStatusLabel(part.estado))}</td><td>${authEscape(formatDate(part.fecha))}</td></tr>`).join('') || '<tr><td colspan="5">Todavía no tienes partes.</td></tr>'}
+      <div class="table-wrapper"><table><thead><tr><th>Parte</th><th>Cliente</th><th>Trabajo</th>      <th>Estado</th><th>Fecha</th><th></th></tr></thead><tbody>
+        ${recent.map(part => `<tr><td>${authEscape(part.id)}</td><td>${authEscape(part.clienteNombre)}</td><td>${authEscape(part.tipoPuerta)}</td><td>${authEscape(getStatusLabel(part.estado))}</td><td>${authEscape(formatDate(part.fecha))}</td><td><button type="button" class="btn btn-outline btn-sm" data-action="edit-parte" data-id="${authEscape(part.id)}" title="Editar mi parte"><i class="fas fa-pen"></i></button></td></tr>`).join('') || '<tr><td colspan="6">Todavía no tienes partes.</td></tr>'}
       </tbody></table></div>
     </div>
     <div class="card"><div class="card-header"><h3>Avisos de revisiones</h3><button class="btn btn-outline btn-sm" onclick="navigateTo('revisionesProgramadas')">Ver revisiones</button></div>
@@ -692,8 +692,14 @@ window.render_almacen = async function(container, arg) {
 
 const originalDashboardRenderer = window.render_dashboard;
 window.render_dashboard = async function(container, arg) {
-  if (window.isTechnician()) return window.renderTechnicianDashboard(container);
-  return originalDashboardRenderer(container, arg);
+  if (window.isTechnician()) await window.renderTechnicianDashboard(container);
+  else await originalDashboardRenderer(container, arg);
+  // En móvil el pie del menú está oculto: botón de avisos accesible desde el inicio
+  const bar = document.createElement('div');
+  bar.className = 'push-mobile-bar';
+  bar.innerHTML = '<button type="button" class="btn btn-outline btn-sm push-toggle-btn" hidden></button>';
+  container.prepend(bar);
+  window.initPushButton?.();
 };
 
 const ADMIN_SEEN_SECTIONS = { partesTrabajo: 'partes', presupuestos: 'presupuestos' };
