@@ -855,7 +855,7 @@ window.showParteForm = async function(id, prefill) {
     '<div class="form-group"><label>Kms (Ceuti ↔ Cliente)</label>' +
       '<input id="pt_kms" class="only-num" value="' + (p.kms || '') + '" placeholder="Se calcula al elegir cliente">' +
     '</div>' +
-    '<div class="form-group"><label>Horas</label><input id="pt_horas" type="number" step="0.5" class="only-num-dec" value="' + (p.horas || '') + '" placeholder="Ej: 1.5"></div>' +
+    '<div class="form-group"><label>Horas *</label><input id="pt_horas" type="number" step="0.5" class="only-num-dec" value="' + (p.horas ?? '') + '" placeholder="Ej: 1.5" required></div>' +
     '<div class="form-group"><label>Vehículo *</label><select id="pt_vehiculo"><option value="">— Seleccionar vehículo —</option>' +
         vehiculos.map(v => '<option value="' + escapeHtml(v.id) + '" data-matricula="' + escapeHtml(v.matricula) + '" ' + (normMatricula(matriculaSel) === normMatricula(v.matricula) ? 'selected' : '') + '>' + escapeHtml(v.matricula) + ' - ' + escapeHtml(v.marca) + ' ' + escapeHtml(v.modelo) + '</option>').join('') +
     '</select></div>' +
@@ -1065,6 +1065,10 @@ window.saveParte = async function(id){
     // Fecha obligatoria
     ok = setFieldError('pt_fecha', validators.required(document.getElementById('pt_fecha').value, 'La fecha')) && ok;
 
+    // Horas obligatorias
+    const horas = document.getElementById('pt_horas').value.trim();
+    ok = setFieldError('pt_horas', validators.required(horas, 'El número de horas')) && ok;
+
     // DNI técnico (si se rellena, debe ser válido)
     if(dniTecnico){
       ok = setFieldError('pt_dni_tecnico', !validarDNI(dniTecnico) ? 'DNI del técnico no válido' : '') && ok;
@@ -1106,7 +1110,7 @@ window.saveParte = async function(id){
       vehiculoId: vehiculoId,
       matricula: (matriculaRaw || '').replace(/\s/g, '').toUpperCase(),
       kms: parseInt(document.getElementById('pt_kms').value)||0,
-      horas: parseFloat(document.getElementById('pt_horas').value)||0,
+      horas: parseFloat(horas),
       fotos: window.__fotosParte?.form || [],
       firmaTecnico: firmaTecnico,
       firmaCliente: firmaCliente,
@@ -1492,6 +1496,24 @@ window.render_configuracion = async function(el){
         '<p style="color:var(--text-muted);margin-top:4px">PWA · IndexedDB · Funciona offline · Exporta PDF</p>'+
       '</div>'+
     '</div>'+
+    '<div class="card" style="margin-top:20px">'+
+      '<div class="card-header"><h3><i class="fas fa-envelope"></i> Configuración de Correo</h3></div>'+
+      '<div class="card-body">'+
+        '<p style="margin-bottom:12px;color:var(--text-muted)">Configura los datos del servidor SMTP para enviar correos electrónicos desde la aplicación.</p>'+
+        '<div class="form-grid">'+
+          '<div class="form-group"><label for="smtp_host">Servidor SMTP (Host)</label><input type="text" id="smtp_host" placeholder="smtp.gmail.com"></div>'+
+          '<div class="form-group"><label for="smtp_port">Puerto</label><input type="number" id="smtp_port" placeholder="587"></div>'+
+          '<div class="form-group"><label for="smtp_user">Usuario / Email</label><input type="email" id="smtp_user" placeholder="tucorreo@gmail.com"></div>'+
+          '<div class="form-group"><label for="smtp_password">Contraseña</label><input type="password" id="smtp_password" placeholder="Tu contraseña o app password"></div>'+
+          '<div class="form-group full"><label for="smtp_secure"><input type="checkbox" id="smtp_secure"> Usar SSL/TLS</label></div>'+
+        '</div>'+
+        '<div style="display:flex;gap:12px;margin-top:16px">'+
+          '<button class="btn btn-primary" onclick="guardarConfigCorreo()"><i class="fas fa-save"></i> Guardar configuración</button>'+
+          '<button class="btn btn-outline" onclick="probarConexionCorreo()"><i class="fas fa-paper-plane"></i> Probar conexión</button>'+
+        '</div>'+
+        '<div id="correo-status" style="margin-top:12px;font-size:13px;"></div>'+
+      '</div>'+
+    '</div>'+
     '<div style="margin-top:20px; padding-top:20px; border-top:1px solid var(--border);">'+
       '<h3 style="margin:0 0 12px 0; font-size:16px;">Cadenas y Rutas</h3>'+
       '<p style="color:var(--gray);font-size:13px;margin-bottom:12px;">Gestiona las cadenas de mantenimiento y sus rutas asociadas.</p>'+
@@ -1505,12 +1527,153 @@ window.render_configuracion = async function(el){
       navigateTo('cadenas');
     });
   }
+
+  // Cargar configuración de correo guardada
+  cargarConfigCorreo();
+};
+
+// Funciones para configuración de correo
+window.cargarConfigCorreo = async function(){
+  try {
+    const configStr = localStorage.getItem('smtp_config');
+    if (configStr) {
+      const config = JSON.parse(configStr);
+      document.getElementById('smtp_host').value = config.host || '';
+      document.getElementById('smtp_port').value = config.port || '';
+      document.getElementById('smtp_user').value = config.user || '';
+      document.getElementById('smtp_password').value = config.password || '';
+      document.getElementById('smtp_secure').checked = config.secure || false;
+      mostrarEstadoCorreo('Configuración cargada correctamente', 'success');
+    }
+  } catch (e) {
+    console.warn('No hay configuración de correo guardada');
+  }
+};
+
+window.guardarConfigCorreo = async function(){
+  const config = {
+    host: document.getElementById('smtp_host').value.trim(),
+    port: parseInt(document.getElementById('smtp_port').value) || 587,
+    user: document.getElementById('smtp_user').value.trim(),
+    password: document.getElementById('smtp_password').value,
+    secure: document.getElementById('smtp_secure').checked
+  };
+
+  if (!config.host || !config.user || !config.password) {
+    mostrarEstadoCorreo('Por favor completa todos los campos obligatorios', 'error');
+    return;
+  }
+
+  try {
+    localStorage.setItem('smtp_config', JSON.stringify(config));
+    mostrarEstadoCorreo('Configuración guardada correctamente', 'success');
+    showToast('Configuración de correo guardada');
+  } catch (e) {
+    mostrarEstadoCorreo('Error al guardar: ' + e.message, 'error');
+  }
+};
+
+window.probarConexionCorreo = async function(){
+  const config = {
+    host: document.getElementById('smtp_host').value.trim(),
+    port: parseInt(document.getElementById('smtp_port').value) || 587,
+    user: document.getElementById('smtp_user').value.trim(),
+    password: document.getElementById('smtp_password').value,
+    secure: document.getElementById('smtp_secure').checked
+  };
+
+  if (!config.host || !config.user || !config.password) {
+    mostrarEstadoCorreo('Por favor completa todos los campos antes de probar', 'error');
+    return;
+  }
+
+  mostrarEstadoCorreo('Probando conexión...', 'info');
+
+  try {
+    // Guardar temporalmente la configuración
+    localStorage.setItem('smtp_config', JSON.stringify(config));
+
+    // Llamar al servidor local para probar la conexión
+    const response = await fetch('/send-email', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        action: 'test',
+        config: config
+      })
+    });
+
+    const result = await response.json();
+
+    if (result.success) {
+      mostrarEstadoCorreo('Conexión exitosa al servidor SMTP', 'success');
+      showToast('Prueba de conexión exitosa');
+    } else {
+      mostrarEstadoCorreo('Error: ' + (result.error || 'Fallo en la conexión'), 'error');
+    }
+  } catch (e) {
+    mostrarEstadoCorreo('Error al probar conexión: ' + e.message, 'error');
+  }
+};
+
+function mostrarEstadoCorreo(mensaje, tipo) {
+  const statusDiv = document.getElementById('correo-status');
+  if (!statusDiv) return;
+
+  const colores = {
+    success: '#16a34a',
+    error: '#dc2626',
+    info: '#2563eb'
+  };
+
+  statusDiv.style.color = colores[tipo] || '#6b7280';
+  statusDiv.textContent = mensaje;
+}
+
+// Función helper para enviar correos desde cualquier parte de la app
+window.enviarCorreo = async function(toEmail, subject, body) {
+  try {
+    const configStr = localStorage.getItem('smtp_config');
+    if (!configStr) {
+      throw new Error('No hay configuración de correo. Configúrala en Configuración.');
+    }
+
+    const config = JSON.parse(configStr);
+
+    const response = await fetch('/send-email', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        action: 'send',
+        config: config,
+        to: toEmail,
+        subject: subject,
+        body: body
+      })
+    });
+
+    const result = await response.json();
+
+    if (result.success) {
+      showToast('Email enviado correctamente', 'success');
+      return true;
+    } else {
+      throw new Error(result.error || 'Error al enviar email');
+    }
+  } catch (e) {
+    showToast('Error al enviar email: ' + e.message, 'error');
+    return false;
+  }
 };
 
 window.exportAllData = async function(){
   const data = {};
-  for(const store of STORES){
-    if(store === 'syncQueue') continue;
+  for(const store of Object.keys(TABLA)){
+    if(store === 'syncQueue' || store === 'config') continue;
     data[store] = await dbGetAll(store);
   }
   downloadJSON(data,'autopuerta_backup_'+getToday()+'.json');
@@ -2194,58 +2357,6 @@ window.exportReportCSV = async function(dateStr = todayStr()) {
    Cadenas y Rutas (PASO B)
    ======================================== */
 
-// --- Helpers de ID automático ---
-async function generarIdCadena() {
-  return window.db.nextId('CAD');
-}
-
-async function generarIdRuta() {
-  return window.db.nextId('RUT');
-}
-
-// --- CRUD Cadenas ---
-async function showCadenas() {
-    const container = document.getElementById('main-content');
-    container.innerHTML = '';
-
-    // Header
-    const header = document.createElement('div');
-    header.className = 'page-header';
-    header.innerHTML = `
-        <h2>Cadenas y Rutas</h2>
-        <p>Gestión de cadenas de revisión y rutas de supermercados</p>
-    `;
-    container.appendChild(header);
-
-    // Sección Cadenas
-    const secCadenas = document.createElement('div');
-    secCadenas.className = 'card';
-    secCadenas.innerHTML = `
-        <div class="card-header">
-            <h3>🔗 Cadenas</h3>
-            <button class="btn btn-primary" id="btn-new-cadena">+ Nueva cadena</button>
-        </div>
-        <div id="cadenas-list"></div>
-    `;
-    container.appendChild(secCadenas);
-
-    // Sección Rutas (se llena al expandir una cadena)
-    const secRutas = document.createElement('div');
-    secRutas.className = 'card';
-    secRutas.innerHTML = `
-        <div class="card-header">
-            <h3>🛣️ Rutas</h3>
-            <p id="rutas-info" style="color:var(--gray); font-size:0.9em;">Selecciona una cadena para ver sus rutas</p>
-        </div>
-        <div id="rutas-list"></div>
-    `;
-    container.appendChild(secRutas);
-
-    // Renderizar cadenas
-    await renderCadenasList();
-}
-// ==================== CADENAS: Render Corregido ====================
-// ==================== CADENAS: RenderLista Final Corregido ====================
 // ==================== CADENAS: Lista ====================
 async function renderCadenasList() {
   const list = document.getElementById('cadenas-list');
@@ -2296,62 +2407,11 @@ async function renderCadenasList() {
 
 
 // ═══════════════════════════════════════════════════════════
-//  CADENAS — FORMULARIO + RUTAS + BORRADO
+//  CADENAS — BORRADO EN CASCADA
 // ═══════════════════════════════════════════════════════════
 
-async function showCadenaForm(editId = null) {
-  const overlay = document.getElementById('modalOverlay');
-  const title = document.getElementById('modalTitle');
-  const body = document.getElementById('modalBody');
-  const footer = document.getElementById('modalFooter');
-
-  let cadena = {};
-  if (editId) {
-    cadena = await getCadenaById(editId);
-    if (!cadena) return;
-  }
-
-  title.textContent = editId ? 'Editar cadena' : 'Nueva cadena';
-  body.innerHTML = `
-    <div style="display:flex;flex-direction:column;gap:16px;">
-      <div>
-        <label style="display:block;font-size:13px;color:var(--gray);margin-bottom:4px;">Nombre *</label>
-        <input id="form-cadena-nombre" type="text" class="input" value="${escapeHtml(cadena.nombre || '')}" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:6px;font-size:15px;">
-      </div>
-      <div>
-        <label style="display:block;font-size:13px;color:var(--gray);margin-bottom:4px;">Nota</label>
-        <textarea id="form-cadena-nota" rows="3" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:6px;font-size:15px;resize:vertical;">${escapeHtml(cadena.nota || '')}</textarea>
-      </div>
-    </div>`;
-  footer.innerHTML = `
-    <button class="btn btn-outline" onclick="closeModal()">Cancelar</button>
-    <button class="btn btn-primary" id="btn-save-cadena">${editId ? 'Actualizar' : 'Crear'}</button>`;
-
-  overlay.classList.add('open');
-
-  document.getElementById('btn-save-cadena').onclick = async () => {
-    const nombre = document.getElementById('form-cadena-nombre').value.trim();
-    if (!nombre) { document.getElementById('form-cadena-nombre').focus(); return; }
-
-    const cadenaData = {
-      ...(editId ? { id: editId } : { id: window.db.nextId('CAD') }),
-      nombre,
-      nota: document.getElementById('form-cadena-nota').value.trim(),
-      createdAt: cadena.createdAt || new Date().toISOString()
-    };
-
-    await saveCadena(cadenaData);
-    toast(editId ? 'Cadena actualizada' : 'Cadena creada');
-    closeModal();
-    renderCadenasList();
-  };
-}
-
-
-// ==================== CADENAS: Borrar ====================
-
 /**
- * deleteCadenaDb(id) → Promise<boolean>
+ * deleteCadenaWithDependencies(id)
  * Cascada: borra rutas y clientes de la cadena.
  */
 async function deleteCadenaWithDependencies(id){
@@ -2364,20 +2424,6 @@ async function deleteCadenaWithDependencies(id){
   }
   await dbDelete('cadenas',id);
 }
-
-window.deleteCadenaDb = async function (id) {
-  if (!id || !window.confirm('¿Borrar esta cadena y sus rutas y clientes asociados?')) return false;
-  try {
-    await deleteCadenaWithDependencies(id);
-    mostrarToast('Cadena y dependencias borradas', 'success');
-    render_cadenas();
-    return true;
-  } catch (e) {
-    console.error('deleteCadenaDb falló:', e.message);
-    mostrarToast('No se pudo borrar la cadena', 'error');
-    return false;
-  }
-};
 
 async function deleteRuta(id, cadenaId) {
   const ruta = await getRutaById(id);
@@ -2488,23 +2534,6 @@ async function showRutaForm(editId = null, defaultCadenaId = null) {
 };
 }
 
-
-// ═══════════════════════════════════════════════════════════
-//  WRAPPER PARA NAVEGACIÓN (render_<page>)
-// ═══════════════════════════════════════════════════════════
-
-// ==================== CADENAS: Render ====================
-async function render_cadenas(main) {
-  if (!main) main = document.querySelector('.main-content');
-  main.innerHTML = `
-    <div class="page-header">
-      <h2><i class="fas fa-link"></i> Cadenas</h2>
-      <button class="btn btn-primary" id="btn-new-cadena">+ Nueva cadena</button>
-    </div>
-    <div id="cadenas-list"></div>`;
-  document.getElementById('btn-new-cadena').addEventListener('click', () => showCadenaForm());
-  await renderCadenasList();
-}
 
 // ═══════════════════════════════════════════════════════════
 //  REVISIONES PROGRAMADAS — PASO C
@@ -3163,41 +3192,6 @@ window.saveDoticsMaintenanceForm=async function(){
 // IMPORTANTE: Object.assign para fusionar (no sobreescribir) lo que db.js ya expuso
 // (render_informesKms, verMensual, verDetalleVehiculo, generarPDF expuestos desde pages_informesKms.js)
 
-// ── Bloque final de pages.js ──
-// Object.assign para fusionar sin sobreescribir lo expuesto por otros archivos
-
-window.pages = window.pages || {};
-Object.assign(window.pages, {
-  // Dashboard
-  render_dashboard: window.render_dashboard,
-
-  // Partes
-  showParteForm: window.showParteForm,
-  saveParte: window.saveParte,
-  renderPartes: window.renderPartes,
-
-  // Clientes
-  showClienteForm: window.showClienteForm,
-  saveCliente: window.saveCliente,
-
-  // Vehículos
-  showVehiculoForm: window.showVehiculoForm,
-  saveVehiculo: window.saveVehiculo,
-
-  // Artículos / Almacén
-  showArticuloForm: window.showArticuloForm,
-  saveArticulo: window.saveArticulo,
-
-  // Presupuestos
-  showPresupuestoForm: window.showPresupuestoForm,
-  savePresupuesto: window.savePresupuesto,
-
-  // Cadenas / Rutas
-  renderCadenasList: window.renderCadenasList,
-  showCadenaForm: window.showCadenaForm,
-  showRutasForCadena: window.showRutasForCadena,
-  deleteCadena: window.deleteCadena
-});
 // ============================================
 // CADENAS - CRUD completo
 // ============================================
@@ -3300,61 +3294,6 @@ function normalizarCadena(c) {
   };
 }
 
-function renderizarFormularioCadena(cadena) {
-  const main = document.querySelector('.main-content');
-  const titulo = cadena ? 'Editar Cadena' : 'Nueva Cadena';
-  const valorNombre = cadena ? cadena.nombre : '';
-  const valorDescripcion = cadena ? cadena.descripcion || '' : '';
-  
-  main.innerHTML = `
-    <div class="page-header">
-      <h2>${titulo}</h2>
-      <button onclick="navigateTo('cadenas')" class="btn-secondary">← Volver</button>
-    </div>
-    <form id="form-cadena" class="form-container">
-      <input type="hidden" id="cd_id" value="${cadena ? cadena.id : ''}">
-      
-      <label for="cd_nombre">Nombre de la cadena *</label>
-      <input type="text" id="cd_nombre" required value="${valorNombre}" placeholder="Ej: Cadena Norte">
-      
-      <label for="cd_descripcion">Descripción</label>
-      <textarea id="cd_descripcion" rows="3" placeholder="Opcional">${valorDescripcion}</textarea>
-      
-      <div class="form-actions">
-        <button type="submit" class="btn-primary">Guardar</button>
-        <button type="button" onclick="navigateTo('cadenas')" class="btn-secondary">Cancelar</button>
-      </div>
-    </form>
-  `;
-    const form = document.getElementById('form-cadena');
-  form.onsubmit = null;
-  form.addEventListener('submit', (e) => {
-    e.preventDefault();
-    saveCadena();
-  });
-}
-
-window.saveCadena = async function() {
-  const idRaw = document.getElementById('cd_id').value;
-  const nombre = document.getElementById('cd_nombre').value.trim();
-  const descripcion = document.getElementById('cd_descripcion').value.trim();
-
-  if (!nombre) { alert('El nombre es obligatorio'); return; }
-
-  try {
-    const updatedat=new Date().toISOString();
-    const data={id:idRaw||window.db.nextId('CAD'),nombre,descripcion,updatedat};
-    if(!idRaw) data.createdat=updatedat;
-    await dbPut('cadenas',data);
-    
-    toast('Cadena guardada');
-    navigateTo('cadenas');
-  } catch (err) {
-    console.error('Error en saveCadena:', err);
-    alert('Error al guardar: ' + (err.message || JSON.stringify(err)));
-  }
-};
-
 // ==================== RUTAS: Acceso a datos ====================
 
 /**
@@ -3442,9 +3381,6 @@ window.deleteRutaDb = async function (id, confirmed=false) {
  * render_rutas(cadenaid) → Promise<void>
  * Renderiza lista de rutas de una cadena en .main-content.
  */
-// ==================== RUTAS: Render Corregido ====================
-// ==================== RUTAS: Render Final Corregido ====================
-// ==================== RUTAS: Render ====================
 async function render_rutas(mainOrChainId, requestedChainId) {
   const main=mainOrChainId?.nodeType===1 ? mainOrChainId : document.getElementById('mainContent');
   let cadenaId=requestedChainId || (mainOrChainId?.nodeType===1 ? localStorage.getItem('cadenaId') : mainOrChainId);
@@ -3628,14 +3564,6 @@ window.volverARevisionesCadena=async function(chainId){
   if(content) content.style.display='block';
   group.scrollIntoView({behavior:'smooth',block:'start'});
 };
-/**
- * Compatibilidad: la app usa una única convención para rutas.
- * Tanto el código nuevo como el legado llamarán a esta función.
- */
-function calcularProximaRevision(ultimaRevisionISO, meses = 6) {
-  return calcularProximaRevisionRuta(ultimaRevisionISO, meses);
-}
-window.calcularProximaRevision = calcularProximaRevision;
 
 window.showRutasForCadena = function(cadenaId) {
   // Normalizar por si llega elemento/evento desde el router
@@ -3648,11 +3576,6 @@ window.showRutasForCadena = function(cadenaId) {
   localStorage.setItem('cadenaId', normalizedId);
   navigateTo('rutas', normalizedId);
 };
-// ============================================
-// FUNCIONES CRUD CADENAS - AÑADIR AL FINAL
-// ============================================
-
-
 window.deleteCadena = async function(cadenaId) {
   if (!confirm('¿Eliminar esta cadena? Se borrarán también todas sus rutas.')) return;
   try {
@@ -3666,21 +3589,11 @@ window.deleteCadena = async function(cadenaId) {
 };
 // ✅ Puente con el router: navigateTo('cadenas') → render_cadenas
 
-// ==================== CADENAS: Render Corregido ====================
-
-/** getCadenas() → Promise<Array<Cadena>>
- * Supabase primero, IndexedDB como fallback. Normaliza a descripcion.
- */
-async function getCadenas() {
-  const all=await dbGetAll('cadenas');
-  return all.map(normalizarCadena).sort((a,b)=>(a.nombre||'').localeCompare(b.nombre||''));
-}
 /**
  * render_cadenas() → Promise<void>
  * Renderiza lista de cadenas en .main-content.
  * Actualizado: usa descripcion (no nota), abre render_rutas al hacer clic.
  */
-// ==================== CADENAS: Render Final Corregido ====================
 async function render_cadenas(main) {
   if (!main) main = document.getElementById('mainContent');
   main.innerHTML = `

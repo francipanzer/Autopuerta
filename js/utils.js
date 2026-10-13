@@ -99,14 +99,6 @@ document.addEventListener('input', function(e){
   }
 });
 
-// ── Listener global delegado de eventos ──
-// __Reemplaza los event listeners sueltos que había antes
-//  Validar teléfono español (9 dígitos) ──
-function validarTelefono(es){
-  const soloNum = es.replace(/\D/g,'');
-  return soloNum.length === 9;
-}
-
 // ── Formatear precio a formato español (coma decimal) ──
 function formatoPrecioES(num){
   if(num == null || isNaN(num)) return '0,00';
@@ -180,35 +172,6 @@ async function kmIdaVuelta(destino){
   const lineal = calcularKmLineal(BASE_CEUTI, destino);   // línea recta
   const idaVuelta = Math.round(lineal * FACTOR_CARETERA * 2);  // ida + vuelta carretera
   return Math.ceil(idaVuelta / 10) * 10;                  // 58 -> 60
-}
-// ── Subir foto al servidor ──
-async function subirFoto(parteId, base64){
-  const res = await fetch('/upload-foto', {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({ parte_id: parteId, base64: base64 })
-  });
-  const data = await res.json();
-  if(data.error) throw new Error(data.error);
-  return data.url;
-}
-
-// ── Abrir cámara y capturar foto ──
-function abrirCamara(parteId, callback){
-  const input = document.createElement('input');
-  input.type = 'file';
-  input.accept = 'image/*';
-  input.capture = 'environment'; // cámara trasera en móvil
-  input.onchange = async function(){
-    const file = input.files[0];
-    if(!file) return;
-    const reader = new FileReader();
-    reader.onload = function(e){
-      callback(e.target.result);
-    };
-    reader.readAsDataURL(file);
-  };
-  input.click();
 }
 // Dictado por voz — versión robusta con MutationObserver
 // ═══════════════════════════════════════════════════════════
@@ -391,6 +354,7 @@ function abrirPadFirma(titulo){
     const padBg = light ? '#ffffff' : '#1e293b';
     const padInk = light ? '#111' : '#f8fafc';
     const overlay = document.createElement('div');
+    overlay.id = 'padFirmaOverlay';
     overlay.style.cssText = 'position:fixed;top:0;left:0;width:100vw;height:100vh;height:100dvh;z-index:20000;background:#0f172a;display:flex;flex-direction:column;padding:12px;padding-top:max(12px,env(safe-area-inset-top));padding-bottom:max(12px,env(safe-area-inset-bottom));gap:10px;touch-action:none;box-sizing:border-box;';
     overlay.innerHTML =
       '<div style="display:flex;justify-content:space-between;align-items:center;color:#fff;gap:12px;flex:0 0 auto">' +
@@ -708,66 +672,6 @@ document.addEventListener('input', function(e){
  */
 const todayStr = () => new Date().toISOString().slice(0, 10);
 
-/**
- * Rango IDBKeyRange para TODOS los partes de un vehículo en un día concreto.
- * Uso: dbGetByIndex('partesTrabajo', 'matricula_fecha', rangeMatriculaFecha(matricula))
- */
-function rangeMatriculaFecha(matricula, dateStr = todayStr()) {
-  return IDBKeyRange.bound([matricula, dateStr], [matricula, '\uffff'], false, false);
-}
-
-/**
- * Rango IDBKeyRange para TODOS los partes del día (todas las matrículas).
- * Útil para el informe diario global.
- */
-function rangeAllPartesOfDay(dateStr = todayStr()) {
-  return IDBKeyRange.bound(['', dateStr], ['\uffff', '\uffff'], false, false);
-}
-
-/**
- * Convierte cualquier formato de fecha a ISO 'YYYY-MM-DD'.
- * Tolera: Date objects, timestamps, 'DD/MM/YYYY', 'YYYY-MM-DD'.
- */
-function toISODate(value) {
-  if (!value) return null;
-  
-  // Ya está en formato ISO correcto
-  if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value)) {
-    return value;
-  }
-  
-  // Formato español DD/MM/YYYY
-  if (typeof value === 'string' && /^\d{2}\/\d{2}\/\d{4}$/.test(value)) {
-    const [dd, mm, yyyy] = value.split('/');
-    return `${yyyy}-${mm}-${dd}`;
-  }
-  
-  // Date object o timestamp
-  const d = new Date(value);
-  if (!isNaN(d.getTime())) {
-    return d.toISOString().slice(0, 10);
-  }
-  
-  console.warn('[toISODate] Formato no reconocido:', value);
-  return null;
-}
-
-/**
- * Verifica si una fecha ISO es válida y no está en el futuro.
- */
-function isValidPastOrToday(isoDate) {
-  if (!isoDate || !/^\d{4}-\d{2}-\d{2}$/.test(isoDate)) return false;
-  return isoDate <= todayStr();
-}
-
-/**
- * Días transcurridos desde una fecha ISO hasta hoy.
- */
-function daysSince(isoDate) {
-  if (!isValidPastOrToday(isoDate)) return Infinity;
-  const diffMs = Date.now() - new Date(isoDate + 'T00:00:00').getTime();
-  return Math.floor(diffMs / (1000 * 60 * 60 * 24));
-}
 // ── Catálogo de tipos de puerta (fijo, no editable por ahora) ──
 const TIPOS_PUERTA = {
   corredera: {
@@ -834,10 +738,6 @@ function getTipoPuerta(tipo) {
   return TIPOS_PUERTA[tipo] || null;
 }
 
-function getChecklistByTipo(tipo) {
-  return TIPOS_PUERTA[tipo]?.checklist || [];
-}
-
 function getDiasRevisionByTipo(tipo) {
   return TIPOS_PUERTA[tipo]?.diasRevision || 365; // fallback conservador
 }
@@ -865,19 +765,6 @@ function calcularProximaRevisionRuta(ultimaRevisionISO, meses = 6) {
 window.calcularProximaRevisionPuerta = calcularProximaRevisionPuerta;
 window.calcularProximaRevisionRuta = calcularProximaRevisionRuta;
 window.calcularProximaRevision = calcularProximaRevisionRuta;
-// ── Toast simple ──
-function toast(msg, ms = 2500) {
-  const cont = document.getElementById('toastContainer');
-  if (!cont) return;
-  const el = document.createElement('div');
-  el.className = 'toast';
-  el.textContent = msg;
-  el.style.cssText = 'background:#16a34a;color:#fff;padding:10px 16px;border-radius:8px;margin-top:8px;font-size:14px;box-shadow:0 4px 12px rgba(0,0,0,.15);opacity:0;transition:opacity .2s;';
-  cont.appendChild(el);
-  requestAnimationFrame(() => el.style.opacity = '1');
-  setTimeout(() => { el.style.opacity = '0'; setTimeout(() => el.remove(), 300); }, ms);
-}
-
 // ==================== RUTAS: Guardar / Actualizar ====================
 
 /**

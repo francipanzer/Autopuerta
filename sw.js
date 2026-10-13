@@ -1,4 +1,4 @@
-const CACHE_NAME = 'autopuerta-v62';  // globos grises, partes asignados
+const CACHE_NAME = 'autopuerta-v65';  // fix: campo fantasma tecnicoUltimo en puertas
 
 // ═══════════════════════════════════════════════════════════
 //  INSTALL

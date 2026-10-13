@@ -69,6 +69,7 @@
     const img = event.target.closest('img.inc-foto');
     if (!img) return;
     const overlay = document.createElement('div');
+    overlay.className = 'valgom-lightbox';
     overlay.style.cssText = 'position:fixed;inset:0;z-index:20000;background:rgba(0,0,0,.92);display:flex;align-items:center;justify-content:center;padding:12px;cursor:zoom-out';
     overlay.innerHTML = `<img src="${esc(img.src)}" alt="Foto de la incidencia" style="max-width:100%;max-height:100%;object-fit:contain">`;
     overlay.onclick = () => overlay.remove();

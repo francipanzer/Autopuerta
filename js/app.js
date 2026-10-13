@@ -1,6 +1,8 @@
 // ── App Shell ──────────────────────────────────────────────
 let currentPage = 'dashboard';
 let currentCadenId = null;   // ← cadena activa (la usan render_rutas / showRutaForm)
+let lastNavArg = null;
+let skipHistoryOnce = false;
 window.currentCadenId = null;
 window.currentPage = 'dashboard';
 
@@ -82,6 +84,7 @@ async function bootAuthenticatedApp() {
     setupMenuFab();
     updateSyncStatus();
     initTheme();
+    setupBackNavigation();
     appShellInitialized = true;
   }
   navigateTo('dashboard');
@@ -103,6 +106,7 @@ window.addEventListener('valgom:logged-out', () => {
 });
 
 document.addEventListener('DOMContentLoaded', async () => {
+  initTheme();
   await window.appAuthReady;
   if (window.authState?.user) await bootAuthenticatedApp();
 });
@@ -115,25 +119,32 @@ function setupNavigation() {
 
 function applyTheme(mode) {
   document.body.classList.toggle('light', mode === 'light');
+  document.documentElement.classList.toggle('light', mode === 'light');
   localStorage.setItem('theme', mode);
   const icon = document.querySelector('#themeToggle i');
   const label = document.getElementById('themeLabel');
-  if (mode === 'light') {
-    icon.className = 'fas fa-sun';
-    label.textContent = 'Modo oscuro';
-  } else {
-    icon.className = 'fas fa-moon';
-    label.textContent = 'Modo claro';
+  if (icon && label) {
+    if (mode === 'light') {
+      icon.className = 'fas fa-sun';
+      label.textContent = 'Modo oscuro';
+    } else {
+      icon.className = 'fas fa-moon';
+      label.textContent = 'Modo claro';
+    }
   }
-  const meta = document.querySelector('meta[name="theme-color"]');
-  if (meta) meta.content = mode === 'light' ? '#0f172a' : '#111827';
+  const themeColor = mode === 'light' ? '#f1f5f9' : '#0f172a';
+  const metas = document.querySelectorAll('meta[name="theme-color"]');
+  metas.forEach(meta => meta.content = themeColor);
+  document.documentElement.style.backgroundColor = themeColor;
+  document.body.style.backgroundColor = themeColor;
 }
 
 function initTheme() {
   const saved = localStorage.getItem('theme') || 'dark';
   applyTheme(saved);
   const btn = document.getElementById('themeToggle');
-  if (btn) {
+  if (btn && !btn.dataset.bound) {
+    btn.dataset.bound = '1';
     btn.addEventListener('click', () => {
       const isLight = document.body.classList.contains('light');
       const next = isLight ? 'dark' : 'light';
@@ -160,6 +171,126 @@ function setupMobileMenu() {
   document.body.appendChild(backdrop);
 }
 
+let valgomNavStack = [{ page: 'dashboard', arg: null }];
+let lastExitPromptTime = 0;
+
+function historyUrl() {
+  return location.pathname + location.search;
+}
+
+function rearmTrap() {
+  try {
+    history.pushState({ valgom: true, trap: true }, '', historyUrl());
+  } catch (_) { /* ignore quota / security errors */ }
+}
+
+function closeTransientUi() {
+  const pad = document.getElementById('padFirmaOverlay');
+  if (pad) {
+    pad.querySelector('#padCancel')?.click();
+    return true;
+  }
+  const lightbox = document.querySelector('.valgom-lightbox');
+  if (lightbox) {
+    lightbox.click();
+    return true;
+  }
+  const revisionModal = document.getElementById('modal-revision-overlay');
+  if (revisionModal) {
+    revisionModal.remove();
+    return true;
+  }
+  if (document.getElementById('overlayRevision')) {
+    window.cerrarRevision?.();
+    return true;
+  }
+  if (document.getElementById('overlayRonda')) {
+    document.getElementById('overlayRonda').remove();
+    return true;
+  }
+  if (document.getElementById('overlayPuertas')) {
+    window.cerrarModalPuertas?.();
+    return true;
+  }
+  if (document.getElementById('overlayUbicaciones')) {
+    window.cerrarModalUbicaciones?.();
+    return true;
+  }
+  const modal = document.getElementById('modalOverlay');
+  if (modal?.classList.contains('open')) {
+    closeModal();
+    return true;
+  }
+  const otherOverlay = document.querySelector('.modal-overlay.open:not(#modalOverlay)');
+  if (otherOverlay) {
+    otherOverlay.remove();
+    return true;
+  }
+  const sidebar = document.getElementById('sidebar');
+  if (sidebar?.classList.contains('bubbles-open') || sidebar?.classList.contains('open')) {
+    sidebar.classList.remove('bubbles-open', 'open');
+    document.querySelector('.sidebar-backdrop')?.classList.remove('show');
+    setBubblesMenu?.();
+    return true;
+  }
+  return false;
+}
+
+function onValgomPopState(event) {
+  // 1. Cerrar cualquier diálogo, formulario o menú abierto en pantalla
+  if (closeTransientUi()) {
+    rearmTrap();
+    lastExitPromptTime = 0;
+    return;
+  }
+
+  // 2. Si estamos dentro de una sección secundaria, retroceder a la anterior
+  if (valgomNavStack.length > 1) {
+    valgomNavStack.pop(); // quitamos la pantalla actual
+    const prev = valgomNavStack[valgomNavStack.length - 1] || { page: 'dashboard', arg: null };
+    skipHistoryOnce = true;
+    navigateTo(prev.page, prev.arg);
+    rearmTrap();
+    lastExitPromptTime = 0;
+    return;
+  } else if (currentPage && currentPage !== 'dashboard') {
+    valgomNavStack = [{ page: 'dashboard', arg: null }];
+    skipHistoryOnce = true;
+    navigateTo('dashboard');
+    rearmTrap();
+    lastExitPromptTime = 0;
+    return;
+  }
+
+  // 3. Estando en el Panel de Control (dashboard): avisar antes de salir
+  const now = Date.now();
+  if (now - lastExitPromptTime < 2500) {
+    // Segundo toque dentro de 2.5s: confirmar salida
+    lastExitPromptTime = 0;
+    try { window.close(); } catch (_) {}
+    history.back();
+  } else {
+    // Primer toque: mostrar aviso y mantener la app abierta
+    lastExitPromptTime = now;
+    showToast('Pulsa atrás de nuevo para salir', 'info');
+    rearmTrap();
+  }
+}
+
+function setupBackNavigation() {
+  if (window.__valgomBackBound) return;
+  window.__valgomBackBound = true;
+  lastNavArg = null;
+  currentPage = currentPage || 'dashboard';
+  window.currentPage = currentPage;
+  valgomNavStack = [{ page: currentPage, arg: null }];
+  try {
+    history.replaceState({ valgom: true, root: true }, '', historyUrl());
+    history.pushState({ valgom: true, trap: true }, '', historyUrl());
+  } catch (_) {}
+  window.addEventListener('popstate', onValgomPopState);
+}
+
 function navigateTo(page, arg) {
   if (window.SUPABASE_AUTH_REQUIRED && !window.canAccessPage?.(page)) {
     if (window.isTechnician?.() && page !== 'dashboard') return navigateTo('dashboard');
@@ -168,9 +299,26 @@ function navigateTo(page, arg) {
     document.querySelectorAll('.nav-item').forEach(item => item.classList.remove('active'));
     return Promise.resolve();
   }
+  const skipHistory = skipHistoryOnce;
+  skipHistoryOnce = false;
   currentPage = page;
   window.currentPage = page;
+  lastNavArg = arg ?? null;
   window.onValgomNavigate?.(page);
+
+  if (!skipHistory) {
+    if (page === 'dashboard') {
+      valgomNavStack = [{ page: 'dashboard', arg: null }];
+    } else {
+      const top = valgomNavStack[valgomNavStack.length - 1];
+      if (!top || top.page !== page || String(top.arg ?? '') !== String(arg ?? '')) {
+        valgomNavStack.push({ page, arg: arg ?? null });
+        if (valgomNavStack.length > 20) {
+          valgomNavStack = [{ page: 'dashboard', arg: null }].concat(valgomNavStack.slice(-15));
+        }
+      }
+    }
+  }
 
   if (page === 'rutas' && arg) {
     window.setCurrentCadenId(arg);
@@ -683,19 +831,24 @@ async function guardarPuerta() {
 
   const hoy = new Date().toISOString().slice(0, 10);
 
-  await dbAdd('puertas', {
-    id: 'PRT-' + Date.now(),
-    nombre,
-    tipo,
-    clienteId: getPuertaClienteActual(),
-    ubicacionId: ubId || null,
-    estado,
-    notas,
-    ultimaRevision: null,
-    tecnicoUltimo: null,
-    proximaRevision: calcularProximaRevision(tipo, null),
-    createdAt: hoy
-  });
+  try {
+    await dbAdd('puertas', {
+      id: 'PRT-' + Date.now(),
+      nombre,
+      tipo,
+      clienteId: getPuertaClienteActual(),
+      ubicacionId: ubId || null,
+      estado,
+      notas,
+      ultimaRevision: null,
+      proximaRevision: calcularProximaRevisionPuerta(tipo, null),
+      createdAt: hoy
+    });
+  } catch (err) {
+    console.error('[guardarPuerta]', err);
+    showToast('No se pudo guardar la puerta: ' + (err?.message || err), 'error');
+    return;
+  }
 
   document.getElementById('pu_nombre').value = '';
   document.getElementById('pu_notas').value = '';
@@ -842,7 +995,6 @@ async function guardarRevision() {
     ...puerta,
     ultimaRevision: fecha,
     estado: estadoFinal,
-    tecnicoUltimo: tecnicoId,
     proximaRevision: null
   };
   if (window.isTechnician?.()) {
@@ -853,6 +1005,7 @@ async function guardarRevision() {
     });
     if (error) throw error;
     puertaActualizada.proximaRevision = nextRevision;
+    await dbPut('puertas', puertaActualizada);
   } else {
     const client = puerta.clienteId ? await dbGet('clientes', puerta.clienteId) : null;
     const routeId = client?.rutaId ?? client?.rutaid;
@@ -864,7 +1017,15 @@ async function guardarRevision() {
 
   cerrarRevision();
   showToast('Revisión registrada · Próx.: ' + puertaActualizada.proximaRevision);
-  pintarListaPuertas();
+  // Refrescar la página actual si es revisionesProgramadas o gestionarPuertas
+  if (currentPage === 'revisionesProgramadas') {
+    const main = document.getElementById('mainContent');
+    if (window.render_revisionesProgramadas) {
+      window.render_revisionesProgramadas(main);
+    }
+  } else {
+    pintarListaPuertas();
+  }
 }
 
 // ==========================================
