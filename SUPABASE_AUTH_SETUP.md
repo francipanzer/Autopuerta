@@ -44,6 +44,24 @@ Después de migrar SQL y desplegar la función, publica/recarga la aplicación. 
 - La solicitud de material no incluye precios; al convertirla se crea un presupuesto en borrador para que oficina complete la valoración.
 - Los cambios de permisos de pantalla son solo una capa de UX: RLS y las funciones SQL son los controles efectivos de datos.
 
+## Compartir PDFs de revisiones
+
+1. Ejecuta `SUPABASE_REVISIONES_STORAGE.sql` en el SQL Editor después de `SUPABASE_AUTH_ROLES.sql`. El bucket `revision-pdfs` queda privado y solo admite PDFs de hasta 20 MB.
+2. Configura una cuenta en Resend y verifica un dominio remitente. Añade `RESEND_API_KEY`, `RESEND_FROM_EMAIL` (por ejemplo, `AutoPuerta Pro <avisos@tu-dominio.es>`) y, opcionalmente, `REVISION_NOTIFICATION_EMAIL` como secretos de Edge Functions. Si no se indica destinatario, se usa `franmerino78@gmail.com`.
+3. Despliega la función:
+
+```powershell
+npx.cmd supabase@latest functions deploy share-revision --project-ref ziimllianelsocrdeeut --no-verify-jwt
+```
+
+Al guardar una revisión, la aplicación descarga el PDF como hasta ahora, lo sube al bucket privado y solicita un enlace firmado válido durante 7 días. Con Resend configurado, el enlace se envía automáticamente a administración. Sin Resend, el PDF se guarda y la aplicación ofrece copiar el enlace. Un fallo al compartir no revierte la revisión guardada.
+
+## Datos de empresa en presupuestos
+
+1. Ejecuta `SUPABASE_DATOS_EMPRESA.sql` en el SQL Editor después de `SUPABASE_AUTH_ROLES.sql`.
+2. En la aplicación, abre **Configuración → Datos de empresa** y guarda nombre comercial, razón social, CIF/NIF, dirección y datos de contacto.
+3. Los datos se guardan en Supabase para que el presupuesto muestre la misma ficha aunque se genere desde otro dispositivo. Solo un administrador puede modificarlos; los usuarios activos pueden consultarlos para generar PDF.
+
 La app requiere conexión para crear, modificar o eliminar datos autenticados. Las cachés locales y la cola pendiente anterior se limpian al cambiar o cerrar la sesión para impedir que otra cuenta del mismo dispositivo herede datos locales. La consulta offline solo puede usar la caché del usuario que sigue autenticado en ese dispositivo.
 
 Antes de publicar la nueva interfaz, valida en un proyecto de pruebas que existen las tablas referenciadas por `SUPABASE_AUTH_ROLES.sql` y que `partesTrabajo` (o `partes_trabajo`) incluye el campo de empleado esperado por la app. La migración habilita RLS únicamente en las tablas conocidas de Valgom y sustituye sus políticas anteriores; revisa cualquier política personalizada de esas tablas antes de ejecutarla.

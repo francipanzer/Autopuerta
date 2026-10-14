@@ -29,6 +29,14 @@ html.light,body.light{background-color:#f1f5f9;background-color:var(--bg)}
 body{font-family:'Segoe UI Variable','Segoe UI',system-ui,sans-serif;background-color:#0f172a;background-color:var(--bg);color:var(--text);overflow:hidden;transition:background .3s,color .3s}
 .app-container{display:flex;height:100vh;height:100dvh}
 
+/* ===== CONTROL DE BARRA DE NAVEGACIÓN ANDROID ===== */
+@supports (-webkit-touch-callout: none) {
+  body {
+    padding-top: env(safe-area-inset-top);
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+}
+
 /* ===== SIDEBAR ===== */
 .sidebar{width:260px;background:var(--sidebar-bg);color:#fff;display:flex;flex-direction:column;flex-shrink:0;transition:transform .3s;z-index:100}
 .main-content{flex:1;overflow-y:auto;padding:24px}
@@ -59,6 +67,7 @@ body{font-family:'Segoe UI Variable','Segoe UI',system-ui,sans-serif;background-
 .auth-push{display:block;font-size:11px;margin-top:6px;white-space:nowrap;text-decoration:none;width:100%;text-align:left}
 .auth-push:disabled{opacity:.6;cursor:wait}
 #authScreen[hidden],.app-container[hidden]{display:none!important}
+.btn[hidden]{display:none!important}
 #authScreen{position:fixed;inset:0;z-index:1000;display:grid;place-items:center;overflow:auto;padding:max(24px,env(safe-area-inset-top,0px)) 24px max(24px,env(safe-area-inset-bottom,0px));background:var(--bg)}
 .auth-card{width:min(100%,440px);padding:32px;background:var(--surface);border:1px solid var(--border);border-radius:18px;box-shadow:var(--shadow-lg)}
 .auth-logo{display:block;width:140px;height:140px;object-fit:cover;border-radius:50%;margin:0 auto 18px}
@@ -100,6 +109,27 @@ body{font-family:'Segoe UI Variable','Segoe UI',system-ui,sans-serif;background-
 /* ===== CABECERA DE PÁGINA ===== */
 .page-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:24px;flex-wrap:wrap;gap:12px}
 .page-header h2{font-size:26px}.page-header p{color:var(--text-muted);font-size:13.5px;margin-top:2px}
+.tecnico-badge{background:linear-gradient(135deg,var(--primary),var(--primary-dark));color:#fff;padding:10px 20px;border-radius:14px;font-size:14px;font-weight:800;letter-spacing:1.5px;text-transform:uppercase;box-shadow:0 6px 16px rgba(22,163,74,.4);white-space:nowrap;display:flex;align-items:center;gap:8px;animation:badge-glow 2s ease-in-out infinite alternate}@keyframes badge-glow{from{box-shadow:0 6px 16px rgba(22,163,74,.4)}to{box-shadow:0 6px 20px rgba(22,163,74,.6)}}
+
+/* ===== EXIT PROMPT ===== */
+.exit-prompt{position:fixed;inset:0;z-index:10001;display:grid;place-items:center;padding:max(20px,env(safe-area-inset-top)) 20px max(20px,env(safe-area-inset-bottom));background:rgba(3,7,18,.66);backdrop-filter:blur(8px);opacity:0;visibility:hidden;transition:opacity .2s,visibility .2s}
+.exit-prompt.show{opacity:1;visibility:visible}
+.exit-prompt-content{width:min(100%,400px);padding:24px;border:1px solid var(--border);border-top:3px solid var(--primary);border-radius:16px;background:var(--surface);color:var(--text);box-shadow:var(--shadow-lg);text-align:center;transform:translateY(10px) scale(.98);transition:transform .2s}
+.exit-prompt.show .exit-prompt-content{transform:translateY(0) scale(1)}
+.exit-prompt-icon{display:grid;place-items:center;width:48px;height:48px;margin:0 auto 14px;border-radius:14px;background:rgba(22,163,74,.14);color:var(--primary-light);font-size:20px}
+.exit-prompt-content h2{font-size:19px;line-height:1.3;margin-bottom:8px}
+.exit-prompt-content p{font-size:14px;line-height:1.5;color:var(--text-muted)}
+.exit-prompt-actions{display:flex;justify-content:center;gap:10px;flex-wrap:wrap;margin-top:20px}
+
+/* ===== CONFIG MENU ===== */
+.config-menu{display:flex;flex-direction:column;gap:12px}
+.config-menu-item{display:flex;align-items:center;gap:16px;padding:16px;background:var(--surface);border-radius:12px;cursor:pointer;transition:all .2s;border:1px solid var(--border)}
+.config-menu-item:hover{background:var(--surface-alt);border-color:var(--primary);transform:translateX(4px)}
+.config-menu-icon{width:48px;height:48px;border-radius:10px;background:linear-gradient(135deg,var(--primary),var(--primary-dark));color:#fff;display:flex;align-items:center;justify-content:center;font-size:20px;flex-shrink:0}
+.config-menu-content{flex:1;min-width:0}
+.config-menu-content h3{font-size:16px;font-weight:600;margin:0 0 4px;color:var(--text)}
+.config-menu-content p{font-size:13px;color:var(--text-muted);margin:0}
+.config-menu-arrow{color:var(--text-muted);font-size:14px;flex-shrink:0}
 .route-page-heading{display:flex;flex-direction:column;gap:8px;min-width:0}
 .route-page-heading h2{margin:0}
 .breadcrumbs{display:flex;align-items:center;flex-wrap:wrap;gap:8px;color:var(--text-muted);font-size:12.5px;line-height:1.4}
@@ -373,9 +403,13 @@ textarea{resize:vertical;min-height:70px}
   .sidebar{padding-top:72px!important}
   .menu-fab.fab-hidden{display:none!important}
   body.on-section .main-content{padding-top:68px!important}
-  .home-account{margin-top:8px;text-align:center}
-  .home-account-name{font-size:13px;color:var(--text-muted);margin-bottom:8px}
-  .home-account-actions{display:flex;gap:10px;justify-content:center;flex-wrap:wrap}
+  .home-account{margin-top:8px;padding-bottom:max(8px,env(safe-area-inset-bottom,0px));text-align:center}
+  .home-account-actions{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+  .home-account-actions .btn{width:100%;min-width:0;padding:9px 6px;gap:5px;font-size:12px}
+  .sidebar-footer .auth-account-identity{display:none!important}
+  .mobile-home-heading{display:grid;gap:5px;margin:0 0 16px;padding:16px 18px;border:1px solid var(--border);border-radius:14px;background:linear-gradient(135deg,var(--surface),var(--surface-alt));box-shadow:var(--shadow)}
+  .mobile-home-eyebrow{color:var(--primary-light);font-size:11px;font-weight:800;text-transform:uppercase}
+  .mobile-home-heading h1{font-size:20px;line-height:1.25;overflow-wrap:anywhere}
   .menu-fab:active{transform:scale(.95)}
 
 }
@@ -523,6 +557,9 @@ body.light .icon-btn-danger{color:#dc2626}
   .dotics-form-intro{align-items:flex-start;flex-direction:column;gap:4px}
 }
 @media(max-width:360px){
+  .home-account-actions{grid-template-columns:repeat(3,44px);justify-content:center}
+  .home-account-actions .btn{width:44px;height:44px;min-height:44px;padding:0}
+  .home-account-actions .btn span{display:none}
   .dotics-state-options{gap:3px}
   .dotics-state-option{gap:2px;padding:6px 2px;font-size:9px;overflow:hidden}
   .dotics-state-option input{flex:0 0 10px;width:10px;height:10px;min-height:10px}

@@ -234,8 +234,10 @@ function updateAuthNavigation() {
   if (!account) return;
   const { profile } = window.authState;
   account.innerHTML = `
-    <div class="auth-account-name" title="${authEscape(profile.email)}">${authEscape(profile.full_name)}</div>
-    <div class="auth-account-role">${profile.role === 'admin' ? 'Administrador' : 'Técnico'}</div>
+    <div class="auth-account-identity">
+      <div class="auth-account-name">${authEscape(window.authState.employee?.nombre || profile.full_name)}</div>
+      <div class="auth-account-role">${window.isTechnician() ? 'Técnico' : 'Administración'}</div>
+    </div>
     <button type="button" class="auth-link auth-account-email" id="changeAccountEmail">Cambiar correo</button>
     <button type="button" class="auth-link auth-push" id="pushToggle" hidden></button>
     <button type="button" class="auth-link auth-logout" id="logoutButton"><i class="fas fa-right-from-bracket"></i> Cerrar sesión</button>`;
@@ -699,21 +701,23 @@ window.render_dashboard = async function(container, arg) {
   else if (window.isTechnician()) await window.renderTechnicianDashboard(container);
   else await originalDashboardRenderer(container, arg);
   container.dataset.dashboardMode = mobile ? 'mobile' : 'desktop';
-  // En móvil el pie del menú está oculto: botón de avisos accesible desde el inicio
-  const bar = document.createElement('div');
-  bar.className = 'push-mobile-bar';
-  bar.innerHTML = '<button type="button" class="btn btn-outline btn-sm push-toggle-btn" hidden></button>';
-  container.prepend(bar);
   window.renderHomeBubbles?.(container);
   if (mobile) {
+    const identity = document.createElement('header');
+    identity.className = 'mobile-home-heading';
+    const technicianName = window.authState.employee?.nombre || window.authState.profile.full_name;
+    identity.innerHTML = `
+      <span class="mobile-home-eyebrow">Panel de control</span>
+      <h1>Hola, ${authEscape(technicianName)}</h1>`;
+    container.prepend(identity);
+
     const footer = document.createElement('div');
     footer.className = 'home-account';
-    const profile = window.authState.profile;
     footer.innerHTML = `
-      <div class="home-account-name">${authEscape(profile.full_name)} · ${profile.role === 'admin' ? 'Administrador' : 'Técnico'}</div>
       <div class="home-account-actions">
-        <button type="button" class="btn btn-outline btn-sm" data-home-theme><i class="fas fa-circle-half-stroke"></i> Tema</button>
-        <button type="button" class="btn btn-outline btn-sm" data-home-logout><i class="fas fa-right-from-bracket"></i> Cerrar sesión</button>
+        <button type="button" class="btn btn-outline btn-sm" data-home-theme title="Tema" aria-label="Tema"><i class="fas fa-circle-half-stroke"></i><span>Tema</span></button>
+        <button type="button" class="btn btn-outline btn-sm push-toggle-btn home-notifications-btn" hidden></button>
+        <button type="button" class="btn btn-outline btn-sm" data-home-logout title="Cerrar sesión" aria-label="Cerrar sesión"><i class="fas fa-right-from-bracket"></i><span>Cerrar sesión</span></button>
       </div>`;
     footer.querySelector('[data-home-theme]').addEventListener('click', () => document.getElementById('themeToggle')?.click());
     footer.querySelector('[data-home-logout]').addEventListener('click', () => window.supabaseDB.auth.signOut());
@@ -895,7 +899,7 @@ window.render_partesTrabajo = async function(container, arg) {
 };
 
 const originalShowPartForm = window.showParteForm;
-window.showParteForm = async function(id) {
+window.showParteForm = async function(id, prefill) {
   if (window.isTechnician() && id) {
     const part = await dbGet('partesTrabajo', id);
     if (!part || String(part.createdBy) !== String(window.authState.user.id)) {
@@ -905,7 +909,7 @@ window.showParteForm = async function(id) {
   if (window.isTechnician() && !window.authState.employee) {
     return showToast('Tu cuenta no está vinculada a un empleado. Contacta con administración.', 'error');
   }
-  await originalShowPartForm(id);
+  await originalShowPartForm(id, prefill);
   if (!window.isTechnician()) return;
   const employeeSelect = document.getElementById('pt_empleado');
   if (employeeSelect) {

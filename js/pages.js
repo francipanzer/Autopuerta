@@ -165,9 +165,19 @@ window.render_dashboard = async function(el){
   const h = new Date().getHours();
   const saludo = h<12 ? 'Buenos días' : h<20 ? 'Buenas tardes' : 'Buenas noches';
 
+  // ── Nombre del técnico ──
+  const nombreTecnico = window.authState?.employee?.nombre || window.authState?.profile?.full_name || '';
+  const nombreTecnicoMayus = nombreTecnico ? nombreTecnico.toUpperCase() : '';
+
   // ── Renderizado HTML: Dashboard ──
   el.innerHTML = `
-    <div class="page-header"><div><h2>${saludo} 👋</h2><p>Resumen general · ${new Date().toLocaleDateString('es-ES',{weekday:'long',day:'numeric',month:'long'})}</p></div></div>
+    <div class="page-header">
+      <div>
+        <h2>${saludo} 👋</h2>
+        <p>Resumen general · ${new Date().toLocaleDateString('es-ES',{weekday:'long',day:'numeric',month:'long'})}</p>
+      </div>
+      ${nombreTecnicoMayus ? `<div class="tecnico-badge">${escapeHtml(nombreTecnicoMayus)}</div>` : ''}
+    </div>
 
     ${bannerHTML}
 
@@ -482,8 +492,8 @@ function renderLineItems(cid, items){
         (window.__tipos||[]).map(t=>'<option value="'+t.id+'" '+(item.tipoId===t.id?'selected':'')+'>'+escapeHtml(t.nombre)+'</option>').join('')+'</td>'+
       '<td><input type="number" data-field="cantidad" class="only-num-dec" min="0" step="0.01" inputmode="decimal" value="'+(Number(item.cantidad)||0)+'" onchange="updateLineItem(\''+cid+'\','+i+',\'cantidad\',this.value)" style="width:110px"></td>'+
       '<td><input type="number" data-field="precio" class="only-num-dec" min="0" step="0.01" inputmode="decimal" value="'+(Number(item.precio)||0)+'" onchange="updateLineItem(\''+cid+'\','+i+',\'precio\',this.value)" style="width:110px"></td>'+
-      '<td><strong>'+formatCurrency(item.cantidad*item.precio)+'</strong></td>'+
-      '<td><button class="btn btn-outline btn-sm btn-icon" onclick="removeLineItem(\''+cid+'\','+i+')"><i class="fas fa-minus"></i></button></td>'+
+      '<td><strong id="'+cid+'_subtotal_'+i+'">'+formatCurrency(item.cantidad*item.precio)+'</strong></td>'+
+      '<td><button class="btn btn-outline btn-sm btn-icon" onclick="removeLineItem(\''+cid+'\','+i+')" title="Eliminar línea"><i class="fas fa-minus"></i></button></td>'+
     '</tr>'
   ).join('');
 }
@@ -491,6 +501,15 @@ function renderLineItems(cid, items){
 window.updateLineItem = function(cid,idx,field,val){
   if(!window.__lineItems[cid]) return;
   window.__lineItems[cid][idx][field] = (field==='cantidad'||field==='precio') ? parseFloat(val)||0 : val;
+
+  // Actualizar subtotal de la línea específica
+  if(field==='cantidad' || field==='precio'){
+    const item = window.__lineItems[cid][idx];
+    const subtotalEl = document.getElementById(cid+'_subtotal_'+idx);
+    if(subtotalEl){
+      subtotalEl.textContent = formatCurrency(item.cantidad * item.precio);
+    }
+  }
 };
 
 window.removeLineItem = function(cid,idx){
@@ -504,6 +523,16 @@ window.addLineItem = function(cid){
   if(!window.__lineItems[key]) window.__lineItems[key]=[];
   window.__lineItems[key].push({descripcion:'',tipoId:'',cantidad:1,precio:0});
   renderLineItems(key, window.__lineItems[key]);
+
+  // Enfocar el campo de descripción de la nueva línea
+  setTimeout(() => {
+    const rows = document.querySelectorAll('#'+key+'_items tr');
+    const lastRow = rows[rows.length - 1];
+    if(lastRow){
+      const descInput = lastRow.querySelector('[data-field="descripcion"]');
+      if(descInput) descInput.focus();
+    }
+  }, 50);
 };
 function calcTotals(prefix){
   const rows = document.querySelectorAll('#'+prefix+'_items tr');
@@ -547,24 +576,20 @@ window.showPresupuestoForm = async function(id, tpl){
     '<div class="form-group full"><label>Notas</label><textarea id="pf_notas">'+escapeHtml(p.notas||'')+'</textarea></div>'+
   '</div>'+
   '<h3 style="margin:20px 0 10px">Conceptos</h3>'+
-  '<div  class="table-wrapper"><table><thead><tr><th>Descripción</th><th>Tipo</th><th>Cant.</th><th>Precio</th><th>Subtotal</th><th></th></tr></thead><tbody id="'+lid+'_items"></tbody></table></div>'+
+  '<div class="table-wrapper"><table><thead><tr><th>Descripción</th><th>Tipo</th><th>Cant.</th><th>Precio</th><th>Subtotal</th><th></th></tr></thead><tbody id="'+lid+'_items"></tbody></table></div>'+
   '<button class="btn btn-primary btn-sm" style="margin-top:10px" onclick="addLineItem(\''+lid+'\')"><i class="fas fa-plus"></i> Añadir línea</button>'+
-  '<div class="totals-box" id="'+lid+'_totals">'+
+  '<div class="totals-box" id="'+lid+'_totals" style="display:none">'+
     '<div class="row"><span>Subtotal:</span><span id="'+lid+'_subtotal">0,00 €</span></div>'+
     '<div class="row"><span>IVA (21%):</span><span id="'+lid+'_iva">0,00 €</span></div>'+
     '<div class="row grand"><span>TOTAL:</span><span id="'+lid+'_total">0,00 €</span></div>'+
-  '</div>';
+  '</div>'+
+  '<p style="margin-top:12px;color:var(--text-muted);font-size:13px"><i class="fas fa-info-circle"></i> Los totales se calcularán al guardar el presupuesto</p>';
 
   const footer = '<button class="btn btn-outline" onclick="closeModal()">Cancelar</button>'+
     '<button class="btn btn-primary btn-save-presupuesto" data-action="save-presupuesto" data-id="'+(id ? escapeHtml(id) : '')+'"><i class="fas fa-save"></i> Guardar</button>';
   openModal(id?'Editar Presupuesto':'Nuevo Presupuesto',form,footer);
 
   renderLineItems(lid, items);
-  setTimeout(()=>{
-    const tbody = document.getElementById(lid + '_items');
-    if (tbody) tbody.addEventListener('input',()=>calcTotals(lid));
-    calcTotals(lid);
-  },100);
 };
 
 window.savePresupuesto = async function(id){
@@ -597,7 +622,13 @@ window.savePresupuesto = async function(id){
 
     // Fecha obligatoria
     const fecha = document.getElementById('pf_fecha').value;
-    ok &= setFieldError('pf_fecha', validators.required(fecha, 'La fecha'));
+    const fechaError = validators.required(fecha, 'La fecha');
+    if(fechaError){
+      setFieldError('pf_fecha', fechaError);
+      ok = false;
+    } else {
+      clearFieldError('pf_fecha');
+    }
 
     // Válido hasta no anterior a la fecha
     const valido = document.getElementById('pf_valido').value;
@@ -621,6 +652,7 @@ window.savePresupuesto = async function(id){
 
     if(!ok){ showToast('Revisa los campos marcados','error'); return; }
 
+    // Calcular totales al guardar
     const sub = items.reduce((s,i)=>s+i.cantidad*i.precio,0);
     const data = {
       id: document.getElementById('pf_id').value.trim(),
@@ -638,6 +670,16 @@ window.savePresupuesto = async function(id){
     await dbPut('presupuestos', data);
     closeModal();
     showToast('Presupuesto guardado');
+
+    // Generar PDF automáticamente
+    try {
+      await window.generatePDF_presupuesto(data.id);
+      showToast('PDF generado automáticamente');
+    } catch(pdfError) {
+      console.warn('No se pudo generar el PDF:', pdfError);
+      showToast('Presupuesto guardado (error al generar PDF)', 'warning');
+    }
+
     navigateTo('presupuestos');
   } catch(err){
     console.error('Error al guardar presupuesto:', err);
@@ -821,7 +863,11 @@ window.showParteForm = async function(id, prefill) {
   const all = await dbGetAll('partesTrabajo');
   const nextId = p.id || 'PT-' + String(all.length + 1).padStart(3, '0');
 
-  const clienteSeleccionado = clientes.find(c => c.id === p.clienteId);
+  const clienteSeleccionado = clientes.find(c => String(c.id) === String(p.clienteId)) ||
+    clientes.find(c => String(c.nombre || '').trim().toLocaleLowerCase() === String(p.clienteNombre || '').trim().toLocaleLowerCase());
+  const clienteIdSeleccionado = clienteSeleccionado?.id || '';
+  const clienteNombrePrefill = String(p.clienteNombre || clienteSeleccionado?.nombre || '').trim();
+  const clienteSinFicha = !clienteSeleccionado && clienteNombrePrefill;
   const clienteDni = clienteSeleccionado?.dni || '';
 
   // Matrícula preseleccionada: directa (p.matricula) o vía vehiculoId
@@ -837,7 +883,8 @@ window.showParteForm = async function(id, prefill) {
     '<div class="form-group"><label>ID</label><input id="pt_id" value="' + escapeHtml(nextId) + '"></div>' +
     '<div class="form-group"><label>Cliente *</label><select id="pt_cliente">' +
       '<option value="">— Seleccionar —</option>' +
-      clientes.map(c => '<option value="' + c.id + '" data-nombre="' + escapeHtml(c.nombre) + '" ' + (p.clienteId === c.id ? 'selected' : '') + '>' + escapeHtml(c.nombre) + '</option>').join('') +
+      (clienteSinFicha ? '<option value="__incidencia__" data-nombre="' + escapeHtml(clienteNombrePrefill) + '" selected>' + escapeHtml(clienteNombrePrefill) + ' (incidencia)</option>' : '') +
+      clientes.map(c => '<option value="' + c.id + '" data-nombre="' + escapeHtml(c.nombre) + '" ' + (String(clienteIdSeleccionado) === String(c.id) ? 'selected' : '') + '>' + escapeHtml(c.nombre) + '</option>').join('') +
     '</select></div>' +
     '<div class="form-group"><label>Ubicación del trabajo</label><select id="pt_ubicacion"><option value="">-- Selecciona un cliente primero --</option></select></div>' +
     '<div class="form-group full"><label>🚪 Puertas a revisar</label>' +
@@ -906,6 +953,13 @@ window.showParteForm = async function(id, prefill) {
     const sel = document.getElementById('pt_cliente');
     if (sel) {
       sel.addEventListener('change', async () => {
+        if (sel.value === '__incidencia__') {
+          document.getElementById('pt_kms').value = '';
+          document.getElementById('pt_dni_cliente').value = '';
+          document.getElementById('pt_ubicacion').innerHTML = '<option value="">Sin ficha de cliente</option>';
+          document.getElementById('pt_puertas').innerHTML = '<option value="">Sin ficha de cliente</option>';
+          return;
+        }
         const cli = await dbGet('clientes', sel.value);
 
         // --- Cálculo de KMs ---
@@ -982,10 +1036,10 @@ window.showParteForm = async function(id, prefill) {
       pintarFirmaEnCanvas('pt_firma_cliente', p.firmaCliente);
     }
     // --- Cargar ubicaciones si hay cliente preseleccionado (edición) ---
-    if (p.clienteId) {
+    if (clienteIdSeleccionado) {
       const selUbicacion = document.getElementById('pt_ubicacion');
       if (selUbicacion) {
-        const ubicaciones = await dbGetByIndex('ubicaciones', 'clienteId', p.clienteId);
+        const ubicaciones = await dbGetByIndex('ubicaciones', 'clienteId', clienteIdSeleccionado);
         if (ubicaciones.length) {
           selUbicacion.innerHTML = '<option value="">-- Selecciona ubicación --</option>' +
             ubicaciones.map(u =>
@@ -1000,7 +1054,7 @@ window.showParteForm = async function(id, prefill) {
       // --- Cargar puertas si hay cliente preseleccionado (edición) ---
       const selPuertas = document.getElementById('pt_puertas');
       if (selPuertas) {
-        const puertas = await dbGetByIndex('puertas', 'clienteId', p.clienteId);
+        const puertas = await dbGetByIndex('puertas', 'clienteId', clienteIdSeleccionado);
         selPuertas.innerHTML = puertas.map(pu => {
           const checked = p.puertaIds && p.puertaIds.includes(pu.id) ? 'selected' : '';
           return '<option value="' + pu.id + '" ' + checked + '>' + escapeHtml(pu.nombre) + ' (' + pu.tipo + ')</option>';
@@ -1014,8 +1068,10 @@ window.saveParte = async function(id){
   try {
     const existingPart = id ? await dbGet('partesTrabajo', id) : null;
     const sel = document.getElementById('pt_cliente');
-    const clienteId = sel.value;
-    const clienteNombre = sel.options[sel.selectedIndex]?.dataset.nombre||'';
+    const clienteOption = sel.options[sel.selectedIndex];
+    const clienteSinFicha = sel.value === '__incidencia__';
+    const clienteId = clienteSinFicha ? null : sel.value;
+    const clienteNombre = clienteOption?.dataset.nombre || '';
     const empSel = document.getElementById('pt_empleado');
 
     // --- UBICACIÓN ---
@@ -1041,7 +1097,7 @@ window.saveParte = async function(id){
     let ok = true;
 
     // Cliente obligatorio
-    if(!clienteId){
+    if(!clienteId && !(clienteSinFicha && clienteNombre)){
       setFieldError('pt_cliente', 'Selecciona un cliente');
       ok = false;
     } else {
@@ -1464,72 +1520,219 @@ window.applyStock = async function(id){
 window.render_configuracion = async function(el){
   el.innerHTML =
     '<div class="page-header"><div><h2>Configuración</h2><p>Ajustes de la aplicación</p></div></div>'+
-    '<section class="config-shortcuts"><h3>Accesos directos</h3><div class="config-shortcut-grid">'+
-      '<button class="btn btn-primary" onclick="navigateTo(\'empleados\')"><i class="fas fa-users-gear"></i> Empleados</button>'+ 
-      '<button class="btn btn-primary" onclick="navigateTo(\'vehiculos\')"><i class="fas fa-truck"></i> Vehículos</button>'+ 
-      '<button class="btn btn-primary" onclick="navigateTo(\'estadisticas\')"><i class="fas fa-chart-bar"></i> Estadísticas</button>'+ 
-      '<button class="btn btn-primary" onclick="navigateTo(\'almacen\')"><i class="fas fa-boxes-stacked"></i> Almacén</button>'+ 
-      '<button class="btn btn-primary" onclick="navigateTo(\'informesKms\')"><i class="fas fa-chart-pie"></i> Informes KMs</button>'+ 
-    '</div></section>'+
-    '<div class="card" style="margin-top:20px">'+
-      '<div class="card-header"><h3>Sincronización de datos</h3></div>'+
-      '<div class="card-body">'+
-        '<p style="margin-bottom:12px;color:var(--text-muted)">Los datos se sincronizan online con Supabase y se mantienen en caché local para consulta. La exportación e importación JSON están disponibles como respaldo adicional.</p>'+
-        '<div style="display:flex;gap:12px;flex-wrap:wrap">'+
-          '<button class="btn btn-primary" onclick="exportAllData()"><i class="fas fa-download"></i> Exportar datos (JSON)</button>'+
-          '<button class="btn btn-outline" onclick="document.getElementById(\'importFile\').click()"><i class="fas fa-upload"></i> Importar datos</button>'+
-          '<input type="file" id="importFile" accept=".json" style="display:none" onchange="importAllData(event)">'+
-          '<button class="btn btn-danger" onclick="confirmDelete(\'Todos los datos de la aplicación\', ()=>clearAllData())"><i class="fas fa-trash"></i> Borrar todos los datos</button>'+
+    '<div class="config-menu">'+
+      '<div class="config-menu-item" onclick="navigateTo(\'empleados\')">'+
+        '<div class="config-menu-icon"><i class="fas fa-users-gear"></i></div>'+
+        '<div class="config-menu-content">'+
+          '<h3>Empleados</h3>'+
+          '<p>Gestión de empleados y asignación de roles</p>'+
         '</div>'+
+        '<div class="config-menu-arrow"><i class="fas fa-chevron-right"></i></div>'+
       '</div>'+
-    '</div>'+
-    '<div class="card" style="margin-top:20px">'+
-      '<div class="card-header"><h3>Instalación en Android</h3></div>'+
-      '<div class="card-body">'+
-        '<p style="color:var(--text-muted);font-size:14px">Abre esta app en <strong>Chrome para Android</strong> y pulsa el menú <strong>⋮ → "Instalar aplicación"</strong>. Quedará como una app nativa en tu escritorio y funcionará sin conexión.</p>'+
-      '</div>'+
-    '</div>'+
-    '<div class="card" style="margin-top:20px">'+
-      '<div class="card-header"><h3>Información</h3></div>'+
-      '<div class="card-body">'+
-        '<p><strong>Valgom</strong> v1.0</p>'+
-        '<p style="color:var(--text-muted);margin-top:4px">PWA · IndexedDB · Funciona offline · Exporta PDF</p>'+
-      '</div>'+
-    '</div>'+
-    '<div class="card" style="margin-top:20px">'+
-      '<div class="card-header"><h3><i class="fas fa-envelope"></i> Configuración de Correo</h3></div>'+
-      '<div class="card-body">'+
-        '<p style="margin-bottom:12px;color:var(--text-muted)">Configura los datos del servidor SMTP para enviar correos electrónicos desde la aplicación.</p>'+
-        '<div class="form-grid">'+
-          '<div class="form-group"><label for="smtp_host">Servidor SMTP (Host)</label><input type="text" id="smtp_host" placeholder="smtp.gmail.com"></div>'+
-          '<div class="form-group"><label for="smtp_port">Puerto</label><input type="number" id="smtp_port" placeholder="587"></div>'+
-          '<div class="form-group"><label for="smtp_user">Usuario / Email</label><input type="email" id="smtp_user" placeholder="tucorreo@gmail.com"></div>'+
-          '<div class="form-group"><label for="smtp_password">Contraseña</label><input type="password" id="smtp_password" placeholder="Tu contraseña o app password"></div>'+
-          '<div class="form-group full"><label for="smtp_secure"><input type="checkbox" id="smtp_secure"> Usar SSL/TLS</label></div>'+
+      '<div class="config-menu-item" onclick="navigateTo(\'vehiculos\')">'+
+        '<div class="config-menu-icon"><i class="fas fa-truck"></i></div>'+
+        '<div class="config-menu-content">'+
+          '<h3>Vehículos</h3>'+
+          '<p>Gestión de la flota y mantenimiento</p>'+
         '</div>'+
-        '<div style="display:flex;gap:12px;margin-top:16px">'+
-          '<button class="btn btn-primary" onclick="guardarConfigCorreo()"><i class="fas fa-save"></i> Guardar configuración</button>'+
-          '<button class="btn btn-outline" onclick="probarConexionCorreo()"><i class="fas fa-paper-plane"></i> Probar conexión</button>'+
-        '</div>'+
-        '<div id="correo-status" style="margin-top:12px;font-size:13px;"></div>'+
+        '<div class="config-menu-arrow"><i class="fas fa-chevron-right"></i></div>'+
       '</div>'+
-    '</div>'+
-    '<div style="margin-top:20px; padding-top:20px; border-top:1px solid var(--border);">'+
-      '<h3 style="margin:0 0 12px 0; font-size:16px;">Cadenas y Rutas</h3>'+
-      '<p style="color:var(--gray);font-size:13px;margin-bottom:12px;">Gestiona las cadenas de mantenimiento y sus rutas asociadas.</p>'+
-      '<button class="btn btn-primary" id="btn-gestion-cadenas">Gestionar Cadenas y Rutas</button>'+
+      '<div class="config-menu-item" onclick="navigateTo(\'almacen\')">'+
+        '<div class="config-menu-icon"><i class="fas fa-boxes-stacked"></i></div>'+
+        '<div class="config-menu-content">'+
+          '<h3>Almacén</h3>'+
+          '<p>Inventario y control de stock</p>'+
+        '</div>'+
+        '<div class="config-menu-arrow"><i class="fas fa-chevron-right"></i></div>'+
+      '</div>'+
+      '<div class="config-menu-item" onclick="navigateTo(\'informesKms\')">'+
+        '<div class="config-menu-icon"><i class="fas fa-chart-pie"></i></div>'+
+        '<div class="config-menu-content">'+
+          '<h3>Informes KMs</h3>'+
+          '<p>Reportes de kilometraje de vehículos</p>'+
+        '</div>'+
+        '<div class="config-menu-arrow"><i class="fas fa-chevron-right"></i></div>'+
+      '</div>'+
+      '<div class="config-menu-item" onclick="navigateTo(\'cadenas\')">'+
+        '<div class="config-menu-icon"><i class="fas fa-route"></i></div>'+
+        '<div class="config-menu-content">'+
+          '<h3>Cadenas y Rutas</h3>'+
+          '<p>Gestión de cadenas de mantenimiento</p>'+
+        '</div>'+
+        '<div class="config-menu-arrow"><i class="fas fa-chevron-right"></i></div>'+
+      '</div>'+
+      '<div class="config-menu-item" onclick="openConfigCorreo()">'+
+        '<div class="config-menu-icon"><i class="fas fa-envelope"></i></div>'+
+        '<div class="config-menu-content">'+
+          '<h3>Configuración de Correo</h3>'+
+          '<p>Configurar servidor SMTP para envío de emails</p>'+
+        '</div>'+
+        '<div class="config-menu-arrow"><i class="fas fa-chevron-right"></i></div>'+
+      '</div>'+
+      '<div class="config-menu-item" onclick="openConfigEmpresa()">'+
+        '<div class="config-menu-icon"><i class="fas fa-building"></i></div>'+
+        '<div class="config-menu-content">'+
+          '<h3>Datos de empresa</h3>'+
+          '<p>Identidad y contacto para los PDF de presupuestos</p>'+
+        '</div>'+
+        '<div class="config-menu-arrow"><i class="fas fa-chevron-right"></i></div>'+
+      '</div>'+
+      '<div class="config-menu-item" onclick="openConfigSync()">'+
+        '<div class="config-menu-icon"><i class="fas fa-sync"></i></div>'+
+        '<div class="config-menu-content">'+
+          '<h3>Sincronización de Datos</h3>'+
+          '<p>Exportar, importar y borrar datos</p>'+
+        '</div>'+
+        '<div class="config-menu-arrow"><i class="fas fa-chevron-right"></i></div>'+
+      '</div>'+
+      '<div class="config-menu-item" onclick="openAndroidNavigationHelp()">'+
+        '<div class="config-menu-icon"><i class="fas fa-bars-staggered"></i></div>'+
+        '<div class="config-menu-content">'+
+          '<h3>Botones de navegación Android</h3>'+
+          '<p>Cómo activar Atrás, Inicio y Recientes</p>'+
+        '</div>'+
+        '<div class="config-menu-arrow"><i class="fas fa-chevron-right"></i></div>'+
+      '</div>'+
+      '<div class="config-menu-item" onclick="openConfigAndroid()">'+
+        '<div class="config-menu-icon"><i class="fas fa-mobile"></i></div>'+
+        '<div class="config-menu-content">'+
+          '<h3>Instalación en Android</h3>'+
+          '<p>Instrucciones para instalar como PWA</p>'+
+        '</div>'+
+        '<div class="config-menu-arrow"><i class="fas fa-chevron-right"></i></div>'+
+      '</div>'+
+      '<div class="config-menu-item" onclick="openConfigInfo()">'+
+        '<div class="config-menu-icon"><i class="fas fa-info-circle"></i></div>'+
+        '<div class="config-menu-content">'+
+          '<h3>Información</h3>'+
+          '<p>Versión y detalles de la aplicación</p>'+
+        '</div>'+
+        '<div class="config-menu-arrow"><i class="fas fa-chevron-right"></i></div>'+
+      '</div>'+
     '</div>';
+};
 
-  // Listener para la gestión de cadenas
-  const btnGestion = document.getElementById('btn-gestion-cadenas');
-  if (btnGestion) {
-    btnGestion.addEventListener('click', () => {
-      navigateTo('cadenas');
-    });
+const COMPANY_SETTINGS_KEY='valgom_company_settings';
+const COMPANY_SETTINGS_DEFAULTS={
+  trade_name:'Valgom',legal_name:'',tax_id:'',address:'',phone:'',email:'',website:''
+};
+
+window.getCompanySettings=async function(){
+  let cached={};
+  try{cached=JSON.parse(localStorage.getItem(COMPANY_SETTINGS_KEY)||'{}');}catch(error){}
+  try{
+    if(!window.authState?.user) return {...COMPANY_SETTINGS_DEFAULTS,...cached};
+    const {data,error}=await window.supabaseDB.from('company_settings')
+      .select('trade_name,legal_name,tax_id,address,phone,email,website')
+      .eq('id',true).maybeSingle();
+    if(error) throw error;
+    const settings={...COMPANY_SETTINGS_DEFAULTS,...data};
+    localStorage.setItem(COMPANY_SETTINGS_KEY,JSON.stringify(settings));
+    return settings;
+  }catch(error){
+    console.warn('[Configuración] No se pudieron cargar los datos de empresa:',error.message);
+    return {...COMPANY_SETTINGS_DEFAULTS,...cached};
   }
+};
 
-  // Cargar configuración de correo guardada
+window.openConfigEmpresa=async function(){
+  if(!window.isAdmin?.()) return showToast('Solo un administrador puede modificar los datos de empresa','error');
+  const settings=await window.getCompanySettings();
+  openModal('Datos de empresa',`
+    <p style="margin-bottom:12px;color:var(--text-muted)">Estos datos aparecerán en la tarjeta de empresa de los PDF de presupuestos.</p>
+    <form id="companySettingsForm" class="form-grid">
+      <div class="form-group"><label for="company_trade_name">Nombre comercial</label><input id="company_trade_name" maxlength="100" value="${escapeHtml(settings.trade_name)}" placeholder="Valgom"></div>
+      <div class="form-group"><label for="company_legal_name">Razón social</label><input id="company_legal_name" maxlength="150" value="${escapeHtml(settings.legal_name)}"></div>
+      <div class="form-group"><label for="company_tax_id">CIF / NIF</label><input id="company_tax_id" maxlength="24" value="${escapeHtml(settings.tax_id)}"></div>
+      <div class="form-group"><label for="company_phone">Teléfono</label><input id="company_phone" type="tel" maxlength="40" value="${escapeHtml(settings.phone)}"></div>
+      <div class="form-group"><label for="company_email">Email</label><input id="company_email" type="email" maxlength="150" value="${escapeHtml(settings.email)}"></div>
+      <div class="form-group"><label for="company_website">Web</label><input id="company_website" type="url" maxlength="180" value="${escapeHtml(settings.website)}" placeholder="https://"></div>
+      <div class="form-group full"><label for="company_address">Dirección</label><input id="company_address" maxlength="220" value="${escapeHtml(settings.address)}"></div>
+    </form>`,
+    '<button type="button" class="btn btn-outline" onclick="closeModal()">Cancelar</button><button type="button" class="btn btn-primary" id="saveCompanySettings"><i class="fas fa-save"></i> Guardar datos</button>');
+  document.getElementById('saveCompanySettings').addEventListener('click',async event=>{
+    const button=event.currentTarget;
+    button.disabled=true;
+    const form=document.getElementById('companySettingsForm');
+    const next={
+      trade_name:form.querySelector('#company_trade_name').value.trim()||'Valgom',
+      legal_name:form.querySelector('#company_legal_name').value.trim(),
+      tax_id:form.querySelector('#company_tax_id').value.trim(),
+      address:form.querySelector('#company_address').value.trim(),
+      phone:form.querySelector('#company_phone').value.trim(),
+      email:form.querySelector('#company_email').value.trim(),
+      website:form.querySelector('#company_website').value.trim()
+    };
+    try{
+      const {error}=await window.supabaseDB.from('company_settings').upsert({
+        id:true,...next,updated_at:new Date().toISOString(),updated_by:window.authState.user.id
+      });
+      if(error) throw error;
+      localStorage.setItem(COMPANY_SETTINGS_KEY,JSON.stringify(next));
+      closeModal();
+      showToast('Datos de empresa guardados');
+    }catch(error){
+      console.error('[Configuración] No se pudieron guardar los datos de empresa:',error);
+      showToast('No se pudieron guardar. Comprueba que ejecutaste SUPABASE_DATOS_EMPRESA.sql: '+error.message,'error');
+      button.disabled=false;
+    }
+  });
+};
+
+window.openConfigCorreo = function(){
+  openModal('Configuración de Correo', `
+    <p style="margin-bottom:12px;color:var(--text-muted)">Configura los datos del servidor SMTP para enviar correos electrónicos desde la aplicación.</p>
+    <div class="form-grid">
+      <div class="form-group"><label for="smtp_host">Servidor SMTP (Host)</label><input type="text" id="smtp_host" placeholder="smtp.gmail.com"></div>
+      <div class="form-group"><label for="smtp_port">Puerto</label><input type="number" id="smtp_port" placeholder="587"></div>
+      <div class="form-group"><label for="smtp_user">Usuario / Email</label><input type="email" id="smtp_user" placeholder="tucorreo@gmail.com"></div>
+      <div class="form-group"><label for="smtp_password">Contraseña</label><input type="password" id="smtp_password" placeholder="Tu contraseña o app password"></div>
+      <div class="form-group full"><label for="smtp_secure"><input type="checkbox" id="smtp_secure"> Usar SSL/TLS</label></div>
+    </div>
+    <div style="display:flex;gap:12px;margin-top:16px">
+      <button class="btn btn-primary" onclick="guardarConfigCorreo()"><i class="fas fa-save"></i> Guardar configuración</button>
+      <button class="btn btn-outline" onclick="probarConexionCorreo()"><i class="fas fa-paper-plane"></i> Probar conexión</button>
+    </div>
+    <div id="correo-status" style="margin-top:12px;font-size:13px;"></div>`,
+    '<button class="btn btn-outline" onclick="closeModal()">Cerrar</button>');
   cargarConfigCorreo();
+};
+
+window.openConfigSync = function(){
+  openModal('Sincronización de Datos', `
+    <p style="margin-bottom:12px;color:var(--text-muted)">Los datos se sincronizan online con Supabase y se mantienen en caché local para consulta. La exportación e importación JSON están disponibles como respaldo adicional.</p>
+    <div style="display:flex;gap:12px;flex-wrap:wrap">
+      <button class="btn btn-primary" onclick="exportAllData()"><i class="fas fa-download"></i> Exportar datos (JSON)</button>
+      <button class="btn btn-outline" onclick="document.getElementById('importFile').click()"><i class="fas fa-upload"></i> Importar datos</button>
+      <input type="file" id="importFile" accept=".json" style="display:none" onchange="importAllData(event)">
+      <button class="btn btn-danger" onclick="confirmDelete('Todos los datos de la aplicación', ()=>clearAllData())"><i class="fas fa-trash"></i> Borrar todos los datos</button>
+    </div>`,
+    '<button class="btn btn-outline" onclick="closeModal()">Cerrar</button>');
+};
+
+window.openConfigAndroid = function(){
+  openModal('Instalación en Android', `
+    <p style="color:var(--text-muted);font-size:14px">Abre esta app en <strong>Chrome para Android</strong> y pulsa el menú <strong>⋮ → "Instalar aplicación"</strong>. Quedará como una app nativa en tu escritorio y funcionará sin conexión.</p>`,
+    '<button class="btn btn-outline" onclick="closeModal()">Cerrar</button>');
+};
+
+window.openAndroidNavigationHelp = function(){
+  openModal('Botones de navegación Android', `
+    <p style="line-height:1.5">Para mostrar <strong>Atrás, Inicio y Recientes</strong>, cambia la navegación desde los ajustes del teléfono. La aplicación no puede modificar ese ajuste del sistema.</p>
+    <ol style="padding-left:22px;margin-top:14px;line-height:1.8">
+      <li>Abre <strong>Ajustes</strong> en el teléfono.</li>
+      <li>Busca <strong>Navegación del sistema</strong> o <strong>Barra de navegación</strong>.</li>
+      <li>Selecciona <strong>Navegación con 3 botones</strong>.</li>
+    </ol>
+    <p style="margin-top:12px;color:var(--text-muted);font-size:13px">El nombre y la ubicación de esta opción pueden variar según el fabricante.</p>`,
+    '<button class="btn btn-primary" onclick="closeModal()">Entendido</button>');
+};
+
+window.openConfigInfo = function(){
+  openModal('Información', `
+    <p><strong>Valgom</strong> v1.0</p>
+    <p style="color:var(--text-muted);margin-top:4px">PWA · IndexedDB · Funciona offline · Exporta PDF</p>`,
+    '<button class="btn btn-outline" onclick="closeModal()">Cerrar</button>');
 };
 
 // Funciones para configuración de correo
@@ -2920,11 +3123,41 @@ window.addHiperberDoor=function(storeIndex){
 };
 
 async function downloadRevisionPDFAfterSave(revisionId){
+  let pdf;
   try{
-    await window.generatePDF_revision(revisionId);
+    pdf=await window.generatePDF_revision(revisionId);
   }catch(error){
     console.error('No se pudo generar el PDF de la revisión guardada:',error);
     showToast('Revisión guardada, pero no se pudo generar el PDF','error');
+    return;
+  }
+  if(!window.authState?.user) return;
+  try{
+    const revisionKey=String(revisionId).replace(/[^a-zA-Z0-9_-]/g,'_');
+    const path=window.authState.user.id+'/'+revisionKey+'-'+Date.now()+'.pdf';
+    const {error:uploadError}=await window.supabaseDB.storage.from('revision-pdfs').upload(path,pdf.blob,{
+      contentType:'application/pdf',upsert:false
+    });
+    if(uploadError) throw uploadError;
+    const {data,error}=await window.supabaseDB.functions.invoke('share-revision',{
+      body:{path,filename:pdf.filename}
+    });
+    if(error) throw error;
+    if(data?.error) throw new Error(data.error);
+    if(data.emailSent){
+      showToast('PDF descargado y enlace enviado a administración');
+      return;
+    }
+    try{
+      await navigator.clipboard.writeText(data.url);
+      showToast(data.emailError?'No se pudo enviar el correo. Enlace copiado':'PDF guardado. Enlace copiado; falta configurar el correo automático','warning');
+    }catch{
+      window.prompt('Enlace de descarga del PDF (válido durante 7 días):',data.url);
+      showToast(data.emailError?'No se pudo enviar el correo. Copia el enlace mostrado':'PDF guardado. Configura el correo automático para enviarlo a administración','warning');
+    }
+  }catch(error){
+    console.error('No se pudo compartir el PDF de la revisión:',error);
+    showToast('Revisión guardada y PDF descargado, pero no se pudo compartir: '+error.message,'warning');
   }
 }
 

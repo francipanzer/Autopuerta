@@ -51,9 +51,13 @@
     const sub = await getSubscription().catch(() => null);
     const active = !!sub && Notification.permission === 'granted';
     button.dataset.active = active ? '1' : '0';
-    button.innerHTML = active
-      ? '<i class="fas fa-bell-slash"></i> Desactivar avisos'
-      : '<i class="fas fa-bell"></i> Activar avisos';
+    const homeAction = button.classList.contains('home-notifications-btn');
+    const label = homeAction ? 'Avisos' : (active ? 'Desactivar avisos' : 'Activar avisos');
+    button.innerHTML = (active
+      ? '<i class="fas fa-bell-slash"></i>'
+      : '<i class="fas fa-bell"></i>') + (homeAction ? '<span>Avisos</span>' : ' ' + label);
+    button.title = active ? 'Desactivar avisos' : 'Activar avisos';
+    button.setAttribute('aria-label', button.title);
   }
 
   window.initPushButton = function () {
@@ -63,8 +67,16 @@
   function initOne(button) {
     if (!(window.isAdmin?.() || window.isTechnician?.())) { button.hidden = true; return; }
     button.hidden = false;
+    const homeAction = button.classList.contains('home-notifications-btn');
+    button.innerHTML = homeAction
+      ? '<i class="fas fa-bell"></i><span>Avisos</span>'
+      : '<i class="fas fa-bell"></i> Activar avisos';
+    button.title = 'Activar avisos';
+    button.setAttribute('aria-label', button.title);
     if (!supported()) {
-      button.innerHTML = '<i class="fas fa-bell"></i> Activar avisos';
+      button.innerHTML = '<i class="fas fa-bell"></i>' + (homeAction ? '<span>Avisos</span>' : ' Activar avisos');
+      button.title = 'Avisos no disponibles';
+      button.setAttribute('aria-label', button.title);
       button.onclick = () => showToast('Este navegador no admite avisos. En iPhone: Compartir > "Añadir a pantalla de inicio" y abre la app desde ese icono. En Android usa Chrome.', 'error');
       return;
     }

@@ -172,7 +172,7 @@ function setupMobileMenu() {
 }
 
 let valgomNavStack = [{ page: 'dashboard', arg: null }];
-let lastExitPromptTime = 0;
+let exitConfirmed = false;
 
 function historyUrl() {
   return location.pathname + location.search;
@@ -185,6 +185,10 @@ function rearmTrap() {
 }
 
 function closeTransientUi() {
+  if (document.getElementById('exitPrompt')) {
+    removeExitPrompt();
+    return true;
+  }
   const pad = document.getElementById('padFirmaOverlay');
   if (pad) {
     pad.querySelector('#padCancel')?.click();
@@ -237,10 +241,14 @@ function closeTransientUi() {
 }
 
 function onValgomPopState(event) {
+  if (exitConfirmed) {
+    exitConfirmed = false;
+    return;
+  }
+
   // 1. Cerrar cualquier diálogo, formulario o menú abierto en pantalla
   if (closeTransientUi()) {
     rearmTrap();
-    lastExitPromptTime = 0;
     return;
   }
 
@@ -251,30 +259,18 @@ function onValgomPopState(event) {
     skipHistoryOnce = true;
     navigateTo(prev.page, prev.arg);
     rearmTrap();
-    lastExitPromptTime = 0;
     return;
   } else if (currentPage && currentPage !== 'dashboard') {
     valgomNavStack = [{ page: 'dashboard', arg: null }];
     skipHistoryOnce = true;
     navigateTo('dashboard');
     rearmTrap();
-    lastExitPromptTime = 0;
     return;
   }
 
-  // 3. Estando en el Panel de Control (dashboard): avisar antes de salir
-  const now = Date.now();
-  if (now - lastExitPromptTime < 2500) {
-    // Segundo toque dentro de 2.5s: confirmar salida
-    lastExitPromptTime = 0;
-    try { window.close(); } catch (_) {}
-    history.back();
-  } else {
-    // Primer toque: mostrar aviso y mantener la app abierta
-    lastExitPromptTime = now;
-    showToast('Pulsa atrás de nuevo para salir', 'info');
-    rearmTrap();
-  }
+  // 3. Estando en el Panel de Control, pedir confirmación antes de salir
+  showExitPrompt();
+  rearmTrap();
 }
 
 function setupBackNavigation() {
@@ -289,6 +285,24 @@ function setupBackNavigation() {
     history.pushState({ valgom: true, trap: true }, '', historyUrl());
   } catch (_) {}
   window.addEventListener('popstate', onValgomPopState);
+
+  // Rearmar el trap cuando la app recupera visibilidad (útil en PWA)
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) {
+      setTimeout(() => {
+        try {
+          history.pushState({ valgom: true, trap: true }, '', historyUrl());
+        } catch (_) {}
+      }, 100);
+    }
+  });
+
+  // Agregar un trap inicial fuerte para PWA
+  setTimeout(() => {
+    try {
+      history.pushState({ valgom: true, trap: true }, '', historyUrl());
+    } catch (_) {}
+  }, 500);
 }
 
 function navigateTo(page, arg) {
@@ -417,6 +431,49 @@ function showToast(msg, type = 'success') {
     t.style.transform = 'translateX(40px)';
     setTimeout(() => t.remove(), 300);
   }, 3200);
+}
+
+function showExitPrompt() {
+  removeExitPrompt();
+  const prompt = document.createElement('div');
+  prompt.id = 'exitPrompt';
+  prompt.className = 'exit-prompt';
+  prompt.innerHTML = `
+    <section class="exit-prompt-content" role="dialog" aria-modal="true" aria-labelledby="exitPromptTitle">
+      <span class="exit-prompt-icon"><i class="fas fa-arrow-right-from-bracket"></i></span>
+      <h2 id="exitPromptTitle">¿Quieres salir de la aplicación?</h2>
+      <p>Tu sesión seguirá activa cuando vuelvas.</p>
+      <div class="exit-prompt-actions">
+        <button type="button" class="btn btn-primary" data-exit-cancel>Seguir en la app</button>
+        <button type="button" class="btn btn-outline" data-exit-confirm>Salir</button>
+      </div>
+    </section>
+  `;
+  document.body.appendChild(prompt);
+  requestAnimationFrame(() => prompt.classList.add('show'));
+  const cancel = prompt.querySelector('[data-exit-cancel]');
+  cancel.addEventListener('click', () => {
+    removeExitPrompt();
+    rearmTrap();
+  });
+  prompt.querySelector('[data-exit-confirm]').addEventListener('click', () => {
+    exitConfirmed = true;
+    removeExitPrompt();
+    try { window.close(); } catch (_) {}
+    history.go(-3);
+  });
+  prompt.addEventListener('click', event => {
+    if (event.target === prompt) cancel.click();
+  });
+  prompt.addEventListener('keydown', event => {
+    if (event.key === 'Escape') cancel.click();
+  });
+  cancel.focus();
+}
+
+function removeExitPrompt() {
+  const prompt = document.getElementById('exitPrompt');
+  if (prompt) prompt.remove();
 }
 // Alias usados por las funciones nuevas de pages.js
 window.toast = showToast;

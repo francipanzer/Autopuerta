@@ -319,7 +319,11 @@
     container.querySelectorAll('[data-inc-parte]').forEach(btn => btn.onclick = async () => {
       const inc = all.find(i => String(i.id) === btn.dataset.incParte);
       await navigateTo('partesTrabajo');
-      showParteForm(null, { clienteId: inc.clienteId || '', descripcion: inc.descripcion || '' });
+      showParteForm(null, {
+        clienteId: inc.clienteId || '',
+        clienteNombre: inc.clienteNombre || '',
+        descripcion: inc.descripcion || ''
+      });
     });
     window.refreshIncidenciasBadge();
   }

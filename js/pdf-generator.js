@@ -54,7 +54,8 @@ const PDF_BRAND = {
   panelBorder: [187,247,208],
   card: [248,250,252],
   cardBorder: [226,232,240],
-  shadow: [226,232,240],
+  shadow: [203,213,225],
+  shadowStrong: [148,163,184],
   soft: [241,245,249],
   text: [15,23,42],
   muted: [100,116,139],
@@ -164,24 +165,27 @@ function addPDFFootersAllPages(doc){
 }
 
 function pdfSectionTitle(doc, texto, y){
-  doc.setFillColor(PDF_BRAND.accent[0], PDF_BRAND.accent[1], PDF_BRAND.accent[2]);
-  doc.roundedRect(14,y,2.5,6,1,1,'F');
-  doc.setFontSize(10.5);
-  doc.setTextColor(PDF_BRAND.primary[0], PDF_BRAND.primary[1], PDF_BRAND.primary[2]);
-  doc.setFont(undefined,'bold');
-  doc.text(texto.toUpperCase(),20,y+5);
-  doc.setFont(undefined,'normal');
-  return y + 11;
+  pdfBox(doc,14,y,182,10,PDF_BRAND.panel,PDF_BRAND.panelBorder);
+  pdfCardHeading(doc,texto,20,y+6.5);
+  return y+14;
 }
 
 // Tarjeta con sombra suave y borde fino
-function pdfBox(doc, x, y, w, h, fillColor = PDF_BRAND.card, borderColor = PDF_BRAND.cardBorder){
-  doc.setFillColor(PDF_BRAND.shadow[0],PDF_BRAND.shadow[1],PDF_BRAND.shadow[2]);
-  doc.roundedRect(x+0.8,y+0.9,w,h,3,3,'F');
+function pdfBox(doc, x, y, w, h, fillColor = PDF_BRAND.card, borderColor = PDF_BRAND.cardBorder, shadowColor = PDF_BRAND.shadow){
+  doc.setFillColor(shadowColor[0],shadowColor[1],shadowColor[2]);
+  doc.roundedRect(x+1.2,y+1.4,w,h,3,3,'F');
   doc.setFillColor(fillColor[0],fillColor[1],fillColor[2]);
-  doc.setLineWidth(0.3);
+  doc.setLineWidth(0.45);
   doc.setDrawColor(borderColor[0],borderColor[1],borderColor[2]);
   doc.roundedRect(x,y,w,h,3,3,'FD');
+}
+
+function pdfCardHeading(doc,text,x,y){
+  doc.setFontSize(9);
+  doc.setFont(undefined,'bold');
+  doc.setTextColor(PDF_BRAND.accentDark[0],PDF_BRAND.accentDark[1],PDF_BRAND.accentDark[2]);
+  doc.text(String(text).toUpperCase(),x,y);
+  doc.setFont(undefined,'normal');
 }
 
 // Campo etiqueta/valor (y = línea base del valor)
@@ -213,6 +217,18 @@ function pdfTextCard(doc, text, x, y, w, fill = PDF_BRAND.card, border = PDF_BRA
   doc.setFont(undefined,'normal');
   doc.setTextColor(color[0],color[1],color[2]);
   doc.text(lines,x+6,y+8);
+  return h;
+}
+
+function pdfTitledTextCard(doc,title,text,x,y,w,fill=PDF_BRAND.card,border=PDF_BRAND.cardBorder,color=PDF_BRAND.text){
+  const lines=doc.splitTextToSize(String(text||'—'),w-12);
+  const h=Math.max(25,lines.length*4.8+21);
+  pdfBox(doc,x,y,w,h,fill,border);
+  pdfCardHeading(doc,title,x+6,y+8);
+  doc.setFontSize(9.5);
+  doc.setFont(undefined,'normal');
+  doc.setTextColor(color[0],color[1],color[2]);
+  doc.text(lines,x+6,y+17);
   return h;
 }
 
@@ -424,8 +440,7 @@ window.generatePDF_clientes = async function(id){
   y += 25;
 
   if (c.nota) {
-    y = pdfSectionTitle(doc,'Notas',y);
-    pdfTextCard(doc,c.nota,X,y,W,PDF_BRAND.warn,PDF_BRAND.warnBorder,PDF_BRAND.warnText);
+    y = pdfTitledTextCard(doc,'Notas',c.nota,X,y,W,PDF_BRAND.warn,PDF_BRAND.warnBorder,PDF_BRAND.warnText)+8;
   }
 
   addPDFFootersAllPages(doc);
@@ -436,14 +451,47 @@ window.generatePDF_clientes = async function(id){
 window.generatePDF_presupuesto = async function(id, opts){
   const p = await dbGet('presupuestos',id);
   if(!p){showToast('Presupuesto no encontrado','error');return}
-  const doc = await createBrandedPDF('Presupuesto '+p.id, 'Gestión de Puertas Automáticas', getStatusLabel(p.estado));
+  const doc = await createBrandedPDF('Presupuesto '+p.id, 'Gestión de Puertas Automáticas');
+  const company=typeof window.getCompanySettings==='function'
+    ? await window.getCompanySettings()
+    : {trade_name:'Valgom'};
   const X = 14, W = 182, third = 56, gap = 7;
   let y = 42;
 
+  const hasLegal=Boolean(company.legal_name||company.tax_id);
+  const hasAddress=Boolean(company.address);
+  const hasContact=Boolean(company.phone||company.email||company.website);
+  const companyCardHeight=18+(hasLegal?10:0)+(hasAddress?10:0)+(hasContact?10:0);
+  pdfBox(doc,X,y,W,companyCardHeight,PDF_BRAND.panel,PDF_BRAND.panelBorder);
+  pdfCardHeading(doc,company.trade_name||company.legal_name||'Valgom',X+6,y+8);
+  let companyInfoY=y+21;
+  if(hasLegal){
+    pdfField(doc,'Razón social',company.legal_name||'—',X+6,companyInfoY,85);
+    pdfField(doc,'CIF / NIF',company.tax_id||'—',X+98,companyInfoY,78);
+    companyInfoY+=10;
+  }
+  if(hasAddress){
+    pdfField(doc,'Dirección',company.address,X+6,companyInfoY,W-12);
+    companyInfoY+=10;
+  }
+  if(hasContact){
+    pdfField(doc,'Teléfono',company.phone||'—',X+6,companyInfoY,48);
+    pdfField(doc,'Email',company.email||'—',X+61,companyInfoY,66);
+    pdfField(doc,'Web',company.website||'—',X+135,companyInfoY,41);
+  }
+  y+=companyCardHeight+6;
+
   y = pdfSectionTitle(doc,'Datos del presupuesto',y);
-  pdfBox(doc,X,y,W,15,PDF_BRAND.panel,PDF_BRAND.panelBorder);
-  pdfField(doc,'Cliente',p.clienteNombre||'—',X+5,y+10,W-10);
-  y += 21;
+  pdfBox(doc,X,y,W,23,PDF_BRAND.panel,PDF_BRAND.panelBorder);
+  pdfField(doc,'Cliente',p.clienteNombre||'—',X+5,y+15,W-58);
+  const statusText=String(getStatusLabel(p.estado)||p.estado||'').toUpperCase();
+  doc.setFillColor(PDF_BRAND.accent[0],PDF_BRAND.accent[1],PDF_BRAND.accent[2]);
+  doc.roundedRect(X+W-50,y+5,44,12,3,3,'F');
+  doc.setFontSize(7);
+  doc.setFont(undefined,'bold');
+  doc.setTextColor(255,255,255);
+  doc.text(statusText,X+W-28,y+12.5,{align:'center',maxWidth:40});
+  y += 29;
   pdfInfoCard(doc,'Nº Presupuesto',p.id,X,y,third);
   pdfInfoCard(doc,'Fecha',formatDate(p.fecha),X+third+gap,y,third);
   pdfInfoCard(doc,'Válido hasta',formatDate(p.validoHasta),X+(third+gap)*2,y,third);
@@ -473,9 +521,8 @@ window.generatePDF_presupuesto = async function(id, opts){
   y += 44;
 
   if(p.notas){
-    if(y > 245){ doc.addPage(); y = 20; }
-    y = pdfSectionTitle(doc,'Notas',y);
-    pdfTextCard(doc,p.notas,X,y,W,PDF_BRAND.warn,PDF_BRAND.warnBorder,PDF_BRAND.warnText);
+    if(y > 245){ doc.addPage(); y = 24; }
+    y = pdfTitledTextCard(doc,'Notas',p.notas,X,y,W,PDF_BRAND.warn,PDF_BRAND.warnBorder,PDF_BRAND.warnText)+8;
   }
   addPDFFootersAllPages(doc);
   const fileName = 'presupuesto_'+p.id+'.pdf';
@@ -499,90 +546,121 @@ window.generatePDF_partes = async function(id){
 
   const companyLogo = await getCompanyLogoDataUrl();
   const fechaTxt = (typeof formatDate === 'function') ? formatDate(p.fecha) : (p.fecha||'');
-  const col = (typeof ESTADO_COLOR !== 'undefined' && ESTADO_COLOR[p.estado]) || PDF_BRAND.muted;
-  const estadoTxt = (typeof getStatusLabel === 'function') ? getStatusLabel(p.estado) : (p.estado||'').toUpperCase();
+  let clienteDireccion = String(p.clienteDireccion || '');
+  let ubicacionNombre = String(p.ubicacionNombre || '');
+  let ubicacionDireccion = String(p.ubicacionDireccion || '');
+  if(p.clienteId && !clienteDireccion){
+    try{clienteDireccion=String((await dbGet('clientes',p.clienteId))?.direccion||'');}
+    catch(error){console.warn('No se pudo cargar la dirección del cliente para el PDF:',error);}
+  }
+  if(p.ubicacionId && (!ubicacionNombre || !ubicacionDireccion)){
+    try{
+      const ubicacion=await dbGet('ubicaciones',p.ubicacionId);
+      ubicacionNombre=ubicacionNombre||String(ubicacion?.denominacion||ubicacion?.nombre||'');
+      ubicacionDireccion=ubicacionDireccion||String(ubicacion?.direccion||'');
+    }catch(error){console.warn('No se pudo cargar la ubicación para el PDF:',error);}
+  }
 
-  // ── Cabecera común con logo y estado ──
-  const doc = createPDF('Parte de trabajo', 'Parte de trabajo / servicio', estadoTxt, col, companyLogo);
+  // ── Cabecera ──
+  const doc = createPDF('Parte de trabajo', 'Parte de trabajo', null, null, companyLogo);
   let y = 40;
 
-  // ── Card cliente + servicio ──
-  pdfBox(doc, 14, y, 182, 26, PDF_BRAND.panel, PDF_BRAND.panelBorder);
-  doc.setTextColor(PDF_BRAND.accentDark[0],PDF_BRAND.accentDark[1],PDF_BRAND.accentDark[2]);
-  doc.setFontSize(10);
-  doc.setFont(undefined,'bold');
-  doc.text('CLIENTE / SERVICIO', 20, y + 8);
-  doc.setFontSize(9.5);
+  // ── Resumen del parte ──
+  const addressLines=clienteDireccion?doc.splitTextToSize(clienteDireccion,88):[];
+  const locationLines=ubicacionNombre?doc.splitTextToSize(ubicacionNombre,88):[];
+  let clientDetailsY=y+22;
+  if(addressLines.length) clientDetailsY+=4+addressLines.length*4+2;
+  if(locationLines.length) clientDetailsY+=4+locationLines.length*4+2;
+  const summaryHeight=Math.max(42,clientDetailsY-y+2);
+  pdfBox(doc, 14, y, 182, summaryHeight, PDF_BRAND.panel, PDF_BRAND.panelBorder);
+  pdfCardHeading(doc,'Cliente / servicio',20,y+8);
+  doc.setFontSize(10.5);
   doc.setTextColor(15,23,42);
   doc.setFont(undefined,'normal');
-  doc.text(String(p.clienteNombre || '—'), 20, y + 16, { maxWidth: 88 });
-  doc.text('Nº Parte: ' + String(p.id || '—'), 115, y + 16);
-  doc.text('Fecha: ' + fechaTxt, 115, y + 22);
-  y += 36;
-
-  // ── Datos del técnico (con DNI) ──
-  y = pdfSectionTitle(doc,'Datos del técnico',y);
-  pdfBox(doc,14,y,182,14,[241,245,249]);
-  pdfField(doc,'Nombre',p.empleadoNombre||'—',20,y+9);
-  pdfField(doc,'DNI/NIF',p.empleadoDni||'—',110,y+9);
-  y+=20;
-
-  // ── Datos del cliente (con DNI) ──
-  y = pdfSectionTitle(doc,'Datos del cliente',y);
-  pdfBox(doc,14,y,182,14,[241,245,249]);
-  pdfField(doc,'Cliente',p.clienteNombre||'—',20,y+9);
-  pdfField(doc,'DNI/NIF',p.clienteDni||'—',110,y+9);
-  y+=20;
-
-  // ── UBICACIÓN ──
-  if(p.ubicacionNombre || p.ubicacionDireccion){
-    y = pdfSectionTitle(doc,'Ubicación',y);
-    doc.setFillColor(243,244,246);
-    doc.roundedRect(14,y,182,18,3,3,'F');
-    doc.setDrawColor(148,163,184);
-    doc.roundedRect(14,y,182,18,3,3,'S');
-    doc.setFontSize(9); doc.setTextColor(15,23,42); doc.setFont(undefined,'bold');
-    doc.text(String(p.ubicacionNombre || '—'), 20, y + 7);
-    doc.setFontSize(7.5); doc.setTextColor(100,116,139); doc.setFont(undefined,'normal');
-    doc.text(String(p.ubicacionDireccion || '—'), 20, y + 13);
-    y += 25;
+  doc.text(String(p.clienteNombre || '—'), 20, y + 15, { maxWidth: 86 });
+  let detailY=y+22;
+  if(addressLines.length){
+    doc.setFontSize(6.8);
+    doc.setFont(undefined,'bold');
+    doc.setTextColor(PDF_BRAND.muted[0],PDF_BRAND.muted[1],PDF_BRAND.muted[2]);
+    doc.text('DIRECCIÓN',20,detailY);
+    detailY+=4;
+    doc.setFontSize(8.2);
+    doc.setFont(undefined,'normal');
+    doc.setTextColor(PDF_BRAND.text[0],PDF_BRAND.text[1],PDF_BRAND.text[2]);
+    doc.text(addressLines,20,detailY);
+    detailY+=addressLines.length*4+2;
   }
-
-  // ── Información del servicio (con Horas + Puertas) ──
-  y = pdfSectionTitle(doc,'Información del servicio',y);
-  pdfBox(doc,14,y,182,36,[241,245,249]);
-  pdfField(doc,'Nº Parte',p.id,20,y+9);
-  pdfField(doc,'Tipo de puerta',p.tipoPuerta,62,y+9);
-  pdfField(doc,'Puertas',puertasTexto,110,y+9);
-  pdfField(doc,'Kilómetros',(p.kms||0)+' km',20,y+21);
-  pdfField(doc,'Horas',(p.horas||0)+' h',100,y+21);
-  pdfField(doc,'Fotos',(p.fotos?.length||0)+' adjunta(s)',150,y+21);
-  y+=44;
-
-  // ── Descripción ──
-  y = pdfSectionTitle(doc,'Descripción del trabajo',y);
-  const descLines = doc.splitTextToSize(p.descripcion||'—',174);
-  const descH = Math.max(16, descLines.length*5+10);
-  pdfBox(doc,14,y,182,descH,[255,255,255]);
-  doc.setFontSize(9.5); doc.setTextColor(30,41,59);
-  doc.text(descLines,20,y+8); y+=descH+8;
-
-  // ── Notas ──
-  if(p.notas){
-    y = pdfSectionTitle(doc,'Notas',y);
-    const notasLines = doc.splitTextToSize(p.notas,174);
-    const notasH = Math.max(16, notasLines.length*5+10);
-    pdfBox(doc,14,y,182,notasH,[254,243,208]);
-    doc.setFontSize(9.5); doc.setTextColor(30,41,59);
-    doc.text(notasLines,20,y+8); y+=notasH+8;
+  if(locationLines.length){
+    doc.setFontSize(6.8);
+    doc.setFont(undefined,'bold');
+    doc.setTextColor(PDF_BRAND.muted[0],PDF_BRAND.muted[1],PDF_BRAND.muted[2]);
+    doc.text('UBICACIÓN',20,detailY);
+    detailY+=4;
+    doc.setFontSize(8.2);
+    doc.setFont(undefined,'normal');
+    doc.setTextColor(PDF_BRAND.text[0],PDF_BRAND.text[1],PDF_BRAND.text[2]);
+    doc.text(locationLines,20,detailY);
   }
+  pdfField(doc,'Fecha',fechaTxt,124,y+13,64);
+  pdfBox(doc,122,y+21,70,18,PDF_BRAND.success,PDF_BRAND.panelBorder);
+  doc.setFontSize(6.5);
+  doc.setFont(undefined,'bold');
+  doc.setTextColor(PDF_BRAND.muted[0],PDF_BRAND.muted[1],PDF_BRAND.muted[2]);
+  doc.text('Nº DE PARTE',127,y+27);
+  doc.setFontSize(10.5);
+  doc.setTextColor(PDF_BRAND.accentDark[0],PDF_BRAND.accentDark[1],PDF_BRAND.accentDark[2]);
+  doc.text(String(p.id||'—'),127,y+35,{maxWidth:60});
+  y += summaryHeight + 6;
+
+  // ── Servicio y técnico ──
+  pdfBox(doc,14,y,182,42,PDF_BRAND.soft,PDF_BRAND.cardBorder);
+  pdfCardHeading(doc,'Servicio y técnico',20,y+8);
+  pdfField(doc,'Técnico',p.empleadoNombre||'—',20,y+20,78);
+  pdfField(doc,'Tipo de puerta',p.tipoPuerta||'—',108,y+20,80);
+  pdfField(doc,'Puertas',puertasTexto,20,y+33,78);
+  pdfField(doc,'Km · horas · fotos',(p.kms||0)+' km · '+(p.horas||0)+' h · '+(p.fotos?.length||0),108,y+33,80);
+  y += 50;
+
+  // ── Trabajo realizado ──
+  const descriptionLines=doc.splitTextToSize(p.descripcion||'—',170);
+  const notesLines=p.notas?doc.splitTextToSize(p.notas,170):[];
+  const descriptionHeight=descriptionLines.length*4.5;
+  const notesHeight=notesLines.length?8+notesLines.length*4.5:0;
+  const workHeight=27+descriptionHeight+notesHeight;
+  pdfBox(doc,14,y,182,workHeight,PDF_BRAND.soft,PDF_BRAND.cardBorder);
+  pdfCardHeading(doc,'Trabajo realizado',20,y+8);
+  let textY=y+19;
+  doc.setFontSize(7);
+  doc.setFont(undefined,'bold');
+  doc.setTextColor(PDF_BRAND.muted[0],PDF_BRAND.muted[1],PDF_BRAND.muted[2]);
+  doc.text('DESCRIPCIÓN',20,textY);
+  textY+=5;
+  doc.setFontSize(9);
+  doc.setFont(undefined,'normal');
+  doc.setTextColor(PDF_BRAND.text[0],PDF_BRAND.text[1],PDF_BRAND.text[2]);
+  doc.text(descriptionLines,20,textY);
+  textY+=descriptionHeight+3;
+  if(notesLines.length){
+    doc.setDrawColor(PDF_BRAND.cardBorder[0],PDF_BRAND.cardBorder[1],PDF_BRAND.cardBorder[2]);
+    doc.line(20,textY,190,textY);
+    textY+=5;
+    doc.setFontSize(7);
+    doc.setFont(undefined,'bold');
+    doc.setTextColor(PDF_BRAND.muted[0],PDF_BRAND.muted[1],PDF_BRAND.muted[2]);
+    doc.text('NOTAS',20,textY);
+    textY+=5;
+    doc.setFontSize(9);
+    doc.setFont(undefined,'normal');
+    doc.setTextColor(PDF_BRAND.text[0],PDF_BRAND.text[1],PDF_BRAND.text[2]);
+    doc.text(notesLines,20,textY);
+  }
+  y+=workHeight+8;
 
   // ═══════════ BLOQUE DE FIRMAS (ROBUSTO - SIN SOLAPAMIENTOS) ═══════════
-  
-  // 1. FORZAR NUEVA PÁGINA: Esto garantiza que las firmas empiecen limpias, 
-  // sin importar cuántas páginas ocupen las fotos.
-  if(y > 200){ doc.addPage(); y = 25; }
-  else { y += 8; }
+  const signatureSpace=48;
+  if(y+signatureSpace>270){doc.addPage();y=24;}
+  else{y+=6;}
 
   // ── 1. DATOS DEL TÉCNICO (Desde BD de empleados) ──
   let emp = null;
@@ -621,7 +699,7 @@ window.generatePDF_partes = async function(id){
   const yDNI = yFirma + boxH + 4;
 
   // ═══ IZQUIERDA: FIRMA CLIENTE + DNI CLIENTE ═══
-  pdfBox(doc, xIzq, yFirma, boxW, boxH, PDF_BRAND.card, PDF_BRAND.cardBorder);
+  pdfBox(doc, xIzq, yFirma, boxW, boxH, PDF_BRAND.card, PDF_BRAND.cardBorder, PDF_BRAND.shadowStrong);
   doc.setFontSize(8); doc.setTextColor(100,116,139);
   doc.text('FIRMA DEL CLIENTE', xIzq + boxW/2, yFirma + 5, {align:'center'});
 
@@ -637,7 +715,7 @@ window.generatePDF_partes = async function(id){
   doc.text(dniCliente, xIzq + boxW/2, yDNI + 7.5, {align:'center'});
 
   // ═══ DERECHA: FIRMA TÉCNICO + DNI TÉCNICO ═══
-  pdfBox(doc, xDer, yFirma, boxW, boxH, PDF_BRAND.card, PDF_BRAND.cardBorder);
+  pdfBox(doc, xDer, yFirma, boxW, boxH, PDF_BRAND.card, PDF_BRAND.cardBorder, PDF_BRAND.shadowStrong);
   doc.setFontSize(8); doc.setTextColor(100,116,139);
   doc.text('FIRMA DEL TÉCNICO', xDer + boxW/2, yFirma + 5, {align:'center'});
 
@@ -658,10 +736,12 @@ window.generatePDF_partes = async function(id){
   y = yDNI + 8 + 8;
 
   addPDFFootersAllPages(doc);
-  doc.save('Parte_'+p.id+'_'+fechaTxt+'.pdf');
+  const partIdForFile=String(p.id||'sin-id').replace(/[^a-zA-Z0-9_-]/g,'_');
+  const dateForFile=String(p.fecha||'').replace(/\D/g,'')||'sin-fecha';
+  doc.save('Parte_'+partIdForFile+'_'+dateForFile+'.pdf');
 };
 
-window.generatePDF_revision=async function(revisionId){
+window.generatePDF_revision=async function(revisionId,{download=true}={}){
   const revision=await dbGet('revisiones',revisionId);
   if(!revision){showToast('No se encontró la revisión','error');return;}
   let metadata={};
@@ -670,11 +750,13 @@ window.generatePDF_revision=async function(revisionId){
   const doc=await createBrandedPDF('Informe de Revisión','Revisión de equipos');
   const chain=metadata.cadena||metadata.cliente||'—';
   const stores=(metadata.supermercados||[]).map(store=>store.nombre).filter(Boolean).join(', ');
-  pdfBox(doc,14,38,182,32,PDF_BRAND.panel,PDF_BRAND.panelBorder);
-  pdfField(doc,'Fecha',formatDate(revision.fecha),20,50,70);
-  pdfField(doc,'Cadena',chain,110,50,80);
-  pdfField(doc,'Cliente / supermercado',stores||metadata.cliente||'—',20,63,85);
-  pdfField(doc,'Técnico',metadata.tecnicos||revision.tecnicoNombre||revision.tecnicoId||'—',110,63,80);
+  let y=pdfSectionTitle(doc,'Resumen de revisión',38);
+  pdfBox(doc,14,y,182,30,PDF_BRAND.panel,PDF_BRAND.panelBorder);
+  pdfField(doc,'Fecha',formatDate(revision.fecha),20,y+10,78);
+  pdfField(doc,'Cadena',chain,110,y+10,78);
+  pdfField(doc,'Cliente / supermercado',stores||metadata.cliente||'—',20,y+23,82);
+  pdfField(doc,'Técnico',metadata.tecnicos||revision.tecnicoNombre||revision.tecnicoId||'—',110,y+23,78);
+  y+=38;
   let tableRows=items.map(item=>[
     item.concepto||item.denominacionCliente||'Equipo',
     item.tipoPuerta||item.tipoProducto||item.tipo||'—',
@@ -683,50 +765,57 @@ window.generatePDF_revision=async function(revisionId){
     item.resultado||item.estadoEquipo||'—'
   ]);
   if(!tableRows.length)tableRows=[['Sin equipos registrados','—','—','—','—']];
-  doc.autoTable(pdfTableStyle({startY:78,head:[['Equipo / ubicación','Tipo','Hallazgo / estado','Correctivo / observaciones','Resultado']],body:tableRows,headStyles:{fillColor:PDF_BRAND.primary,textColor:255,fontSize:7.5,fontStyle:'bold',cellPadding:3},bodyStyles:{fontSize:7.5,cellPadding:2.5,textColor:PDF_BRAND.text,overflow:'linebreak'}}));
-  let y=(doc.lastAutoTable?.finalY||90)+8;
+  y=pdfSectionTitle(doc,'Equipos revisados',y);
+  doc.autoTable(pdfTableStyle({startY:y,head:[['Equipo / ubicación','Tipo','Hallazgo / estado','Correctivo / observaciones','Resultado']],body:tableRows,headStyles:{fillColor:PDF_BRAND.primary,textColor:255,fontSize:7.5,fontStyle:'bold',cellPadding:3},bodyStyles:{fontSize:7.5,cellPadding:2.5,textColor:PDF_BRAND.text,overflow:'linebreak'}}));
+  y=(doc.lastAutoTable?.finalY||90)+8;
   const notes=[metadata.intervencion?'Intervención: '+metadata.intervencion:'',metadata.contrato?'Contrato: '+metadata.contrato:'',metadata.observaciones||''].filter(Boolean).join('\n');
   if(notes){
     const lines=doc.splitTextToSize(notes,170);
-    if(y+lines.length*4.8+28>276){doc.addPage();y=20;}
-    y=pdfSectionTitle(doc,'Observaciones',y);
-    y+=pdfTextCard(doc,notes,14,y,182,PDF_BRAND.warn,PDF_BRAND.warnBorder,PDF_BRAND.warnText)+8;
+    if(y+lines.length*4.8+34>276){doc.addPage();y=24;}
+    y=pdfTitledTextCard(doc,'Observaciones',notes,14,y,182,PDF_BRAND.warn,PDF_BRAND.warnBorder,PDF_BRAND.warnText)+8;
   }
   const photos=[];
   items.forEach(item=>{
     [...(item.hallazgoFotos||[]),...(item.fotos||[])].forEach((photo,index)=>photos.push({label:(item.concepto||'Equipo')+' · Foto '+(index+1),url:photo}));
   });
   if(photos.length){
-    if(y+20>276){doc.addPage();y=20;}
+    if(y+20>276){doc.addPage();y=24;}
     y=pdfSectionTitle(doc,'Fotografías',y);
     for(const photo of photos){
       let imageData=photo.url;
       if(typeof imageData!=='string')continue;
       if(!imageData.startsWith('data:image/'))imageData=await urlToCompressedJPEG(imageData);
       if(!imageData)continue;
-      if(y+72>276){doc.addPage();y=20;}
+      if(y+74>276){doc.addPage();y=24;}
+      pdfBox(doc,14,y,182,68,PDF_BRAND.white,PDF_BRAND.cardBorder,PDF_BRAND.shadowStrong);
       try{
         const dimensions=doc.getImageProperties(imageData);
-        const scale=Math.min(86/dimensions.width,58/dimensions.height);
+        const scale=Math.min(86/dimensions.width,52/dimensions.height);
         const width=dimensions.width*scale;
         const height=dimensions.height*scale;
-        doc.setFontSize(7);doc.setTextColor(70,70,70);
-        doc.text(doc.splitTextToSize(photo.label,86),14,y+4);
-        doc.addImage(imageData,'JPEG',14,y+7,width,height,undefined,'FAST');
+        doc.setFontSize(7.5);doc.setFont(undefined,'bold');doc.setTextColor(PDF_BRAND.accentDark[0],PDF_BRAND.accentDark[1],PDF_BRAND.accentDark[2]);
+        doc.text(doc.splitTextToSize(photo.label,86),20,y+7);
+        doc.addImage(imageData,'JPEG',20,y+11,width,height,undefined,'FAST');
       }catch(error){console.warn('No se pudo incluir una foto en el PDF:',error);}
-      y+=72;
+      y+=74;
     }
   }
   addPDFFootersAllPages(doc);
-  doc.save('revision_'+String(revision.id).replace(/[^a-zA-Z0-9_-]/g,'_')+'.pdf');
-  showToast('PDF de revisión descargado');
+  const filename='revision_'+String(revision.id).replace(/[^a-zA-Z0-9_-]/g,'_')+'.pdf';
+  const blob=doc.output('blob');
+  if(download){
+    doc.save(filename);
+    showToast('PDF de revisión descargado');
+  }
+  return {blob,filename};
 };
 
 window.generatePDF_almacen = async function(){
   const items = await dbGetAll('almacen');
   if(!items.length){showToast('No hay artículos en el almacén','error');return}
   const doc = await createBrandedPDF('Inventario de Almacén','Control de stock');
-  doc.autoTable(pdfTableStyle({startY:40,head:[['Ref.','Nombre','Categoría','Unidad','Stock','Mín.','P. Compra','P. Venta','Proveedor']],
+  const tableStart=pdfSectionTitle(doc,'Existencias',38);
+  doc.autoTable(pdfTableStyle({startY:tableStart,head:[['Ref.','Nombre','Categoría','Unidad','Stock','Mín.','P. Compra','P. Venta','Proveedor']],
   body:items.map(a=>[a.referencia,a.nombre,a.categoria||'—',a.unidad||'unidad',a.stock,a.stockMinimo,formatCurrency(a.precioCompra),formatCurrency(a.precioVenta),a.proveedor||'—']),
   headStyles:{fillColor:PDF_BRAND.primary,textColor:255,fontSize:7.5,fontStyle:'bold',cellPadding:3},bodyStyles:{fontSize:7.5,cellPadding:2.5,textColor:PDF_BRAND.text},columnStyles:{0:{cellWidth:22},1:{cellWidth:45},4:{halign:'center'},5:{halign:'center'},6:{halign:'right'},7:{halign:'right'}}}));
   addPDFFootersAllPages(doc); doc.save('almacen_'+getToday()+'.pdf'); showToast('PDF de almacén generado');
@@ -736,7 +825,8 @@ window.generatePDF_presupuestos = async function(){
   const presupuestos = await dbGetAll('presupuestos');
   if(!presupuestos.length){showToast('No hay presupuestos','error');return}
   const doc = await createBrandedPDF('Listado de Presupuestos','Resumen comercial');
-  doc.autoTable(pdfTableStyle({startY:40,head:[['ID','Cliente','Fecha','Válido hasta','Total','Estado']],
+  const tableStart=pdfSectionTitle(doc,'Relación de presupuestos',38);
+  doc.autoTable(pdfTableStyle({startY:tableStart,head:[['ID','Cliente','Fecha','Válido hasta','Total','Estado']],
   body:presupuestos.map(p=>[p.id,p.clienteNombre,formatDate(p.fecha),formatDate(p.validoHasta),formatCurrency(p.total),getStatusLabel(p.estado)]),
   columnStyles:{4:{halign:'right'}}}));
   addPDFFootersAllPages(doc); doc.save('presupuestos_'+getToday()+'.pdf'); showToast('PDF de presupuestos generado');
