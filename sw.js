@@ -1,4 +1,4 @@
-const CACHE_NAME = 'autopuerta-v65';  // fix: campo fantasma tecnicoUltimo en puertas
+const CACHE_NAME = 'autopuerta-v75';  // refresh shell after back-navigation fix
 
 // ═══════════════════════════════════════════════════════════
 //  INSTALL

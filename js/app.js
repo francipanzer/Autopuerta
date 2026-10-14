@@ -178,9 +178,10 @@ function historyUrl() {
   return location.pathname + location.search;
 }
 
+// Chrome omite al volver las entradas creadas sin gesto del usuario, por eso se añade tras el primer toque
 function rearmTrap() {
   try {
-    history.pushState({ valgom: true, trap: true }, '', historyUrl());
+    if (!history.state?.trap) history.pushState({ valgom: true, trap: true }, '', historyUrl());
   } catch (_) { /* ignore quota / security errors */ }
 }
 
@@ -243,6 +244,7 @@ function closeTransientUi() {
 function onValgomPopState(event) {
   if (exitConfirmed) {
     exitConfirmed = false;
+    history.back();
     return;
   }
 
@@ -282,27 +284,18 @@ function setupBackNavigation() {
   valgomNavStack = [{ page: currentPage, arg: null }];
   try {
     history.replaceState({ valgom: true, root: true }, '', historyUrl());
-    history.pushState({ valgom: true, trap: true }, '', historyUrl());
   } catch (_) {}
   window.addEventListener('popstate', onValgomPopState);
 
-  // Rearmar el trap cuando la app recupera visibilidad (útil en PWA)
-  document.addEventListener('visibilitychange', () => {
-    if (!document.hidden) {
-      setTimeout(() => {
-        try {
-          history.pushState({ valgom: true, trap: true }, '', historyUrl());
-        } catch (_) {}
-      }, 100);
-    }
-  });
+  const armOnGesture = () => {
+    rearmTrap();
+    ['pointerdown', 'keydown'].forEach(type => document.removeEventListener(type, armOnGesture, true));
+  };
+  ['pointerdown', 'keydown'].forEach(type => document.addEventListener(type, armOnGesture, true));
 
-  // Agregar un trap inicial fuerte para PWA
-  setTimeout(() => {
-    try {
-      history.pushState({ valgom: true, trap: true }, '', historyUrl());
-    } catch (_) {}
-  }, 500);
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) rearmTrap();
+  });
 }
 
 function navigateTo(page, arg) {
@@ -454,13 +447,12 @@ function showExitPrompt() {
   const cancel = prompt.querySelector('[data-exit-cancel]');
   cancel.addEventListener('click', () => {
     removeExitPrompt();
-    rearmTrap();
   });
   prompt.querySelector('[data-exit-confirm]').addEventListener('click', () => {
     exitConfirmed = true;
     removeExitPrompt();
     try { window.close(); } catch (_) {}
-    history.go(-3);
+    history.back();
   });
   prompt.addEventListener('click', event => {
     if (event.target === prompt) cancel.click();
