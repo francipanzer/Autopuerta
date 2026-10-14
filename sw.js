@@ -1,4 +1,4 @@
-const CACHE_NAME = 'autopuerta-v75';  // refresh shell after back-navigation fix
+const CACHE_NAME = 'autopuerta-v76';  // refresh shell after back-navigation fix
 
 // ═══════════════════════════════════════════════════════════
 //  INSTALL

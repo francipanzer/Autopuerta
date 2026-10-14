@@ -178,10 +178,14 @@ function historyUrl() {
   return location.pathname + location.search;
 }
 
-// Chrome omite al volver las entradas creadas sin gesto del usuario, por eso se añade tras el primer toque
+let trapAhead = false;
+
+// Chrome salta las entradas creadas sin gesto del usuario: tras volver se reutiliza la existente con forward
 function rearmTrap() {
   try {
-    if (!history.state?.trap) history.pushState({ valgom: true, trap: true }, '', historyUrl());
+    if (history.state?.trap) return;
+    if (trapAhead) history.forward();
+    else history.pushState({ valgom: true, trap: true }, '', historyUrl());
   } catch (_) { /* ignore quota / security errors */ }
 }
 
@@ -247,6 +251,11 @@ function onValgomPopState(event) {
     history.back();
     return;
   }
+  if (event.state?.trap) {
+    trapAhead = false;
+    return;
+  }
+  trapAhead = true;
 
   // 1. Cerrar cualquier diálogo, formulario o menú abierto en pantalla
   if (closeTransientUi()) {
