@@ -167,7 +167,8 @@ async function cargarTablaKms() {
   const busqueda = document.getElementById('searchVehiculo')?.value?.toLowerCase().trim() || '';
 
   // Obtener partes filtrados
-  let partes = await window.cargarPartesConMatricula();
+  const todas = await window.dbGetAll('partesTrabajo');
+let partes = todas.filter(p => p.kms && Number(p.kms) > 0);
   partes = partes.filter(p => {
     return p.fecha >= desde && p.fecha <= hasta &&
            (estado === 'todos' || p.estado === estado);

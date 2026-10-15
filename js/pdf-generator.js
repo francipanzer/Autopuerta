@@ -831,3 +831,60 @@ window.generatePDF_presupuestos = async function(){
   columnStyles:{4:{halign:'right'}}}));
   addPDFFootersAllPages(doc); doc.save('presupuestos_'+getToday()+'.pdf'); showToast('PDF de presupuestos generado');
 };
+
+window.generatePDF_ruta=async function(revisions,{rutaNombre='',cadenaNombre=''}={}){
+  const parseNotes=revision=>{try{return JSON.parse(revision.notas||'{}');}catch(error){return {observaciones:revision.notas||''};}};
+  const stores=new Map();
+  let totalEquipos=0,totalFallos=0;
+  const dates=[];
+  for(const revision of revisions){
+    const notes=parseNotes(revision);
+    if(revision.fecha) dates.push(String(revision.fecha).slice(0,10));
+    const touched=new Set();
+    for(const item of revision.items||[]){
+      const storeName=item.clienteNombre||(String(item.concepto||'').split(' · ')[0])||'Tienda';
+      touched.add(storeName);
+      if(!stores.has(storeName)) stores.set(storeName,{rows:[],notes:[]});
+      const store=stores.get(storeName);
+      const failed=String(item.resultado||'').toUpperCase()==='X';
+      totalEquipos++;
+      if(failed) totalFallos++;
+      store.rows.push([
+        String(item.concepto||'Equipo').split(' · ').slice(1).join(' · ')||item.concepto||'Equipo',
+        item.tipoPuerta||item.tipo||'—',
+        item.hallazgoTexto||item.hallazgo||'—',
+        item.correctivoTexto||item.correctivo||'—',
+        item.resultado||'—',
+        formatDate(revision.fecha)
+      ]);
+    }
+    if(notes.observaciones) for(const name of touched){
+      const store=stores.get(name);
+      if(!store.notes.includes(notes.observaciones)) store.notes.push(notes.observaciones);
+    }
+  }
+  const doc=await createBrandedPDF('Informe de Ruta','Revisión de ruta');
+  dates.sort();
+  const period=dates.length?(dates[0]===dates[dates.length-1]?formatDate(dates[0]):formatDate(dates[0])+' – '+formatDate(dates[dates.length-1])):'—';
+  let y=pdfSectionTitle(doc,'Resumen de ruta',38);
+  pdfBox(doc,14,y,182,30,PDF_BRAND.panel,PDF_BRAND.panelBorder);
+  pdfField(doc,'Ruta',rutaNombre||'—',20,y+10,78);
+  pdfField(doc,'Cadena',cadenaNombre||'—',110,y+10,78);
+  pdfField(doc,'Tiendas revisadas',String(stores.size),20,y+23,40);
+  pdfField(doc,'Equipos · incidencias',totalEquipos+' · '+totalFallos,70,y+23,38);
+  pdfField(doc,'Periodo',period,110,y+23,78);
+  y+=38;
+  for(const [storeName,store] of stores){
+    if(y>235){doc.addPage();y=24;}
+    y=pdfSectionTitle(doc,storeName,y);
+    doc.autoTable(pdfTableStyle({startY:y,margin:{left:14,right:14,top:24,bottom:18},head:[['Equipo','Tipo','Hallazgo','Correctivo','Resultado','Fecha']],body:store.rows,headStyles:{fillColor:PDF_BRAND.primary,textColor:255,fontSize:7.5,fontStyle:'bold',cellPadding:3},bodyStyles:{fontSize:7.5,cellPadding:2.5,textColor:PDF_BRAND.text,overflow:'linebreak'},columnStyles:{4:{halign:'center',cellWidth:20},5:{cellWidth:22}}}));
+    y=(doc.lastAutoTable?.finalY||y)+8;
+    if(store.notes.length){
+      if(y>230){doc.addPage();y=24;}
+      y=pdfTitledTextCard(doc,'Observaciones',store.notes.join('\n'),14,y,182,PDF_BRAND.warn,PDF_BRAND.warnBorder,PDF_BRAND.warnText)+8;
+    }
+  }
+  addPDFFootersAllPages(doc);
+  doc.save('ruta_'+String(rutaNombre||'sin-nombre').replace(/[^a-zA-Z0-9_-]/g,'_')+'_'+getToday()+'.pdf');
+  showToast('PDF de la ruta generado');
+};

@@ -25,9 +25,9 @@ function actualizarCuentaAtrasITV(){
   if(dashboardItvCountdownTimer) clearTimeout(dashboardItvCountdownTimer);
   const countdowns=document.querySelectorAll('.itv-countdown[data-date]');
   countdowns.forEach(element=>{
-    const days=diasHastaFechaITV(element.dataset.date);
+    const days=window.diasHastaFechaITV(element.dataset.date);
     if(days===null) return;
-    element.innerHTML=textoCuentaAtrasITV(days);
+    element.innerHTML=window.textoCuentaAtrasITV(days);
     const row=element.closest('.itv-alert-item');
     if(row){
       row.style.borderLeftColor=days<0?'#ef4444':'#f59e0b';
@@ -86,7 +86,7 @@ window.render_dashboard = async function(el){
   vehiculos.forEach(v => {
     const fechaStr = v.fechaITV || v.itv || v.fecha_itv;
     if(fechaStr){
-      const dias=diasHastaFechaITV(fechaStr);
+      const dias=window.diasHastaFechaITV(fechaStr);
       if(dias!==null){
         let estado = 'ok';
         if(dias < 0) estado = 'caducada';
@@ -274,6 +274,34 @@ window.render_dashboard = async function(el){
 // ═══════════════════════════════════════════════════════════
 //  CLIENTES
 // ═══════════════════════════════════════════════════════════
+// Pinta filas por tandas y carga la siguiente al llegar al final (o con el botón)
+window.renderPaginatedRows = function(tbody, items, renderRow, { colspan = 1, empty = '', pageSize = 50 } = {}) {
+  if (!tbody) return;
+  tbody.__moreObserver?.disconnect();
+  if (!items.length) { tbody.innerHTML = empty; return; }
+  let shown = Math.min(pageSize, items.length);
+  const paint = () => {
+    tbody.__moreObserver?.disconnect();
+    let html = items.slice(0, shown).map(renderRow).join('');
+    if (shown < items.length) {
+      html += '<tr class="load-more-row"><td colspan="' + colspan + '" style="text-align:center;padding:14px"><button type="button" class="btn btn-outline btn-sm" data-load-more>Mostrar más (' + shown + ' de ' + items.length + ')</button></td></tr>';
+    }
+    tbody.innerHTML = html;
+    const button = tbody.querySelector('[data-load-more]');
+    if (!button) return;
+    const loadMore = () => { shown = Math.min(shown + pageSize, items.length); paint(); };
+    button.addEventListener('click', loadMore);
+    if ('IntersectionObserver' in window) {
+      const observer = new IntersectionObserver(entries => {
+        if (entries.some(entry => entry.isIntersecting)) { observer.disconnect(); loadMore(); }
+      }, { rootMargin: '200px' });
+      observer.observe(button);
+      tbody.__moreObserver = observer;
+    }
+  };
+  paint();
+};
+
 window.render_clientes = async function(el){
   el.innerHTML =
     '<div class="page-header"><div><h2>Clientes</h2><p>Gestión de clientes</p></div>'+
@@ -282,13 +310,22 @@ window.render_clientes = async function(el){
       '<input type="text" placeholder="Buscar cliente..." id="searchCliente" oninput="renderClientes()">'+
       '<select id="filterTipo" onchange="renderClientes()"><option value="">Todos</option><option value="empresa">Empresa</option><option value="particular">Particular</option></select></div>'+
     '<div class="card"><div  class="table-wrapper"><table><thead>'+
-      '<tr><th>ID</th><th>Nombre</th><th>Contacto</th><th>Teléfono</th><th>Email</th><th>Tipo</th><th>Acciones</th></tr>'+
+      '<tr><th>ID</th><th>Nombre</th><th>Padre</th><th>Ruta</th><th>Contacto</th><th>Teléfono</th><th>Email</th><th>Tipo</th><th>Acciones</th></tr>'+
     '</thead><tbody id="clientesBody"></tbody></table></div></div>';
   renderClientes();
 };
 
 window.renderClientes = async function(){
   const clientes = await dbGetAll('clientes');
+  const cadenas = await dbGetAll('cadenas');
+  const rutas = await dbGetAll('rutas');
+  const allClientes = await dbGetAll('clientes');
+  
+  // Mapas para lookup rápido
+  const cadenaMap = new Map(cadenas.map(c => [String(c.id), c.nombre]));
+  const rutaMap = new Map(rutas.map(r => [String(r.id), r.nombre]));
+  const clienteMap = new Map(allClientes.map(c => [String(c.id), c.nombre]));
+  
   const q = (document.getElementById('searchCliente')?.value||'').toLowerCase();
   const tipo = document.getElementById('filterTipo')?.value||'';
   const filtered = clientes.filter(c=>{
@@ -296,19 +333,26 @@ window.renderClientes = async function(){
     if(tipo && c.tipo!==tipo) return false;
     return true;
   });
-  document.getElementById('clientesBody').innerHTML = filtered.map(c=>
-    '<tr><td>'+escapeHtml(c.id)+'</td><td><strong>'+escapeHtml(c.nombre)+'</strong></td><td>'+escapeHtml(c.contacto)+'</td>'+
-    '<td>'+escapeHtml(c.telefono)+'</td><td>'+escapeHtml(c.email)+'</td>'+
-    '<td><span class="badge '+(c.tipo==='empresa'?'badge-blue':'badge-gray')+'">'+(c.tipo==='empresa'?'Empresa':'Particular')+'</span></td>'+
-    '<td class="actions-cell">'+
-      '<button class="btn btn-outline btn-sm btn-icon" title="Ubicaciones" onclick="gestionarUbicaciones(\''+c.id+'\')"><i class="fas fa-map-marker-alt"></i></button>'+
-      '<button class="btn btn-outline btn-sm btn-icon" title="Puertas" onclick="gestionarPuertas(\''+c.id+'\')"><i class="fas fa-door-open"></i></button>'+
-      '<button class="btn btn-outline btn-sm btn-icon" title="Histórico revisiones" onclick="verHistoricoPuertas(\''+c.id+'\')"><i class="fas fa-clock-rotate-left"></i></button>'+
-      '<button class="btn btn-outline btn-sm btn-icon" title="Editar" data-action="edit-cliente" data-id="'+escapeHtml(c.id)+'"><i class="fas fa-pen"></i></button>'+
-      '<button class="btn btn-outline btn-sm btn-icon" title="PDF" onclick="generatePDF_clientes(\''+c.id+'\')"><i class="fas fa-file-pdf"></i></button>'+
-      '<button class="btn btn-outline btn-sm btn-icon" title="Eliminar" onclick="confirmDelete(\'Cliente '+escapeHtml(c.nombre)+'\', ()=>deleteCliente(\''+c.id+'\'))"><i class="fas fa-trash"></i></button>'+
-    '</td>'
-  ).join('') || '<tr><td colspan="7" style="text-align:center;padding:30px;color:var(--text-muted)">Sin clientes</td></tr>';
+  
+  renderPaginatedRows(document.getElementById('clientesBody'), filtered, c=>{
+    const padreNombre = c.padreId ? clienteMap.get(String(c.padreId)) || (c.cadenaId ? cadenaMap.get(String(c.cadenaId)) : '') : '';
+    const rutaNombre = c.rutaId ? rutaMap.get(String(c.rutaId)) : '';
+    
+    return '<tr><td>'+escapeHtml(c.id)+'</td><td><strong>'+escapeHtml(c.nombre)+'</strong></td>'+
+      '<td>'+escapeHtml(padreNombre)+'</td>'+
+      '<td>'+escapeHtml(rutaNombre)+'</td>'+
+      '<td>'+escapeHtml(c.contacto)+'</td>'+
+      '<td>'+escapeHtml(c.telefono)+'</td><td>'+escapeHtml(c.email)+'</td>'+
+      '<td><span class="badge '+(c.tipo==='empresa'?'badge-blue':'badge-gray')+'">'+(c.tipo==='empresa'?'Empresa':'Particular')+'</span></td>'+
+      '<td class="actions-cell">'+
+        '<button class="btn btn-outline btn-sm btn-icon" title="Ubicaciones" onclick="gestionarUbicaciones(\''+c.id+'\')"><i class="fas fa-map-marker-alt"></i></button>'+
+        '<button class="btn btn-outline btn-sm btn-icon" title="Puertas" onclick="gestionarPuertas(\''+c.id+'\')"><i class="fas fa-door-open"></i></button>'+
+        '<button class="btn btn-outline btn-sm btn-icon" title="Histórico revisiones" onclick="verHistoricoPuertas(\''+c.id+'\')"><i class="fas fa-clock-rotate-left"></i></button>'+
+        '<button class="btn btn-outline btn-sm btn-icon" title="Editar" data-action="edit-cliente" data-id="'+escapeHtml(c.id)+'"><i class="fas fa-pen"></i></button>'+
+        '<button class="btn btn-outline btn-sm btn-icon" title="PDF" onclick="generatePDF_clientes(\''+c.id+'\')"><i class="fas fa-file-pdf"></i></button>'+
+        '<button class="btn btn-outline btn-sm btn-icon" title="Eliminar" onclick="confirmDelete(\'Cliente '+escapeHtml(c.nombre)+'\', ()=>deleteCliente(\''+c.id+'\'))"><i class="fas fa-trash"></i></button>'+
+      '</td>';
+  }, {colspan:9, empty:'<tr><td colspan="9" style="text-align:center;padding:30px;color:var(--text-muted)">Sin clientes</td></tr>'});
 };
 async function showClienteForm(editId = null, opts = {}) {
   const id = editId ? String(editId) : null;
@@ -323,17 +367,17 @@ async function showClienteForm(editId = null, opts = {}) {
   const cadenasMant = await getAllCadenas();
   let rutasCache = [];
   if (c.cadenaId) {
-    try { rutasCache = await getRutasByCadena(c.cadenaId); } catch(e){ rutasCache = []; }
+    try { rutasCache = await getRutasByCadena(String(c.cadenaId)); } catch(e){ rutasCache = []; }
   }
 
   const opcionesCadenaMant = '<option value="">— Sin cadena —</option>' +
-    cadenasMant.map(cm => `<option value="${cm.id}" ${c.cadenaId===cm.id?'selected':''}>${escapeHtml(cm.nombre)}</option>`).join('');
+    cadenasMant.map(cm => `<option value="${cm.id}" ${c.cadenaId==cm.id?'selected':''}>${escapeHtml(cm.nombre)}</option>`).join('');
 
   const opcionesRuta = '<option value="">— Sin ruta —</option>' +
-    rutasCache.map(r => `<option value="${r.id}" ${c.rutaId===r.id?'selected':''}>${escapeHtml(r.nombre)}</option>`).join('');
+    rutasCache.map(r => `<option value="${r.id}" ${c.rutaId==r.id?'selected':''}>${escapeHtml(r.nombre)}</option>`).join('');
 
   const opcionesPadre = '<option value="">— Ninguno (cliente suelto) —</option>' +
-    cadenasPadre.map(p => `<option value="${p.id}" ${c.padreId===p.id?'selected':''}>${escapeHtml(p.nombre)}</option>`).join('');
+    cadenasPadre.map(p => `<option value="${p.id}" ${c.padreId==p.id?'selected':''}>${escapeHtml(p.nombre)}</option>`).join('');
 
   const esCadenaChecked = (opts?.nuevoPadre === true || c.esCadena) ? 'checked' : '';
 
@@ -487,7 +531,7 @@ function renderLineItems(cid, items){
   if(!container) return;
   container.innerHTML = items.map((item,i)=>
     '<tr data-idx="'+i+'">'+
-      '<td><input type="text" data-field="descripcion" value="'+escapeHtml(item.descripcion)+'" onchange="updateLineItem(\''+cid+'\','+i+',\'descripcion\',this.value)" style="min-width:200px"></td>'+
+      '<td><input type="text" data-field="descripcion" value="'+escapeHtml(item.descripcion)+'" oninput="this.style.outline=\'\'" onchange="updateLineItem(\''+cid+'\','+i+',\'descripcion\',this.value)" style="min-width:200px"></td>'+
       '<td><select data-field="tipoId" onchange="updateLineItem(\''+cid+'\','+i+',\'tipoId\',this.value)">'+
         (window.__tipos||[]).map(t=>'<option value="'+t.id+'" '+(item.tipoId===t.id?'selected':'')+'>'+escapeHtml(t.nombre)+'</option>').join('')+'</td>'+
       '<td><input type="number" data-field="cantidad" class="only-num-dec" min="0" step="0.01" inputmode="decimal" value="'+(Number(item.cantidad)||0)+'" onchange="updateLineItem(\''+cid+'\','+i+',\'cantidad\',this.value)" style="width:110px"></td>'+
@@ -602,7 +646,7 @@ window.savePresupuesto = async function(id){
     const items = [];
     document.querySelectorAll('#'+lid+'_items tr').forEach(r=>{
       items.push({
-        descripcion: r.querySelector('[data-field="descripcion"]')?.value||'',
+        descripcion: (r.querySelector('[data-field="descripcion"]')?.value||'').trim(),
         tipoId: r.querySelector('[data-field="tipoId"]')?.value||'',
         cantidad: parseFloat(r.querySelector('[data-field="cantidad"]')?.value)||0,
         precio: parseFloat(r.querySelector('[data-field="precio"]')?.value)||0
@@ -639,18 +683,40 @@ window.savePresupuesto = async function(id){
       clearFieldError('pf_valido');
     }
 
-    // Al menos una línea con descripción
+    // Ninguna línea puede quedar sin descripción
     const lineTbody = document.getElementById(lid+'_items');
-    const hasValidLine = items.some(i => i.descripcion.trim());
-    if(!hasValidLine){
+    const descInputs = [...(lineTbody?.querySelectorAll('[data-field="descripcion"]')||[])];
+    descInputs.forEach(input => { input.style.outline = ''; });
+    lineTbody?.querySelectorAll('[data-field="cantidad"]').forEach(input => { input.style.outline = ''; });
+    if(lineTbody) lineTbody.style.outline = '';
+    let lineErrorShown = false;
+    const emptyLines = items.reduce((list,item,index)=>item.descripcion.trim() ? list : list.concat(index+1), []);
+    if(!items.length){
       showToast('Añade al menos un concepto con descripción','error');
       if(lineTbody) lineTbody.style.outline = '2px solid #dc2626';
+      lineErrorShown = true;
       ok = false;
-    } else if(lineTbody){
-      lineTbody.style.outline = '';
+    } else if(emptyLines.length){
+      emptyLines.forEach(n => { if(descInputs[n-1]) descInputs[n-1].style.outline = '2px solid #dc2626'; });
+      descInputs[emptyLines[0]-1]?.focus();
+      showToast(emptyLines.length===1
+        ? 'La línea '+emptyLines[0]+' no tiene descripción'
+        : 'Hay líneas sin descripción: '+emptyLines.join(', ')+'. Complétalas o elimínalas','error');
+      lineErrorShown = true;
+      ok = false;
+    } else {
+      const badQty = items.reduce((list,item,index)=>item.cantidad>0 ? list : list.concat(index+1), []);
+      if(badQty.length){
+        const qtyInputs = [...lineTbody.querySelectorAll('[data-field="cantidad"]')];
+        badQty.forEach(n => { if(qtyInputs[n-1]) qtyInputs[n-1].style.outline = '2px solid #dc2626'; });
+        qtyInputs[badQty[0]-1]?.focus();
+        showToast('La cantidad debe ser mayor que 0 (línea '+badQty.join(', ')+')','error');
+        lineErrorShown = true;
+        ok = false;
+      }
     }
 
-    if(!ok){ showToast('Revisa los campos marcados','error'); return; }
+    if(!ok){ if(!lineErrorShown) showToast('Revisa los campos marcados','error'); return; }
 
     // Calcular totales al guardar
     const sub = items.reduce((s,i)=>s+i.cantidad*i.precio,0);
@@ -828,7 +894,7 @@ window.renderPartes = async function(){
     return true;
   });
 
-  document.getElementById('parteBody').innerHTML = filtered.map(p=>
+  renderPaginatedRows(document.getElementById('parteBody'), filtered, p=>
     '<tr><td><strong>'+escapeHtml(p.id)+'</strong></td><td>'+escapeHtml(p.clienteNombre)+'</td>'+
     '<td>'+(p.ubicacionNombre ? escapeHtml(p.ubicacionNombre)+'<br><small style="color:#666">'+escapeHtml(p.ubicacionDireccion||'')+'</small>' : '—')+'</td>'+
     '<td>' + ((p.puertaIds && p.puertaIds.length)
@@ -850,7 +916,7 @@ window.renderPartes = async function(){
       '<button class="btn btn-outline btn-sm btn-icon" title="PDF" onclick="generatePDF_partes(\''+p.id+'\')"><i class="fas fa-file-pdf"></i></button>'+
       '<button class="btn btn-outline btn-sm btn-icon" title="Eliminar" onclick="confirmDelete(\'Parte '+escapeHtml(p.id)+'\', ()=>deleteParte('+p.id+'))"><i class="fas fa-trash"></i></button>'+
     '</td></tr>'
-  ).join('') || '<tr><td colspan="12" style="text-align:center;padding:30px;color:var(--text-muted)">Sin partes de trabajo</td></tr>';
+  , {colspan:12, empty:'<tr><td colspan="12" style="text-align:center;padding:30px;color:var(--text-muted)">Sin partes de trabajo</td></tr>'});
 };
 window.showParteForm = async function(id, prefill) {
   id = id ? String(id) : null;
@@ -2742,7 +2808,7 @@ async function showRutaForm(editId = null, defaultCadenaId = null) {
 //  REVISIONES PROGRAMADAS — PASO C
 // ═══════════════════════════════════════════════════════════
 
-async function render_revisionesProgramadas(main) {
+window.render_revisionesProgramadas = async function(main) {
   if (!main) main = document.getElementById('mainContent');
 
   main.innerHTML = `
@@ -2778,7 +2844,6 @@ async function render_revisionesProgramadas(main) {
         <div class="revision-cadena-meta">
           ${esDotics?'<button type="button" class="btn btn-sm btn-primary btn-dotics-visit">Formulario de revisión</button>':''}
           ${esHiperber?'<button type="button" class="btn btn-sm btn-primary btn-hiperber-review">Formulario de revisión</button>':''}
-          ${window.isTechnician?.()?'':'<button type="button" class="btn btn-sm btn-primary btn-ver-cadena" data-cadena-id="'+escapeHtml(cadena.id)+'">Ver rutas</button>'}
           <span class="badge badge-info">${rutas.length} ruta${rutas.length>1?'s':''}</span>
         </div>
       </div>`;
@@ -2857,12 +2922,9 @@ async function render_revisionesProgramadas(main) {
       abrirRevision(button.dataset.puertaId);
     }));
     cadenaHeader.addEventListener('click', (e) => {
-      if (e.target.closest('.btn-ver-cadena,.btn-dotics-visit,.btn-hiperber-review')) return;
-      revContent.style.display = revContent.style.display === 'none' ? 'block' : 'none';
-    });
-    verCadenaBtn?.addEventListener('click', (e) => {
-      e.stopPropagation();
-      showRutasForCadena(cadena.id);
+      if (e.target.closest('.btn-dotics-visit,.btn-hiperber-review')) return;
+      // Abrir vista de rutas en tarjetas
+      window.render_revisiones_rutas(cadena.id, cadena.nombre);
     });
 
     container.appendChild(grupo);
@@ -2894,6 +2956,222 @@ async function render_revisionesProgramadas(main) {
   document.getElementById('hist-rev-buscar').addEventListener('keydown',event=>{if(event.key==='Enter')window.buscarHistorialRevisiones();});
   await window.buscarHistorialRevisiones();
 }
+
+// ═══════════════════════════════════════════════════════════
+//  REVISIONES PROGRAMADAS - VISTA DE RUTAS (NIVEL 2)
+// ═══════════════════════════════════════════════════════════
+window.render_revisiones_rutas = async function(cadenaId, cadenaNombre) {
+  const main = document.getElementById('mainContent');
+  if (!main) return;
+
+  const rutas = await getRutasByCadena(cadenaId);
+  
+  main.innerHTML = `
+    <div class="page-revisiones">
+      <div class="page-header">
+        <div>
+          <button class="btn btn-outline btn-sm" onclick="navigateTo('revisionesProgramadas')"><i class="fas fa-arrow-left"></i> Volver</button>
+        </div>
+        <div>
+          <h2 class="page-revisiones-title"><i class="fas fa-route"></i> Rutas · ${escapeHtml(cadenaNombre)}</h2>
+          <p class="page-revisiones-subtitle">Selecciona una ruta para ver sus tiendas</p>
+        </div>
+      </div>
+      <div id="rutas-container" class="stats-grid"></div>
+    </div>`;
+
+  const container = document.getElementById('rutas-container');
+  
+  if (rutas.length === 0) {
+    container.innerHTML = '<p style="padding:20px;text-align:center;color:var(--gray);grid-column:1/-1;">No hay rutas para esta cadena.</p>';
+    return;
+  }
+
+  // Usar estilos de stat-card para las rutas
+  for (const ruta of rutas) {
+    const puertas = await getPuertasPorRuta(ruta.id);
+    
+    // Calcular días hasta próxima revisión
+    let diasHastaRevision = null;
+    let bordeColor = '#22c55e'; // verde por defecto
+    
+    if (ruta.proximaRevision) {
+      const proxima = new Date(ruta.proximaRevision);
+      const hoy = new Date();
+      const diffTime = proxima - hoy;
+      diasHastaRevision = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+      
+      // Rojo si faltan 15 días o menos, verde si más
+      if (diasHastaRevision <= 15) {
+        bordeColor = '#ef4444'; // rojo
+      }
+    }
+    
+    const card = document.createElement('div');
+    card.className = 'stat-card';
+    card.style.cursor = 'pointer';
+    card.style.border = `2px solid ${bordeColor}`;
+    card.innerHTML = `
+      <div class="stat-icon" style="background:#dbeafe;color:#2563eb"><i class="fas fa-route"></i></div>
+      <div class="stat-info">
+        <h3>${escapeHtml(ruta.nombre)}</h3>
+        <p>${puertas.length} puerta${puertas.length>1?'s':''}</p>
+        ${diasHastaRevision !== null ? `<small style="color:${bordeColor}">Próxima revisión: ${diasHastaRevision} día${diasHastaRevision!==1?'s':''}</small>` : ''}
+        ${ruta.frecuenciaMeses ? `<small>cada ${ruta.frecuenciaMeses} mes${ruta.frecuenciaMeses>1?'es':''}</small>` : ''}
+      </div>
+    `;
+    card.addEventListener('click', () => window.render_revisiones_tiendas(ruta.id, ruta.nombre, cadenaId, cadenaNombre));
+    container.appendChild(card);
+  }
+};
+
+// ═══════════════════════════════════════════════════════════
+//  REVISIONES PROGRAMADAS - VISTA DE TIENDAS (NIVEL 3)
+// ═══════════════════════════════════════════════════════════
+window.render_revisiones_tiendas = async function(rutaId, rutaNombre, cadenaId, cadenaNombre) {
+  const main = document.getElementById('mainContent');
+  if (!main) return;
+
+  const clientes = await dbGetAll('clientes');
+  const tiendas = clientes.filter(c => String(c.rutaId ?? c.rutaid ?? '') === String(rutaId));
+  
+  main.innerHTML = `
+    <div class="page-revisiones">
+      <div class="page-header">
+        <div>
+          <button class="btn btn-outline btn-sm" onclick="window.render_revisiones_rutas('${cadenaId}', '${escapeHtml(cadenaNombre)}')"><i class="fas fa-arrow-left"></i> Volver a rutas</button>
+        </div>
+        <div>
+          <h2 class="page-revisiones-title"><i class="fas fa-store"></i> Tiendas · ${escapeHtml(rutaNombre)}</h2>
+          <p class="page-revisiones-subtitle">${tiendas.length} tienda${tiendas.length>1?'s':''} en esta ruta</p>
+        </div>
+        <div class="header-actions">
+          <button class="btn btn-primary btn-sm" onclick="window.generarPDFRutaCompleta('${rutaId}', '${escapeHtml(rutaNombre)}', '${cadenaId}', '${escapeHtml(cadenaNombre)}')"><i class="fas fa-file-pdf"></i> PDF de ruta</button>
+        </div>
+      </div>
+      <div id="tiendas-container" class="stats-grid"></div>
+    </div>`;
+
+  const container = document.getElementById('tiendas-container');
+  
+  if (tiendas.length === 0) {
+    container.innerHTML = '<p style="padding:20px;text-align:center;color:var(--gray);grid-column:1/-1;">No hay tiendas asignadas a esta ruta.</p>';
+    return;
+  }
+
+  // Usar estilos de stat-card para las tiendas
+  tiendas.forEach((tienda, index) => {
+    const esUltimaTienda = index === tiendas.length - 1;
+    const card = document.createElement('div');
+    card.className = 'stat-card tienda-card';
+    card.style.cursor = 'pointer';
+    card.innerHTML = `
+      <div class="stat-icon" style="background:#dbeafe;color:#2563eb"><i class="fas fa-store"></i></div>
+      <div class="stat-info">
+        <h3>${escapeHtml(tienda.nombre)}</h3>
+        <p>${escapeHtml(tienda.direccion || 'Sin dirección')}</p>
+        ${esUltimaTienda ? '<small style="color:var(--warning)">Última tienda de la ruta</small>' : ''}
+      </div>
+      <div class="stat-actions">
+        <button class="btn btn-sm btn-outline" onclick="event.stopPropagation(); abrirGoogleMaps('${escapeHtml(tienda.direccion)}')"><i class="fas fa-map-marker-alt"></i> Maps</button>
+        <button class="btn btn-sm btn-primary" onclick="event.stopPropagation(); abrirInformeRevisionRuta('${rutaId}', '${escapeHtml(rutaNombre)}', '${cadenaId}', '${escapeHtml(cadenaNombre)}', '${tienda.id}', '${escapeHtml(tienda.nombre)}', ${esUltimaTienda})"><i class="fas fa-clipboard-check"></i> Informe</button>
+      </div>
+    `;
+    card.addEventListener('click', () => abrirInformeRevisionRuta(rutaId, rutaNombre, cadenaId, cadenaNombre, tienda.id, tienda.nombre, esUltimaTienda));
+    container.appendChild(card);
+  });
+};
+
+// Función para abrir Google Maps con la dirección
+window.abrirGoogleMaps = function(direccion) {
+  if (!direccion) {
+    showToast('La tienda no tiene dirección', 'warning');
+    return;
+  }
+  const url = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(direccion)}`;
+  window.open(url, '_blank');
+};
+
+// Función para generar PDF consolidado de toda la ruta
+window.generarPDFRutaCompleta = async function(rutaId, rutaNombre, cadenaId, cadenaNombre) {
+  showToast('Generando PDF de la ruta...', 'info');
+  
+  try {
+    // Buscar todas las revisiones de esta ruta
+    const todasRevisiones = await dbGetAll('revisiones');
+    const revisionesRuta = todasRevisiones.filter(rev => {
+      try {
+        const notas = JSON.parse(rev.notas || '{}');
+        // El formulario HIPERBER guarda el id de la ruta en cadenaId
+        return [notas.rutaId, notas.cadenaId].some(value => value && String(value) === String(rutaId));
+      } catch(e) {
+        return false;
+      }
+    });
+    
+    if (revisionesRuta.length === 0) {
+      showToast('No hay revisiones guardadas para esta ruta', 'warning');
+      return;
+    }
+    
+    await window.generatePDF_ruta(revisionesRuta, { rutaNombre, cadenaNombre });
+    
+  } catch(error) {
+    console.error('Error generando PDF de ruta:', error);
+    showToast('Error al generar PDF de ruta: ' + error.message, 'error');
+  }
+};
+
+// Función para abrir el informe de revisión de la ruta (usando formulario HIPERBER)
+window.abrirInformeRevisionRuta = function(rutaId, rutaNombre, cadenaId, cadenaNombre, tiendaId, tiendaNombre, esUltimaTienda = false) {
+  // Si es la última tienda, mostrar confirmación
+  if (esUltimaTienda) {
+    if (!confirm('Esta es la última tienda de la ruta. ¿Deseas completar la revisión de toda la ruta?')) {
+      return;
+    }
+  }
+
+  // Crear un draft temporal para HIPERBER con solo esta tienda
+  const tienda = {
+    clienteId: tiendaId,
+    nombre: tiendaNombre,
+    direccion: tiendaNombre,
+    rutaId: rutaId,
+    rutaNombre: rutaNombre,
+    puertas: [] // Se cargarán las puertas de esta tienda
+  };
+
+  // Buscar las puertas de esta tienda
+  dbGetByIndex('puertas', 'clienteId', tiendaId).then(puertas => {
+    tienda.puertas = puertas.map(door => ({
+      id: door.id,
+      nombre: door.nombre || door.tipoPuerta || door.tipo || 'Puerta',
+      tipo: door.tipoPuerta || door.tipo || '',
+      hallazgo: null, hallazgoTexto: '', hallazgoFotos: [],
+      correctivo: null, correctivoTexto: '', resultado: null
+    }));
+
+    window.__hiperberReviewDraft = {
+      id: window.db.nextId('REV'),
+      chainId: rutaId,
+      chainName: rutaNombre,
+      stores: [tienda],
+      esUltimaTienda: esUltimaTienda
+    };
+
+    const form = '<div class="hiperber-form">' +
+      '<div class="form-group hiperber-date"><label for="hiperber-review-date">Fecha de revisión</label><input id="hiperber-review-date" type="date" value="' + new Date().toISOString().slice(0, 10) + '"></div>' +
+      '<div id="hiperber-stores" class="hiperber-stores"></div>' +
+      '</div>';
+    
+    const footer = '<button type="button" class="btn btn-outline" onclick="closeModal()">Cancelar</button>' +
+      '<button type="button" class="btn btn-primary" onclick="closeModal();window.render_revisiones_tiendas(\'' + rutaId + '\', \'' + escapeHtml(rutaNombre) + '\', \'' + cadenaId + '\', \'' + escapeHtml(cadenaNombre) + '\')"><i class="fas fa-arrow-left"></i> Volver</button>' +
+      '<button type="button" class="btn btn-primary" onclick="saveHiperberReviewForm()"><i class="fas fa-save"></i> Guardar revisión</button>';
+
+    openModal('Revisión · ' + tiendaNombre, form, footer);
+    renderHiperberStores();
+  });
+};
 
 function revisionHistoryMetadata(revision){
   let notes={};
@@ -2984,52 +3262,109 @@ function getEstadoPuerta(puerta) {
   }
 }
 
-window.openHiperberReviewForm=async function(chainId){
-  const chain=await getCadenaById(chainId);
-  if(!chain) return showToast('No se encontró la cadena HIPERBER','error');
-  const [clients,routes]=await Promise.all([dbGetAll('clientes'),getRutasByCadena(chain.id)]);
-  const routeIds=new Set(routes.map(route=>String(route.id)));
-  const supermarkets=clients.filter(client=>
-    String(client.cadenaId??client.cadenaid??'')===String(chain.id)||
-    String(client.padreId??client.padreid??'')===String(chain.id)||
-    routeIds.has(String(client.rutaId??client.rutaid??''))
+async function openHiperberReviewForm(chainId) {
+  const chain = await getCadenaById(chainId);
+  if (!chain) return showToast('No se encontró la cadena HIPERBER', 'error');
+
+  const [clients, routes] = await Promise.all([
+    dbGetAll('clientes'),
+    getRutasByCadena(chain.id)
+  ]);
+
+  const routeIds = new Set(routes.map(r => String(r.id)));
+  const supermarkets = clients.filter(client =>
+    String(client.cadenaId ?? client.cadenaid ?? '') === String(chain.id) ||
+    String(client.padreId ?? client.padreid ?? '') === String(chain.id) ||
+    routeIds.has(String(client.rutaId ?? client.rutaid ?? ''))
   );
-  const stores=[];
-  for(const client of supermarkets){
-    const doors=await dbGetByIndex('puertas','clienteId',client.id);
+
+  // Mapa rutaId → nombre de ruta
+  const routeNameById = {};
+  routes.forEach(r => { routeNameById[String(r.id)] = r.nombre; });
+
+  const stores = [];
+  for (const client of supermarkets) {
+    const doors = await dbGetByIndex('puertas', 'clienteId', client.id);
+    const rid = String(client.rutaId ?? client.rutaid ?? '');
     stores.push({
-      clienteId:client.id,nombre:client.nombre,
-      puertas:doors.length?doors.map(door=>({id:door.id,nombre:door.nombre||door.tipoPuerta||door.tipo||'Puerta',tipo:door.tipoPuerta||door.tipo||'',hallazgo:null,hallazgoTexto:'',hallazgoFotos:[],correctivo:null,correctivoTexto:'',resultado:null})):
-        [{id:null,nombre:'',tipo:'',hallazgo:null,hallazgoTexto:'',hallazgoFotos:[],correctivo:null,correctivoTexto:'',resultado:null,nueva:true}]
+      clienteId: client.id,
+      nombre: client.nombre,
+      direccion: client.direccion || '',
+      rutaId: rid,
+      rutaNombre: routeNameById[rid] || '⚠️ Sin ruta asignada',
+      puertas: doors.length ? doors.map(door => ({
+        id: door.id,
+        nombre: door.nombre || door.tipoPuerta || door.tipo || 'Puerta',
+        tipo: door.tipoPuerta || door.tipo || '',
+        hallazgo: null, hallazgoTexto: '', hallazgoFotos: [],
+        correctivo: null, correctivoTexto: '', resultado: null
+      })) : [{
+        id: null, nombre: '', tipo: '',
+        hallazgo: null, hallazgoTexto: '', hallazgoFotos: [],
+        correctivo: null, correctivoTexto: '', resultado: null, nueva: true
+      }]
     });
   }
-  window.__hiperberReviewDraft={id:window.db.nextId('REV'),chainId:String(chain.id),chainName:chain.nombre,stores};
-  const form='<div class="hiperber-form">'+
-    '<div class="form-group hiperber-date"><label for="hiperber-review-date">Fecha de revisión</label><input id="hiperber-review-date" type="date" value="'+new Date().toISOString().slice(0,10)+'"></div>'+ 
-    '<div id="hiperber-stores" class="hiperber-stores"></div>'+ 
-  '</div>';
-  const footer='<button type="button" class="btn btn-primary" onclick="closeModal()">Cancelar</button>'+ 
-    '<button type="button" class="btn btn-primary" onclick="saveHiperberReviewForm()"><i class="fas fa-save"></i> Guardar revisión</button>';
-  openModal('Revisión · '+chain.nombre,form,footer);
-  renderHiperberStores();
-};
 
-function renderHiperberStores(){
-  const draft=window.__hiperberReviewDraft;
-  const container=document.getElementById('hiperber-stores');
-  if(!draft||!container) return;
-  if(!draft.stores.length){
-    container.innerHTML='<div class="empty-state"><p>No hay supermercados asignados a HIPERBER. Asigna clientes a la cadena para completar el formulario.</p></div>';
+  window.__hiperberReviewDraft = {
+    id: window.db.nextId('REV'),
+    chainId: String(chain.id),
+    chainName: chain.nombre,
+    stores
+  };
+
+  const form = '<div class="hiperber-form">' +
+    '<div class="form-group hiperber-date"><label for="hiperber-review-date">Fecha de revisión</label><input id="hiperber-review-date" type="date" value="' + new Date().toISOString().slice(0, 10) + '"></div>' +
+    '<div id="hiperber-stores" class="hiperber-stores"></div>' +
+    '</div>';
+  const footer = '<button type="button" class="btn btn-primary" onclick="closeModal()">Cancelar</button>' +
+    '<button type="button" class="btn btn-primary" onclick="saveHiperberReviewForm()"><i class="fas fa-save"></i> Guardar revisión</button>';
+
+  openModal('Revisión · ' + chain.nombre, form, footer);
+  renderHiperberStores();
+}
+function renderHiperberStores() {
+  const draft = window.__hiperberReviewDraft;
+  const container = document.getElementById('hiperber-stores');
+  if (!draft || !container) return;
+  if (!draft.stores.length) {
+    container.innerHTML = '<div class="empty-state"><p>No hay supermercados asignados a HIPERBER. Asigna clientes a la cadena para completar el formulario.</p></div>';
     return;
   }
-  container.innerHTML=draft.stores.map((store,storeIndex)=>
-    '<section class="hiperber-store"><h3>'+escapeHtml(store.nombre)+'</h3>'+ 
-      '<div class="table-wrapper hiperber-table-wrapper"><table class="hiperber-checklist"><thead><tr><th>Puerta</th><th>HALLAZGO</th><th>CORRECTIVO</th><th>RESULTADO</th></tr></thead><tbody>'+ 
-        store.puertas.map((door,doorIndex)=>'<tr><td data-label="Puerta"><input class="hiperber-door-name" type="text" aria-label="Puerta de '+escapeHtml(store.nombre)+'" placeholder="'+(door.nueva?'Añade una puerta':'Nombre de la puerta')+'" value="'+escapeHtml(door.nombre)+'" oninput="updateHiperberDoor('+storeIndex+','+doorIndex+',\'nombre\',this.value)"><small>'+escapeHtml(door.tipo||'')+'</small></td>'+ 
-          hiperberDecisionCell(storeIndex,doorIndex,door,'hallazgo',[['ok','OK'],['x','X']])+ 
-          hiperberDecisionCell(storeIndex,doorIndex,door,'correctivo',[['ok','OK'],['hecho','Hecho'],['x','X']])+ 
-          hiperberDecisionCell(storeIndex,doorIndex,door,'resultado',[['ok','OK'],['x','X']])+'</tr>').join('')+
-      '</tbody></table></div><button type="button" class="btn btn-primary btn-sm hiperber-add-door" onclick="addHiperberDoor('+storeIndex+')"><i class="fas fa-plus"></i> Añadir puerta</button></section>'
+
+  // Agrupar visualmente por ruta, conservando el índice real en draft.stores
+  const groups = [];
+  const byName = {};
+  draft.stores.forEach((store, i) => {
+    const name = store.rutaNombre || 'Sin ruta';
+    if (!byName[name]) {
+      byName[name] = { name, items: [] };
+      groups.push(byName[name]);
+    }
+    byName[name].items.push({ store, index: i });
+  });
+
+  const storeHtml = (store, storeIndex) =>
+    '<section class="hiperber-store" style="margin-left:18px;">' +
+      '<h4>' + escapeHtml(store.nombre) + '</h4>' +
+      (store.direccion ? '<div style="font-size:12px;color:var(--text-muted);margin:-4px 0 8px 2px;">📍 ' + escapeHtml(store.direccion) + '</div>' : '') +
+      '<div class="table-wrapper hiperber-table-wrapper"><table class="hiperber-checklist"><thead><tr><th>Puerta</th><th>HALLAZGO</th><th>CORRECTIVO</th><th>RESULTADO</th></tr></thead><tbody>' +
+        store.puertas.map((door, doorIndex) =>
+          '<tr><td data-label="Puerta"><input class="hiperber-door-name" type="text" aria-label="Puerta de ' + escapeHtml(store.nombre) + '" placeholder="' + (door.nueva ? 'Añade una puerta' : 'Nombre de la puerta') + '" value="' + escapeHtml(door.nombre) + '" oninput="updateHiperberDoor(' + storeIndex + ',' + doorIndex + ',\'nombre\',this.value)"><small>' + escapeHtml(door.tipo || '') + '</small></td>' +
+            hiperberDecisionCell(storeIndex, doorIndex, door, 'hallazgo', [['ok','OK'],['x','X']]) +
+            hiperberDecisionCell(storeIndex, doorIndex, door, 'correctivo', [['ok','OK'],['hecho','Hecho'],['x','X']]) +
+            hiperberDecisionCell(storeIndex, doorIndex, door, 'resultado', [['ok','OK'],['x','X']]) + '</tr>'
+        ).join('') +
+      '</tbody></table></div>' +
+      '<button type="button" class="btn btn-primary btn-sm hiperber-add-door" onclick="addHiperberDoor(' + storeIndex + ')"><i class="fas fa-plus"></i> Añadir puerta</button>' +
+    '</section>';
+
+  container.innerHTML = groups.map(g =>
+    '<div class="hiperber-route-group" style="margin-bottom:26px;border-left:4px solid var(--primary);padding-left:14px;">' +
+      '<h3 style="color:var(--primary);margin:0 0 12px;">' + escapeHtml(g.name) +
+        ' <span class="badge badge-info">' + g.items.length + '</span></h3>' +
+      g.items.map(it => storeHtml(it.store, it.index)).join('') +
+    '</div>'
   ).join('');
 }
 
@@ -3194,7 +3529,7 @@ window.saveHiperberReviewForm=async function(){
     correctivo:door.correctivo==='hecho'?door.correctivoTexto:door.correctivo==='x'?'X':'OK',correctivoEstado:door.correctivo,correctivoTexto:door.correctivoTexto,
     resultado:door.resultado==='ok'?'OK':'X',resultadoEstado:door.resultado
   }));
-  const notas=JSON.stringify({form:'HIPERBER_REVISION_V1',cadenaId:draft.chainId,cadena:draft.chainName,supermercados:stores.map(store=>({id:store.clienteId,nombre:store.nombre}))});
+  const notas=JSON.stringify({form:'HIPERBER_REVISION_V1',cadenaId:draft.chainId,cadena:draft.chainName,supermercados:stores.map(store=>({id:store.clienteId,nombre:store.nombre})),rutaId:draft.chainId,rutaNombre:draft.chainName});
   try{
     await dbAdd('revisiones',{
       id:draft.id,puertaId:null,clienteId:null,fecha,tecnicoId:window.authState?.employee?.id||null,items,
@@ -3206,6 +3541,16 @@ window.saveHiperberReviewForm=async function(){
     closeModal();
     showToast('Revisión HIPERBER guardada');
     await downloadRevisionPDFAfterSave(draft.id);
+    
+    // Si es la última tienda, generar PDF consolidado de la ruta
+    if(draft.esUltimaTienda && draft.chainId) {
+      try {
+        await window.generarPDFRutaCompleta(draft.chainId, draft.chainName, draft.chainId, draft.chainName);
+      } catch(e) {
+        console.error('Error generando PDF de ruta:', e);
+        showToast('Revisión guardada, pero no se pudo generar el PDF de ruta', 'warning');
+      }
+    }
   }catch(error){
     showToast('No se pudo guardar la revisión: '+error.message,'error');
   }
@@ -3747,16 +4092,16 @@ async function render_clientes_ruta(rutaid) {
   let clientes = [];
   let ruta = null;
   try {
-    ruta=await getRutaById(rutaid);
+    ruta = await getRutaById(rutaid);
     const todos = await dbGetAll('clientes');
-    clientes = todos.filter(c => String(c.rutaId??c.rutaid) === String(rutaid));
+    clientes = todos.filter(c => String(c.rutaId ?? c.rutaid) === String(rutaid));
   } catch (e) {
     console.error('render_clientes_ruta falló:', e);
   }
 
-  const cadenaId = String(ruta?.cadenaId??ruta?.cadenaid??localStorage.getItem('cadenaId')??'');
-  if(cadenaId) localStorage.setItem('cadenaId',cadenaId);
-  const cadena=cadenaId ? await getCadenaById(cadenaId) : null;
+  const cadenaId = String(ruta?.cadenaId ?? ruta?.cadenaid ?? localStorage.getItem('cadenaId') ?? '');
+  if (cadenaId) localStorage.setItem('cadenaId', cadenaId);
+  const cadena = cadenaId ? await getCadenaById(cadenaId) : null;
   const main = document.querySelector('.main-content');
   main.innerHTML = `
     <div class="page-header">
@@ -3764,29 +4109,38 @@ async function render_clientes_ruta(rutaid) {
         <nav class="breadcrumbs" aria-label="Ruta de navegación">
           <button type="button" class="breadcrumb-link" onclick="navigateTo('revisionesProgramadas')">Revisiones Programadas</button>
           <i class="fas fa-chevron-right" aria-hidden="true"></i>
-          <button type="button" class="breadcrumb-link" onclick="volverARevisionesCadena('${escapeHtml(cadenaId)}')">${escapeHtml(cadena?.nombre||'Cadena')}</button>
+          <button type="button" class="breadcrumb-link" onclick="volverARevisionesCadena('${escapeHtml(cadenaId)}')">${escapeHtml(cadena?.nombre || 'Cadena')}</button>
           <i class="fas fa-chevron-right" aria-hidden="true"></i>
           <button type="button" class="breadcrumb-link" onclick="render_rutas('${escapeHtml(cadenaId)}')">Rutas</button>
           <i class="fas fa-chevron-right" aria-hidden="true"></i>
           <span aria-current="page">Clientes</span>
         </nav>
-        <h2>👥 Clientes de ${escapeHtml(ruta?.nombre||'esta ruta')}</h2>
+        <h2>👥 Clientes de ${escapeHtml(ruta?.nombre || 'esta ruta')}</h2>
       </div>
     </div>
     <div id="clientes-ruta-lista">
       ${clientes.length ? clientes.map(c => `
-        <div class="card" style="margin-bottom:10px;">
+        <div class="card" style="margin-bottom:10px;cursor:pointer;" onclick="showClienteForm('${escapeHtml(String(c.id))}')">
           <div class="card-body" style="padding:14px 18px;">
-            <strong>${escapeHtml(c.nombre)}</strong>
-            <div style="font-size:13px;color:var(--text-muted);margin-top:4px;">
-              📞 ${escapeHtml(c.telefono || 'Sin teléfono')}
-              &nbsp;·&nbsp; ✉️ ${escapeHtml(c.email || 'Sin email')}
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;">
+              <strong>${escapeHtml(c.nombre)}</strong>
+              <button type="button" class="btn btn-outline btn-sm" title="Editar cliente"
+                onclick="event.stopPropagation(); showClienteForm('${escapeHtml(String(c.id))}')">
+                <i class="fas fa-pen"></i> Editar
+              </button>
+            </div>
+            <div style="font-size:13px;color:var(--text-muted);margin-top:4px;line-height:1.5;">
+              ${c.direccion ? '<div>📍 ' + escapeHtml(c.direccion) + '</div>' : ''}
+              <div>
+                📞 ${escapeHtml(c.telefono || 'Sin teléfono')}
+                &nbsp;·&nbsp; ✉️ ${escapeHtml(c.email || 'Sin email')}
+                ${c.dni ? '&nbsp;·&nbsp; CIF ' + escapeHtml(c.dni) : ''}
+              </div>
             </div>
           </div>
         </div>
       `).join('') : '<p style="text-align:center;color:var(--gray);margin-top:40px;">No hay clientes en esta ruta.</p>'}
     </div>`;
-
 }
 
 window.volverARevisionesCadena=async function(chainId){
@@ -3840,3 +4194,309 @@ async function render_cadenas(main) {
   document.getElementById('btn-new-cadena').addEventListener('click', () => showCadenaForm());
   await renderCadenasList();
 }
+// ── Importador de folio OCR ──────────────────────────────────
+let _importData = null;
+let _importLoaded = false;
+
+window.showImportFolioModal = async function() {
+  const main = document.querySelector('main.main-content');
+  if (!main) return;
+
+  if (!_importLoaded) {
+    main.innerHTML = '<div style="padding:24px;text-align:center;color:#666;">⏳ Cargando motor OCR... (~2 MB, solo la primera vez)</div>';
+    try {
+      await Tesseract.createWorker('spa', 1, {
+        logger: m => {
+          if (m.status === 'recognizing text') {
+            main.innerHTML = `<div style="padding:24px;text-align:center;color:#666;">🔍 Reconociendo texto... ${Math.round(m.progress * 100)}%</div>`;
+          }
+        }
+      });
+      _importLoaded = true;
+    } catch (e) {
+      main.innerHTML = `<div style="padding:24px;text-align:center;color:red;">❌ Error cargando OCR: ${e.message}</div>`;
+      return;
+    }
+  }
+
+  // Cargar cadenas para el selector
+  const cadenas = await window.db.dbGetAll('cadenas');
+  const cadenasOptions = cadenas.map(c => `<option value="${c.id}">${escapeHtml(c.nombre)}</option>`).join('');
+
+  main.innerHTML = `
+    <div id="import-modal" style="position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;z-index:9999;">
+      <div style="background:#fff;border-radius:12px;padding:24px;max-width:700px;width:90%;max-height:90vh;overflow-y:auto;">
+        <h2 style="margin:0 0 16px;">📄 Importar folio de clientes</h2>
+        <p style="color:#666;margin:0 0 16px;">Haz una foto o elige un folio con rutas y tiendas. Tesseract leerá el texto y te mostrará una vista previa editable antes de guardar.</p>
+        
+        <div style="margin-bottom:16px;">
+          <label style="font-weight:600;display:block;margin-bottom:6px;">Selecciona la cadena (padre):</label>
+          <select id="import-cadena-select" style="width:100%;padding:8px;border:1px solid #ccc;border-radius:6px;">
+            ${cadenasOptions}
+          </select>
+        </div>
+
+        <div id="import-upload-area" style="border:2px dashed #ccc;border-radius:8px;padding:32px;text-align:center;cursor:pointer;margin-bottom:16px;background:#fafafa;">
+          <input type="file" id="import-file" accept="image/*" capture="environment" style="display:none;">
+          <div id="import-preview-container" style="margin-bottom:16px;"></div>
+          <p id="import-upload-hint">📷 Clic o arrastra una imagen aquí</p>
+        </div>
+
+        <div id="import-status" style="margin-bottom:16px;display:none;"></div>
+
+        <div id="import-results" style="display:none;"></div>
+
+        <div id="import-actions" style="display:none;margin-top:16px;text-align:right;">
+          <button id="import-cancel" style="background:#666;color:#fff;border:none;padding:8px 16px;border-radius:6px;margin-right:8px;">Cancelar</button>
+          <button id="import-import-btn" style="background:#2563eb;color:#fff;border:none;padding:8px 16px;border-radius:6px;">Importar todo</button>
+        </div>
+      </div>
+    </div>
+  `;
+
+  const modal = document.getElementById('import-modal');
+  const fileInput = document.getElementById('import-file');
+  const uploadArea = document.getElementById('import-upload-area');
+  const previewContainer = document.getElementById('import-preview-container');
+  const hint = document.getElementById('import-upload-hint');
+  const status = document.getElementById('import-status');
+  const results = document.getElementById('import-results');
+  const cancelBtn = document.getElementById('import-cancel');
+  const importBtn = document.getElementById('import-import-btn');
+
+  // ══ CERRAR MODAL CON CLIC FUERA ══
+  modal.addEventListener('click', (e) => {
+    if (e.target === modal) {
+      cancelBtn.click();
+    }
+  });
+
+  // ══ CERRAR CON ESCAPE ══
+  const escHandler = (e) => {
+    if (e.key === 'Escape') {
+      cancelBtn.click();
+      document.removeEventListener('keydown', escHandler);
+    }
+  };
+  document.addEventListener('keydown', escHandler);
+
+  uploadArea.addEventListener('click', () => fileInput.click());
+
+  uploadArea.addEventListener('dragover', e => { e.preventDefault(); uploadArea.style.borderColor = '#2563eb'; });
+  uploadArea.addEventListener('dragleave', () => { uploadArea.style.borderColor = '#ccc'; });
+  uploadArea.addEventListener('drop', e => {
+    e.preventDefault();
+    uploadArea.style.borderColor = '#ccc';
+    if (e.dataTransfer.files.length) handleFile(e.dataTransfer.files[0]);
+  });
+
+  fileInput.addEventListener('change', () => {
+    if (fileInput.files.length) handleFile(fileInput.files[0]);
+  });
+
+  function handleFile(file) {
+    const img = document.createElement('img');
+    img.style.maxWidth = '100%';
+    img.style.borderRadius = '8px';
+    img.onload = () => {
+      previewContainer.innerHTML = '';
+      previewContainer.appendChild(img);
+      hint.style.display = 'none';
+    };
+    img.src = URL.createObjectURL(file);
+    status.style.display = 'block';
+    status.innerHTML = '⏳ Procesando imagen...';
+    status.style.color = '#666';
+
+    Tesseract.recognize(img.src, 'spa', {
+      logger: m => {
+        if (m.status === 'recognizing text') {
+          status.innerHTML = `🔍 Reconociendo texto... ${Math.round(m.progress * 100)}%`;
+        }
+      }
+    }).then(({ data: { text } }) => {
+      status.style.display = 'none';
+      _importData = parseFolioTexto(text);
+      renderImportResults();
+    }).catch(e => {
+      status.style.color = 'red';
+      status.innerHTML = `❌ Error: ${e.message}`;
+    });
+  }
+
+  function renderImportResults() {
+    if (!_importData || !_importData.rutas.length) {
+      results.style.display = 'block';
+      results.innerHTML = '<p style="color:#e67e22;">⚠️ No se detectaron rutas. Revisa la imagen y prueba de nuevo.</p>';
+      document.getElementById('import-actions').style.display = 'block';
+      return;
+    }
+
+    let html = '<h3 style="margin:0 0 12px;">Vista previa — revisa y corrige antes de importar:</h3>';
+
+    _importData.rutas.forEach((ruta, ri) => {
+      html += `<details open style="margin-bottom:10px;border:1px solid #e5e7eb;border-radius:8px;padding:10px;">
+        <summary style="font-weight:600;cursor:pointer;">🛤️ RUTA
+          <input type="number" data-ruta-num="${ri}" value="${ruta.numero}" min="1"
+            style="width:60px;margin:0 6px;padding:4px;border:1px solid #ccc;border-radius:4px;">
+          (${ruta.clientes.length} tiendas)
+        </summary>
+        <div style="margin-top:8px;">`;
+
+      ruta.clientes.forEach((cli, ci) => {
+        html += `<div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px dashed #eee;flex-wrap:wrap;">
+          <input type="checkbox" checked data-inc="${ri}-${ci}" style="width:16px;height:16px;flex-shrink:0;">
+          <input type="text" data-nombre="${ri}-${ci}" value="${escAttr(cli.nombre)}" placeholder="Nombre tienda"
+            style="flex:1 1 160px;min-width:140px;padding:6px;border:1px solid #ccc;border-radius:4px;">
+          <input type="text" data-direccion="${ri}-${ci}" value="${escAttr(cli.direccion)}" placeholder="Dirección completa"
+            style="flex:2 1 240px;min-width:200px;padding:6px;border:1px solid #ccc;border-radius:4px;">
+        </div>`;
+      });
+
+      html += `</div></details>`;
+    });
+
+    results.style.display = 'block';
+    results.innerHTML = html;
+    document.getElementById('import-actions').style.display = 'block';
+  }
+
+  function escAttr(s) {
+    return String(s ?? '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+  }
+
+  cancelBtn.addEventListener('click', () => {
+    const el = document.getElementById('import-modal');
+    if (el) el.remove();
+    _importData = null;
+  });
+
+  importBtn.addEventListener('click', async () => {
+    importBtn.disabled = true;
+    importBtn.textContent = '⏳ Guardando...';
+    status.style.display = 'block';
+    status.style.color = '#2563eb';
+    status.innerHTML = '💾 Guardando clientes y rutas en Supabase...';
+
+    try {
+      // Obtener cadena seleccionada
+      const cadenaSelect = document.getElementById('import-cadena-select');
+      const cadenaId = cadenaSelect ? cadenaSelect.value : null;
+      if (!cadenaId) {
+        throw new Error('No se ha seleccionado ninguna cadena. Selecciona una cadena antes de importar.');
+      }
+
+      const cadenas = await window.db.dbGetAll('cadenas');
+      const cadenaSeleccionada = cadenas.find(c => String(c.id) === String(cadenaId));
+      if (!cadenaSeleccionada) {
+        throw new Error('No se encontró la cadena seleccionada.');
+      }
+
+      let totalRutasCreadas = 0;
+      let totalCreados = 0;
+      let totalExistente = 0;
+      const rutasCreadasNombres = [];
+
+      for (let ri = 0; ri < _importData.rutas.length; ri++) {
+        const ruta = _importData.rutas[ri];
+
+        const numInput = document.querySelector(`input[data-ruta-num="${ri}"]`);
+        const numeroRuta = numInput ? numInput.value.trim() : ruta.numero;
+
+        const rutasAll = await window.db.dbGetAll('rutas');
+        let rutaExistente = rutasAll.find(r =>
+          String(r.cadenaId ?? r.cadenaid) === cadenaSeleccionada.id &&
+          String(r.nombre).toLowerCase().includes(String(numeroRuta).trim())
+        );
+
+        if (!rutaExistente) {
+          const nuevaRuta = {
+            id: window.db.nextId('RUT'),
+            nombre: `RUTA ${numeroRuta}`,
+            cadenaId: cadenaSeleccionada.id,
+            cadenaid: cadenaSeleccionada.id,
+            frecuenciameses: 6,
+            orden: parseInt(numeroRuta) || 0,
+            proximarevision: null,
+            ultimorevision: null
+          };
+          await window.db.dbPut('rutas', nuevaRuta);
+          rutaExistente = nuevaRuta;
+          totalRutasCreadas++;
+          rutasCreadasNombres.push(`RUTA ${numeroRuta}`);
+        }
+
+        for (let ci = 0; ci < ruta.clientes.length; ci++) {
+          const cb = document.querySelector(`input[data-inc="${ri}-${ci}"]`);
+          if (cb && !cb.checked) continue;
+
+          const nombreInput = document.querySelector(`input[data-nombre="${ri}-${ci}"]`);
+          const dirInput = document.querySelector(`input[data-direccion="${ri}-${ci}"]`);
+          const nombre = (nombreInput?.value || '').trim();
+          const direccion = (dirInput?.value || '').trim();
+          if (!nombre) continue;
+
+          const clientesAll = await window.db.dbGetAll('clientes');
+          const norm = s => s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
+          const yaExiste = clientesAll.find(c => norm(c.nombre) === norm(nombre));
+
+          if (yaExiste) {
+            yaExiste.rutaId = rutaExistente.id;
+            yaExiste.rutaid = rutaExistente.id;
+            yaExiste.cadenaId = cadenaSeleccionada.id;
+            yaExiste.cadenaid = cadenaSeleccionada.id;
+            yaExiste.padreId = cadenaSeleccionada.id;
+            yaExiste.padreid = cadenaSeleccionada.id;
+            await window.db.dbPut('clientes', yaExiste);
+            totalExistente++;
+          } else {
+            await window.db.dbPut('clientes', {
+              id: window.db.nextId('CLI'),
+              nombre,
+              direccion,
+              cadenaId: cadenaSeleccionada.id,
+              cadenaid: cadenaSeleccionada.id,
+              padreId: cadenaSeleccionada.id,
+              padreid: cadenaSeleccionada.id,
+              rutaId: rutaExistente.id,
+              rutaid: rutaExistente.id,
+              esCadena: false,
+              escadena: false,
+              tipo: 'empresa'
+            });
+            totalCreados++;
+          }
+        }
+      }
+
+      status.style.color = '#16a34a';
+      let mensaje = `✅ ¡Importación completada!<br>`;
+      mensaje += `${totalRutasCreadas} ruta${totalRutasCreadas !== 1 ? 's creadas' : ' creada'}: ${rutasCreadasNombres.join(', ') || 'ninguna (ya existían)'}<br>`;
+      mensaje += `${totalCreados} cliente${totalCreados !== 1 ? 's creados' : ' creado'} · ${totalExistente} actualizados`;
+      status.innerHTML = mensaje;
+      results.style.display = 'none';
+      uploadArea.style.display = 'none';
+
+      // Re-enable cancel to close
+      cancelBtn.textContent = 'Cerrar';
+      cancelBtn.onclick = () => {
+        const el = document.getElementById('import-modal');
+        if (el) el.remove();
+        _importData = null;
+      };
+
+      if (window.currentPage === 'clientes' && typeof renderClientesList === 'function') {
+        renderClientesList();
+      }
+
+    } catch (e) {
+      status.style.color = 'red';
+      status.innerHTML = `❌ Error: ${e.message}`;
+      importBtn.disabled = false;
+      importBtn.textContent = 'Importar todo';
+    }
+  });
+};
+window.render_importFolio = function(main) {
+  showImportFolioModal();
+};

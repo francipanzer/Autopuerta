@@ -460,8 +460,19 @@ function showExitPrompt() {
   prompt.querySelector('[data-exit-confirm]').addEventListener('click', () => {
     exitConfirmed = true;
     removeExitPrompt();
-    try { window.close(); } catch (_) {}
-    history.back();
+    // Intentar cerrar la ventana
+    try {
+      window.close();
+    } catch (_) {}
+    // Si no se cierra, navegar a una página en blanco
+    setTimeout(() => {
+      try {
+        window.location.href = 'about:blank';
+      } catch (_) {
+        // Último recurso: intentar history.back()
+        history.back();
+      }
+    }, 100);
   });
   prompt.addEventListener('click', event => {
     if (event.target === prompt) cancel.click();
@@ -1092,17 +1103,88 @@ async function guardarRevision() {
 
 let rondaPuertas = [];
 
-window.abrirRondaRevisiones = async function (rutaId) {
+// ===== REEMPLAZO: abrirRondaRevisiones (2 niveles: Rutas → Detalle) =====
+// Reemplaza la función actual en pages.js / app.js (donde esté definida)
+
+async function abrirRondaRevisiones(rutaId = null) {
   const hoy = new Date();
   const puertas = await dbGetAll('puertas');
   const clientes = await dbGetAll('clientes');
+  const rutas = await dbGetAll('rutas');
 
-  const treintaDias = new Date(hoy); treintaDias.setDate(hoy.getDate() + 30);
+  // Si NO viene rutaId → mostrar nivel 1 (listado de rutas)
+  if (rutaId === null) {
+    return renderNivel1Rutas(rutas, puertas, clientes);
+  }
+
+  // Si viene rutaId → mostrar nivel 2 (detalle de esa ruta)
+  return renderNivel2Detalle(rutaId, puertas, clientes, hoy);
+}
+
+// ── NIVEL 1: Listado de rutas clickeables ──
+function renderNivel1Rutas(rutas, puertas, clientes) {
   const pendientes = puertas.filter(p => {
     if (!p.proximaRevision) return false;
+    const treintaDias = new Date(); treintaDias.setDate(new Date().getDate() + 30);
     return new Date(p.proximaRevision) <= treintaDias;
   });
 
+  // Contar puertas pendientes por ruta
+  const conteoPorRuta = {};
+  pendientes.forEach(p => {
+    const cliente = clientes.find(c => c.id === p.clienteId);
+    const rutaId = cliente ? (cliente.rutaId || null) : null;
+    if (rutaId) {
+      conteoPorRuta[rutaId] = (conteoPorRuta[rutaId] || 0) + 1;
+    }
+  });
+
+  let html = `
+    <div class="review-header" style="display:flex;justify-content:space-between;align-items:center;margin:20px 0 24px 0;">
+      <h2 style="margin:0;font-size:1.4rem;color:#1e293b;">📋 Informe de Revisión</h2>
+      <button class="btn-back" onclick="goHome()" style="padding:8px 16px;border:1px solid #cbd5e1;border-radius:8px;background:#fff;cursor:pointer;font-size:0.9rem;color:#475569;">← Volver</button>
+    </div>
+    <p style="color:#64748b;font-size:0.9rem;margin-bottom:20px;">Selecciona una ruta para ver las puertas pendientes de revisión</p>
+    <div class="review-rutas-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px;">
+  `;
+
+  for (const ruta of rutas) {
+    const numPendientes = conteoPorRuta[ruta.id] || 0;
+    // Solo mostrar rutas con puertas pendientes (o todas si prefieres)
+    html += `
+      <div class="review-ruta-card" onclick="abrirRondaRevisiones('${ruta.id}')"
+           style="padding:16px;border:2px solid #e2e8f0;border-radius:12px;cursor:pointer;transition:all 0.2s;background:#fff;"
+           onmouseover="this.style.borderColor='#3b82f6';this.style.boxShadow='0 4px 12px rgba(59,130,246,0.15)'"
+           onmouseout="this.style.borderColor='#e2e8f0';this.style.boxShadow='none'">
+        <div style="font-size:1.05rem;font-weight:600;color:#1e293b;">🗺️ ${escapeHtml(ruta.nombre)}</div>
+        <div style="font-size:0.85rem;color:#64748b;margin-top:4px;">
+          ${numPendientes > 0
+            ? `<span style="color:#ef4444;font-weight:600;">⚠️ ${numPendientes} puerta(s) pendiente(s)</span>`
+            : '✅ Sin pendientes'}
+        </div>
+      </div>
+    `;
+  }
+
+  html += `</div>`;
+  document.getElementById('app').innerHTML = html;
+}
+
+// ── NIVEL 2: Detalle de una ruta (reutiliza tu tabla actual) ──
+async function renderNivel2Detalle(rutaId, puertas, clientes, hoy) {
+  const ruta = await dbGetAll('rutas').then(r => r.find(x => x.id === rutaId));
+  const clientesRuta = clientes.filter(c => c.rutaId === rutaId);
+  const clientesIds = new Set(clientesRuta.map(c => c.id));
+
+  // Puertas pendientes de esta ruta
+  const treintaDias = new Date(hoy); treintaDias.setDate(hoy.getDate() + 30);
+  const pendientes = puertas.filter(p => {
+    if (!p.proximaRevision) return false;
+    if (!clientesIds.has(p.clienteId)) return false;
+    return new Date(p.proximaRevision) <= treintaDias;
+  });
+
+  // Agrupar por cliente
   const grupos = {};
   pendientes.forEach(p => {
     if (!grupos[p.clienteId]) grupos[p.clienteId] = [];
@@ -1111,99 +1193,93 @@ window.abrirRondaRevisiones = async function (rutaId) {
 
   const numClientes = Object.keys(grupos).length;
   if (numClientes === 0) {
-    showToast('✅ No hay revisiones pendientes.', 'info');
-    return;
+    showToast('✅ No hay revisiones pendientes para esta ruta.', 'info');
+    return renderNivel1Rutas(await dbGetAll('rutas'), puertas, clientes);
   }
 
-  let html = '';
-  const totalPuertas = pendientes.length;
+  let html = `
+    <div class="review-header" style="display:flex;justify-content:space-between;align-items:center;margin:20px 0 24px 0;">
+      <h2 style="margin:0;font-size:1.3rem;color:#1e293b;">🗺️ ${escapeHtml(ruta?.nombre || 'Ruta')} <span style="font-size:0.9rem;color:#64748b;">(${pendientes.length} puerta(s))</span></h2>
+      <button class="btn-back" onclick="abrirRondaRevisiones()" style="padding:8px 16px;border:1px solid #cbd5e1;border-radius:8px;background:#fff;cursor:pointer;font-size:0.9rem;color:#475569;">← Volver a rutas</button>
+    </div>
+  `;
 
   Object.entries(grupos).forEach(([clienteId, lista]) => {
     const cliente = clientes.find(c => c.id === clienteId);
     const nombreCliente = cliente ? cliente.nombre : 'Cliente desconocido';
+    const direccion = cliente ? (cliente.direccion || '') : '';
+    const lat = cliente?.lat;
+    const lng = cliente?.lng;
+    const mapUrl = (lat && lng)
+      ? `https://www.google.com/maps?q=${lat},${lng}`
+      : `https://www.google.com/maps/search/${encodeURIComponent(direccion || nombreCliente)}`;
 
     html += `
-            <div class="rd-grupo" data-cliente="${clienteId}" style="margin-bottom:28px;">
+      <div class="rd-grupo" data-cliente="${clienteId}" style="margin-bottom:28px;">
+        <!-- Header del cliente con dirección y Maps -->
         <h4 style="display:flex;align-items:center;gap:8px;margin:0 0 12px 0;color:#1e293b;">
           <i class="fas fa-store" style="color:#3b82f6;"></i> ${escapeHtml(nombreCliente)}
           <span class="badge" style="background:#dbeafe;color:#2563eb;">${lista.length} puerta(s)</span>
         </h4>
+        <!-- Dirección con icono + botón Maps -->
+        <div style="display:flex;align-items:center;gap:6px;margin-bottom:12px;padding:8px 12px;background:#f8fafc;border-radius:8px;">
+          <span style="font-size:16px;flex-shrink:0;">📍</span>
+          <span style="font-size:0.85rem;color:#475569;">${escapeHtml(direccion || 'Sin dirección')}</span>
+          <span style="margin-left:auto;">
+            <a href="${mapUrl}" target="_blank" rel="noopener"
+               style="display:inline-flex;align-items:center;gap:4px;font-size:0.8rem;color:#3b82f6;text-decoration:none;padding:4px 10px;border:1px solid #3b82f6;border-radius:6px;cursor:pointer;transition:all 0.2s;"
+               onmouseover="this.style.background='#3b82f6';this.style.color='#fff'"
+               onmouseout="this.style.background='transparent';this.style.color='#3b82f6'">
+              🗺️ Maps
+            </a>
+          </span>
+        </div>
+        <!-- Tabla de puertas (tu código actual) -->
         <table style="width:100%;border-collapse:collapse;font-size:0.9rem;">
           <thead>
             <tr style="background:#f1f5f9;border-bottom:2px solid #e2e8f0;">
               <th style="text-align:left;padding:8px 10px;width:35%;">Puerta</th>
-              <th style="text-align:center;padding:8px 10px;width:15%;">Hallazgo</th>
-              <th style="text-align:center;padding:8px 10px;width:15%;">Correctivo</th>
-              <th style="text-align:center;padding:8px 10px;width:15%;">Resultado</th>
-              <th style="text-align:center;padding:8px 10px;width:20%;">Detalle</th>
+              <th style="text-align:left;padding:8px 10px;">Tipo</th>
+              <th style="text-align:left;padding:8px 10px;">Últ. Revisión</th>
+              <th style="text-align:left;padding:8px 10px;">Próx. Revisión</th>
+              <th style="text-align:left;padding:8px 10px;">Estado</th>
+              <th style="text-align:center;padding:8px 10px;">Acción</th>
             </tr>
           </thead>
           <tbody>
-            ${lista.map((p) => {
-              const tipo = getTipoPuerta(p.tipo);
-              const nombreTipo = tipo ? tipo.nombre : p.tipo;
-              const idKey = p.id;
-              return `
-                <tr style="border-bottom:1px solid #f1f5f9;">
-                  <td style="padding:8px 10px;vertical-align:top;">
-                    <strong>${escapeHtml(p.nombre || '')}</strong><br>
-                    <small style="color:#64748b;">${escapeHtml(nombreTipo)}</small>
-                  </td>
-                  <td style="text-align:center;padding:8px 10px;vertical-align:top;">
-                    <input type="checkbox" class="rd-hallazgo-check" data-puerta="${idKey}" onchange="rdToggleDetalle(this)">
-                  </td>
-                  <td style="text-align:center;padding:8px 10px;vertical-align:top;">
-                    <input type="checkbox" class="rd-correctivo-check" data-puerta="${idKey}" onchange="rdValidar()">
-                  </td>
-                  <td style="text-align:center;padding:8px 10px;vertical-align:top;">
-                    <select class="rd-resultado-select" data-puerta="${idKey}" onchange="rdValidar()">
-                      <option value="">—</option>
-                      <option value="ok">OK</option>
-                      <option value="reparada">Reparada</option>
-                      <option value="pendiente">Pendiente</option>
-                      <option value="repuesto">Repuesto</option>
-                    </select>
-                  </td>
-                  <td style="padding:8px 10px;vertical-align:top;">
-                    <textarea class="rd-detalle-input" data-puerta="${idKey}" rows="1" placeholder="Descripción..."
-                      style="width:100%;min-height:32px;display:none;border:1px solid #cbd5e1;border-radius:4px;padding:4px 8px;font-size:0.85rem;resize:vertical;"
-                      oninput="rdValidar()"></textarea>
-                  </td>
-                </tr>`;
-            }).join('')}
+    `;
+
+    lista.forEach((puerta, idx) => {
+      const diasRestantes = Math.ceil((new Date(puerta.proximaRevision) - hoy) / 86400000);
+      const estadoColor = diasRestantes < 0 ? '#ef4444' : diasRestantes <= 7 ? '#f59e0b' : '#22c55e';
+      const estadoTexto = diasRestantes < 0 ? `Vencida (${Math.abs(diasRestantes)}d)` :
+                          diasRestantes <= 7 ? `Próxima (${diasRestantes}d)` : `OK`;
+
+      html += `
+        <tr style="border-bottom:1px solid #f1f5f9;">
+          <td style="padding:8px 10px;">${escapeHtml(puerta.nombre || 'Puerta ' + puerta.id)}</td>
+          <td style="padding:8px 10px;color:#64748b;">${escapeHtml(puerta.tipo || '—')}</td>
+          <td style="padding:8px 10px;color:#64748b;">${puerta.ultimaRevision ? new Date(puerta.ultimaRevision).toLocaleDateString('es-ES') : '—'}</td>
+          <td style="padding:8px 10px;color:#64748b;">${puerta.proximaRevision ? new Date(puerta.proximaRevision).toLocaleDateString('es-ES') : '—'}</td>
+          <td style="padding:8px 10px;color:${estadoColor};font-weight:600;">${estadoTexto}</td>
+          <td style="text-align:center;padding:8px 10px;">
+            <button onclick="abrirRevision('${puerta.id}')" style="padding:4px 12px;border:1px solid #3b82f6;border-radius:6px;background:#fff;color:#3b82f6;cursor:pointer;font-size:0.8rem;">
+              Revisar
+            </button>
+          </td>
+        </tr>
+      `;
+    });
+
+    html += `
           </tbody>
         </table>
-      </div>`;
+      </div>
+    `;
   });
 
-  const overlay = document.createElement('div');
-  overlay.id = 'modal-revision-overlay';
-  overlay.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,.5);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px;';
-  overlay.innerHTML = `
-    <div class="card" style="max-width:900px;width:100%;max-height:88vh;overflow-y:auto;background:#fff;border-radius:10px;">
-      <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #e5e7eb;padding:16px 20px;">
-        <h3 style="margin:0;"><i class="fas fa-clipboard-check" style="color:#3b82f6;margin-right:8px;"></i>Ronda de Revisiones (${numClientes} clientes · ${totalPuertas} puertas)</h3>
-        <button onclick="cerrarModalRevision()" style="background:none;border:none;font-size:22px;cursor:pointer;color:#6b7280;">&times;</button>
-      </div>
-      <div class="card-body" style="padding:20px;">
-        ${html}
-        <hr style="margin:20px 0;">
-        <label id="rd-final-label" style="display:flex;align-items:center;gap:10px;font-size:1.05rem;font-weight:700;color:#dc2626;opacity:.5;padding:16px;background:#fef2f2;border-radius:8px;">
-          <input type="checkbox" id="rd-check-final" disabled>
-          ✅ Revisión de ruta completa — todas las puertas revisadas
-        </label>
-        <button id="rd-btn-guardar" class="btn btn-primary" style="width:100%;margin-top:16px;padding:12px;" disabled onclick="guardarRondaRevision()">
-          <i class="fas fa-save"></i> Cerrar revisión y sumar 6 meses
-        </button>
-      </div>
-    </div>`;
-  document.body.appendChild(overlay);
-
-  document.getElementById('rd-check-final').addEventListener('change', e => {
-    const btn = document.getElementById('rd-btn-guardar');
-    if (btn) btn.disabled = !e.target.checked;
-  });
-};
+  document.getElementById('app').innerHTML = html;
+}
 
 // ── Mostrar textarea si hallazgo está marcado ──
 window.rdToggleDetalle = function (checkbox) {

@@ -926,3 +926,113 @@ async function getRutasByCadena(cadenaId) {
     }))
     .filter(r => String(r.cadenaId ?? r.cadenaid) === String(cadenaId));
 }
+// ── Parser de folio OCR → estructura rutas/clientes ──────
+function parseFolioTexto(texto) {
+  const rutaRegex = /(?:ruta|RUTA)\s*(?:nº?\.?\s*)?(\d+)/i;
+  // Nombre de tienda: "H." o "H-" seguido de nombre (acepta HEDA sin separador)
+  const tiendaSplit = /(?=H[.\-\s]?)/gi;
+  const cpRegex = /\b(\d{5})\b/;
+  const calleRegex = /(c\/|calle\b|avda\.?|av\.|avenida\b|pl\.|plaza\b|pso\.|paseo\b|trav\.|camino\b|ronda\b|ctra\.|presbítero\b|gran vía\b)/i;
+
+  const lineas = texto.split(/\r?\n/)
+    .map(l => l.trim())
+    .filter(l => l.length > 0);
+
+  const rutas = [];
+  let rutaActual = null;
+  let ultimaTienda = null;
+
+  for (let i = 0; i < lineas.length; i++) {
+    let linea = lineas[i];
+
+    // Quitar bordes de tabla y basura suelta
+    linea = linea.replace(/[|¦ǀ]/g, ' ')
+                 .replace(/—+/g, ' ')
+                 .replace(/\s{2,}/g, ' ').trim();
+    if (!linea || /^[-=]+$/.test(linea)) continue;
+
+    // Cabeceras de tabla
+    if (/^\s*[KM]\s+TIENDA\s+DIRECCION/i.test(linea)) continue;
+
+    // ¿Nueva ruta?
+    const mRuta = linea.match(rutaRegex);
+    if (mRuta) {
+      rutaActual = { numero: mRuta[1], clientes: [] };
+      rutas.push(rutaActual);
+      ultimaTienda = null;
+      continue;
+    }
+    if (!rutaActual) continue;
+
+    // Dividir la línea en fragmentos: uno por cada "H." detectado
+    const partes = linea.split(tiendaSplit).map(p => p.trim()).filter(Boolean);
+
+    // Trozo antes del primer "H." (km suelto o continuación de dirección anterior)
+    if (!tiendaSplit.test(partes[0] === '' ? '' : partes[0]) && !/^H[.\-\s]?/i.test(partes[0])) {
+      const head = partes.shift();
+      if (ultimaTienda && (cpRegex.test(head) || calleRegex.test(head))) {
+        ultimaTienda.direccion += ' ' + head; // continuación de dirección partida
+      }
+    }
+
+    for (const frag of partes) {
+      // Separar nombre de dirección por primera calle detectada
+      const mCalle = frag.match(calleRegex);
+      let nombre, direccion;
+      if (mCalle) {
+        nombre = frag.slice(0, mCalle.index).trim().replace(/[,;·:\[\]]+\s*$/, '');
+        direccion = frag.slice(mCalle.index).trim();
+      } else {
+        nombre = frag.trim();
+        direccion = '';
+      }
+
+      // Limpiar nombre: quitar km delante (ej: "4,6 H.CAMPELLO") y basura final
+      nombre = nombre.replace(/^[\d.,]+\s+(?=H)/, '')
+                     .replace(/[\[\]:;,|-]+$/g, '')
+                     .replace(/\s+/g, ' ').trim();
+
+      if (nombre.length > 2) {
+        ultimaTienda = { nombre, direccion };
+        rutaActual.clientes.push(ultimaTienda);
+      }
+    }
+  }
+
+  // Limpieza final de direcciones
+  for (const r of rutas) {
+    for (const c of r.clientes) {
+      c.direccion = c.direccion.replace(/\s+/g, ' ')
+                               .replace(/[\[\]|]+/g, '')
+                               .replace(/[:;,]+$/g, '')
+                               .trim();
+      // Normalizar nombre a "H.NOMBRE"
+      c.nombre = c.nombre.replace(/^H[.\-\s]+/i, 'H.');
+    }
+  }
+
+  return { rutas };
+}
+
+window.parseFolioTexto = parseFolioTexto;
+
+// ═══════════════════════════════════════════════════════════
+//  FUNCIONES DE ITV (para auth.js y pages.js)
+// ═══════════════════════════════════════════════════════════
+window.diasHastaFechaITV = function(value){
+  const match=String(value||'').slice(0,10).match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if(!match) return null;
+  const target=Date.UTC(Number(match[1]),Number(match[2])-1,Number(match[3]));
+  const today=new Date();
+  const todayUtc=Date.UTC(today.getFullYear(),today.getMonth(),today.getDate());
+  return Math.round((target-todayUtc)/86400000);
+};
+
+window.textoCuentaAtrasITV = function(days){
+  if(days<0){
+    const overdue=Math.abs(days);
+    return `<strong>CADUCADA</strong> hace ${overdue} día${overdue===1?'':'s'}`;
+  }
+  if(days===0) return '<strong>CADUCA HOY</strong>';
+  return `Caduca en <strong>${days}</strong> día${days===1?'':'s'}`;
+};

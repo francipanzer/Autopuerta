@@ -16,6 +16,22 @@ window.isAdmin = () => window.authState.profile?.role === 'admin' && window.auth
 window.isTechnician = () => window.authState.profile?.role === 'technician' && window.authState.profile?.is_active === true;
 window.canAccessPage = page => window.isAdmin() || (window.isTechnician() && TECH_PAGES.has(page));
 
+// ─── Envoltura perezosa ─────────────────────────────────────────────
+// auth.js se carga ANTES que pages.js, así que window.render_x aún no existe
+// cuando se ejecuta este archivo. lazyWrap resuelve la implementación base
+// EN EL MOMENTO DE LLAMAR, no en carga, evitando "originalX is not a function".
+function lazyWrap(name, wrapper) {
+  const captured = typeof window[name] === 'function' ? window[name] : null;
+  window[name] = function (...args) {
+    let base = captured;
+    if (!base) {
+      base = window[name + '__base']; // copia registrada por pages.js (ver final de este archivo)
+      if (typeof base !== 'function') base = null;
+    }
+    return wrapper(base, ...args);
+  };
+  window[name].__isWrapper = true;
+}
 function authEscape(value) {
   return escapeHtml(String(value ?? ''));
 }
@@ -372,7 +388,7 @@ window.renderTechnicianDashboard = async function(container) {
   const [parts, revisions, vehicles] = await Promise.all([dbGetAll('partesTrabajo'), dbGetAll('puertas'), dbGetAll('vehiculos')]);
   const itvAlerts = vehicles.map(vehicle => {
     const date = vehicle.fechaITV || vehicle.itv || vehicle.fecha_itv;
-    return { vehicle, date: String(date || '').slice(0, 10), days: date ? diasHastaFechaITV(date) : null };
+    return { vehicle, date: String(date || '').slice(0, 10), days: date ? window.diasHastaFechaITV(date) : null };
   }).filter(item => item.days !== null && item.days <= 30).sort((a, b) => a.days - b.days);
   const ownParts = parts.filter(part => String(part.createdBy) === String(window.authState.user.id));
   const pendingParts = ownParts.filter(part => part.estado !== 'completado');
@@ -410,7 +426,7 @@ window.renderTechnicianWarehouse = async function(container) {
   const paint = () => {
     const query = container.querySelector('#techWarehouseSearch').value.toLocaleLowerCase('es').trim();
     const rows = articles.filter(item => `${item.referencia || ''} ${item.nombre || ''}`.toLocaleLowerCase('es').includes(query));
-    container.querySelector('#techWarehouseRows').innerHTML = rows.map(item => `<tr><td>${authEscape(item.referencia)}</td><td>${authEscape(item.nombre)}</td><td>${authEscape(item.stock)}</td></tr>`).join('') || '<tr><td colspan="3">Sin artículos.</td></tr>';
+    container.querySelector('#techWarehouseRows').innerHTML = rows.map(item => `<tr><td>${authEscape(item.referencia)}</td><td>${authEscape(item.nombre)}</td><td>${authEscape(item.stock)}</td></tr></tr>`).join('') || '<tr><td colspan="3">Sin artículos.</td></tr>';
   };
   container.querySelector('#techWarehouseSearch').addEventListener('input', paint);
   paint();
@@ -659,21 +675,22 @@ window.openUserManagement = async function() {
   }
 };
 
-const originalConfigurationRenderer = window.render_configuracion;
-window.render_configuracion = async function(container, arg) {
-  await originalConfigurationRenderer(container, arg);
+// ─── Wrappers perezosos (lazyWrap): resuelven la base al llamar, no al cargar ───
+
+lazyWrap('render_configuracion', async (base, container, arg) => {
+  if (base) await base(container, arg);
+  else container.innerHTML = '<div class="empty-state"><i class="fas fa-gear"></i><h3>Configuración</h3></div>';
   if (!window.isAdmin()) return;
   const card = document.createElement('section');
   card.className = 'card user-management-entry';
   card.innerHTML = '<div class="card-header"><h3>Usuarios y permisos</h3></div><div class="card-body"><p>Invita al equipo, vincula técnicos a Empleados y administra roles y cuentas.</p><button class="btn btn-primary" type="button" id="openUserManagement"><i class="fas fa-user-shield"></i> Gestionar usuarios</button></div>';
   container.prepend(card);
   card.querySelector('#openUserManagement').addEventListener('click', window.openUserManagement);
-};
+});
 
-const originalBudgetRenderer = window.render_presupuestos;
-window.render_presupuestos = async function(container, arg) {
+lazyWrap('render_presupuestos', async (base, container, arg) => {
   if (window.isTechnician()) return window.renderTechnicianRequests(container);
-  await originalBudgetRenderer(container, arg);
+  if (base) await base(container, arg);
   if (window.isAdmin()) {
     const header = container.querySelector('.page-header .header-actions');
     if (header) {
@@ -685,21 +702,20 @@ window.render_presupuestos = async function(container, arg) {
       header.prepend(button);
     }
   }
-};
+});
 
-const originalWarehouseRenderer = window.render_almacen;
-window.render_almacen = async function(container, arg) {
+lazyWrap('render_almacen', (base, container, arg) => {
   if (window.isTechnician()) return window.renderTechnicianWarehouse(container);
-  return originalWarehouseRenderer(container, arg);
-};
+  return base ? base(container, arg) : Promise.resolve();
+});
 
-const originalDashboardRenderer = window.render_dashboard;
-window.render_dashboard = async function(container, arg) {
+lazyWrap('render_dashboard', async (base, container, arg) => {
   const mobile = window.innerWidth <= 900;
   // En móvil el inicio son solo los globos: no se renderiza el panel de control
   if (mobile) container.innerHTML = '';
   else if (window.isTechnician()) await window.renderTechnicianDashboard(container);
-  else await originalDashboardRenderer(container, arg);
+  else if (base) await base(container, arg);
+  else container.innerHTML = '<div class="empty-state"><i class="fas fa-tachometer-alt"></i><h3>Panel de control</h3></div>';
   container.dataset.dashboardMode = mobile ? 'mobile' : 'desktop';
   window.renderHomeBubbles?.(container);
   if (mobile) {
@@ -711,7 +727,7 @@ window.render_dashboard = async function(container, arg) {
       <h1>Hola, ${authEscape(technicianName)}</h1>`;
     container.prepend(identity);
 
-    const footer = document.createElement('div');
+   const footer = document.createElement('div');
     footer.className = 'home-account';
     footer.innerHTML = `
       <div class="home-account-actions">
@@ -727,7 +743,7 @@ window.render_dashboard = async function(container, arg) {
   window.refreshAdminNotifications?.();
   window.refreshIncidenciasBadge?.();
   if (typeof actualizarBadgeRevisiones === 'function') actualizarBadgeRevisiones();
-};
+});
 
 // Al girar el móvil o cambiar el tamaño cruzando el umbral, repinta el inicio
 window.addEventListener('resize', () => {
@@ -796,7 +812,7 @@ window.refreshAdminNotifications = async function() {
   try {
     const vehicles = await dbGetAll('vehiculos');
     setNavBadge('vehiculos', vehicles.filter(v => {
-      const days = diasHastaFechaITV(v.fechaITV || v.itv || v.fecha_itv);
+      const days = window.diasHastaFechaITV(v.fechaITV || v.itv || v.fecha_itv);
       return days !== null && days <= 30;
     }).length);
   } catch (error) {
@@ -820,15 +836,14 @@ document.addEventListener('visibilitychange', () => { if (!document.hidden && wi
 function itvAlertsCard(vehicles) {
   const alerts = vehicles.map(vehicle => {
     const date = vehicle.fechaITV || vehicle.itv || vehicle.fecha_itv;
-    return { vehicle, date: String(date || '').slice(0, 10), days: date ? diasHastaFechaITV(date) : null };
+    return { vehicle, date: String(date || '').slice(0, 10), days: date ? window.diasHastaFechaITV(date) : null };
   }).filter(item => item.days !== null && item.days <= 30).sort((a, b) => a.days - b.days);
   return `<div class="card"><div class="card-header"><h3><i class="fas fa-triangle-exclamation" style="color:#f59e0b;margin-right:8px"></i>Avisos de ITV (${alerts.length})</h3></div>
-    <div class="card-body">${alerts.map(({ vehicle, date, days }) => `<div class="itv-alert-item" style="padding:12px;border-radius:6px;margin-bottom:8px;border-left:4px solid ${days < 0 ? '#ef4444' : '#f59e0b'};background-color:${days < 0 ? 'rgba(239,68,68,.1)' : 'rgba(245,158,11,.1)'};"><strong style="display:block;">${authEscape(vehicle.marca)} ${authEscape(vehicle.modelo)}</strong><span style="font-weight:bold;color:#2563eb;letter-spacing:1px;">${authEscape(vehicle.matricula)}</span><small style="display:block;margin-top:2px;"><span class="itv-countdown" data-date="${authEscape(date)}">${textoCuentaAtrasITV(days)}</span></small></div>`).join('') || '<p>No hay ITV caducadas ni próximas en los siguientes 30 días.</p>'}
+    <div class="card-body">${alerts.map(({ vehicle, date, days }) => `<div class="itv-alert-item" style="padding:12px;border-radius:6px;margin-bottom:8px;border-left:4px solid ${days < 0 ? '#ef4444' : '#f59e0b'};background-color:${days < 0 ? 'rgba(239,68,68,.1)' : 'rgba(245,158,11,.1)'};"><strong style="display:block;">${authEscape(vehicle.marca)} ${authEscape(vehicle.modelo)}</strong><span style="font-weight:bold;color:#2563eb;letter-spacing:1px;">${authEscape(vehicle.matricula)}</span><small style="display:block;margin-top:2px;"><span class="itv-countdown" data-date="${authEscape(date)}">${window.textoCuentaAtrasITV(days)}</span></small></div>`).join('') || '<p>No hay ITV caducadas ni próximas en los siguientes 30 días.</p>'}
     ${alerts.length && window.isTechnician() ? '<p class="help-notice">Si ves una ITV caducada o próxima, avisa al encargado.</p>' : ''}</div></div>`;
 }
 
-const originalVehiclesPage = window.render_vehiculos;
-window.render_vehiculos = async function(container, arg) {
+lazyWrap('render_vehiculos', async (base, container, arg) => {
   const vehicles = await dbGetAll('vehiculos');
   if (window.isTechnician()) {
     container.innerHTML = `<div class="page-header"><div><h2>Vehículos</h2><p>Avisos de ITV de la flota</p></div></div>
@@ -837,11 +852,11 @@ window.render_vehiculos = async function(container, arg) {
         ${vehicles.map(v => `<tr><td><strong>${authEscape(v.matricula)}</strong></td><td>${authEscape(v.marca)}</td><td>${authEscape(v.modelo)}</td><td>${authEscape(formatDate(v.fechaITV || v.itv || v.fecha_itv) || '—')}</td></tr>`).join('') || '<tr><td colspan="4">Sin vehículos</td></tr>'}
       </tbody></table></div></div>`;
   } else {
-    await originalVehiclesPage(container, arg);
+    if (base) await base(container, arg);
     container.querySelector('.page-header')?.insertAdjacentHTML('afterend', itvAlertsCard(vehicles));
   }
   actualizarCuentaAtrasITV();
-};
+});
 
 window.viewTechnicianPart = function(part) {
   const fotos = (Array.isArray(part.fotos) ? part.fotos : []).filter(f => typeof f === 'string' && /^(data:image\/|https?:)/.test(f));
@@ -871,7 +886,7 @@ window.renderTechnicianParts = async function(container) {
       part.id, part.clienteNombre, part.ubicacionNombre, part.empleadoNombre,
       part.tipoPuerta, part.descripcion, part.estado, part.fecha
     ].join(' ').toLocaleLowerCase('es').includes(query));
-    container.querySelector('#technicianPartRows').innerHTML = filtered.map(part => {
+    renderPaginatedRows(container.querySelector('#technicianPartRows'), filtered, part => {
       const own = String(part.createdBy) === String(window.authState.user.id);
       const actions = own
         ? `<button type="button" class="btn btn-outline btn-sm" data-action="edit-parte" data-id="${authEscape(part.id)}" title="Editar mi parte"><i class="fas fa-pen"></i></button>
@@ -879,7 +894,7 @@ window.renderTechnicianParts = async function(container) {
            <button type="button" class="btn btn-outline btn-sm" onclick="confirmDelete('Parte ${authEscape(part.id)}',()=>deleteParte('${authEscape(part.id)}'))" title="Eliminar mi parte"><i class="fas fa-trash"></i></button>`
         : `<button type="button" class="btn btn-outline btn-sm" data-view-part="${authEscape(part.id)}" title="Ver parte"><i class="fas fa-eye"></i> Ver</button>`;
       return `<tr><td><strong>${authEscape(part.id)}</strong></td><td>${authEscape(part.clienteNombre)}</td><td>${authEscape(part.ubicacionNombre || '—')}</td><td>${authEscape(part.empleadoNombre || '—')}</td><td>${authEscape(part.tipoPuerta || part.descripcion || '—')}</td><td>${authEscape(part.kms || 0)} km</td><td><span class="badge ${authEscape(getBadgeClass(part.estado))}">${authEscape(getStatusLabel(part.estado))}</span></td><td>${authEscape(formatDate(part.fecha))}</td><td class="actions-cell">${actions}</td></tr>`;
-    }).join('') || '<tr><td colspan="9">No hay partes que coincidan.</td></tr>';
+    }, { colspan: 9, empty: '<tr><td colspan="9">No hay partes que coincidan.</td></tr>' });
   };
   container.querySelector('#technicianPartRows').addEventListener('click', e => {
     const btn = e.target.closest('[data-view-part]');
@@ -892,14 +907,14 @@ window.renderTechnicianParts = async function(container) {
   paint();
 };
 
-const originalPartPage = window.render_partesTrabajo;
-window.render_partesTrabajo = async function(container, arg) {
+lazyWrap('render_partesTrabajo', (base, container, arg) => {
   if (window.isTechnician()) return window.renderTechnicianParts(container);
-  return originalPartPage(container, arg);
-};
+  if (base) return base(container, arg);
+  container.innerHTML = '<div class="empty-state"><i class="fas fa-clipboard-list"></i><h3>Partes de Trabajo</h3></div>';
+  return Promise.resolve();
+});
 
-const originalShowPartForm = window.showParteForm;
-window.showParteForm = async function(id, prefill) {
+lazyWrap('showParteForm', async (base, id, prefill) => {
   if (window.isTechnician() && id) {
     const part = await dbGet('partesTrabajo', id);
     if (!part || String(part.createdBy) !== String(window.authState.user.id)) {
@@ -909,7 +924,7 @@ window.showParteForm = async function(id, prefill) {
   if (window.isTechnician() && !window.authState.employee) {
     return showToast('Tu cuenta no está vinculada a un empleado. Contacta con administración.', 'error');
   }
-  await originalShowPartForm(id, prefill);
+  if (base) await base(id, prefill);
   if (!window.isTechnician()) return;
   const employeeSelect = document.getElementById('pt_empleado');
   if (employeeSelect) {
@@ -932,26 +947,50 @@ window.showParteForm = async function(id, prefill) {
     });
     kmsInput.insertAdjacentElement('afterend', unlock);
   }
-};
+});
 
-const originalSavePart = window.saveParte;
-window.saveParte = async function(id) {
+lazyWrap('saveParte', (base, id) => {
   if (window.isTechnician()) {
     const employee = window.authState.employee;
     const employeeSelect = document.getElementById('pt_empleado');
     if (!employee || !employeeSelect) return showToast('No se ha podido asignar el técnico a este parte.', 'error');
     employeeSelect.value = employee.id;
   }
-  return originalSavePart(id);
-};
+  return base ? base(id) : Promise.resolve();
+});
 
-const originalDeletePart = window.deleteParte;
-window.deleteParte = async function(id) {
+lazyWrap('deleteParte', async (base, id) => {
   if (window.isTechnician()) {
     const part = await dbGet('partesTrabajo', id);
     if (!part || String(part.createdBy) !== String(window.authState.user.id)) {
       return showToast('Solo puedes eliminar tus propios partes.', 'error');
     }
   }
-  return originalDeletePart(id);
-};
+  return base ? base(id) : Promise.resolve();
+});
+
+// ─── Red de seguridad para pages.js ────────────────────────────────
+// Si pages.js declara estas funciones con `function render_x()` (hoisting),
+// pisaría nuestros wrappers al cargarse. Este registro en DOMContentLoaded
+// guarda la implementación base ANTES de que nadie la llame, y re-instala
+// el wrapper si detecta que ha sido sustituido.
+const WRAPPED_NAMES = ['render_vehiculos', 'render_presupuestos', 'render_almacen',
+  'render_dashboard', 'render_configuracion', 'render_partesTrabajo',
+  'showParteForm', 'saveParte', 'deleteParte'];
+
+document.addEventListener('DOMContentLoaded', () => {
+  WRAPPED_NAMES.forEach(name => {
+    const current = window[name];
+    if (typeof current !== 'function') return;
+    if (current.__isWrapper) return; // sigue nuestro wrapper: nada que hacer
+    // pages.js nos ha pisado: esa es la implementación base real
+    window[name + '__base'] = current;
+    // Re-envolvemos preservando la lógica del wrapper original guardada antes
+    const previousWrapper = current.__valgomPreviousWrapper || null;
+    if (previousWrapper) {
+      window[name] = previousWrapper;
+    } else {
+      console.warn(`[Auth] ${name} sobrescrita por pages.js sin wrapper previo; se usará la base directamente.`);
+    }
+  });
+}, { once: true });

@@ -204,7 +204,7 @@ class Server(HTTPServer):
 
 
 # CAMBIO AQUÍ: '0.0.0.0' en vez de '127.0.0.1'
-print(f'🌐 Server AutoPuerta Pro: http://0.0.0.0:{PORT}')
-print(f'📸 Carpeta fotos/: {os.path.abspath(FOTOS_DIR)}')
-print(f'📧 Servicio de correo SMTP habilitado')
+print(f'Server AutoPuerta Pro: http://0.0.0.0:{PORT}')
+print(f'Carpeta fotos/: {os.path.abspath(FOTOS_DIR)}')
+print(f'Servicio de correo SMTP habilitado')
 Server(('0.0.0.0', PORT), Handler).serve_forever()
