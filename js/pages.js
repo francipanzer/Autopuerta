@@ -402,6 +402,8 @@ async function showClienteForm(editId = null, opts = {}) {
         '<input id="cf_direccion" value="'+escapeHtml(c.direccion||'')+'" style="flex:1">'+
         '<button type="button" class="btn btn-outline btn-sm" onclick="geolocalizarCliente()" title="Buscar coordenadas">'+
           '<i class="fas fa-map-marker-alt"></i></button>'+
+        '<button type="button" id="cf_btn_gps" class="btn btn-outline btn-sm" onclick="usarUbicacionActualCliente()" title="Usar mi ubicación actual">'+
+          '<i class="fas fa-location-crosshairs"></i></button>'+
       '</div>'+
       '<small id="cf_geo_estado" style="color:var(--text-muted);font-size:11px">'+
         (c.lat ? '✅ '+c.lat.toFixed(4)+', '+c.lng.toFixed(4) : '⚠️ Sin coordenadas (pulsa el mapa)')+
@@ -479,6 +481,30 @@ window.geolocalizarCliente = async function(){
   window.__geoCliente = geo;
   estado.textContent = '✅ ' + geo.nombreCompleto.split(',').slice(0,3).join(',');
   showToast('Coordenadas encontradas');
+};
+
+window.usarUbicacionActualCliente = function(){
+  const estado = document.getElementById('cf_geo_estado');
+  const btn = document.getElementById('cf_btn_gps');
+  if(!navigator.geolocation){ showToast('Tu dispositivo no permite obtener la ubicación','error'); return; }
+  estado.textContent = '📡 Obteniendo ubicación...';
+  if(btn) btn.disabled = true;
+  navigator.geolocation.getCurrentPosition(async pos => {
+    const lat = pos.coords.latitude, lng = pos.coords.longitude;
+    const res = await geocodificarInverso(lat, lng);
+    if(btn) btn.disabled = false;
+    if(!document.getElementById('cf_direccion')) return;
+    window.__geoCliente = { lat, lng, nombreCompleto: res?.nombreCompleto || '' };
+    if(res) document.getElementById('cf_direccion').value = res.direccion;
+    estado.textContent = '✅ ' + lat.toFixed(4) + ', ' + lng.toFixed(4)
+      + (res ? '' : ' (dirección no encontrada, escríbela a mano)');
+    showToast(res ? 'Dirección capturada. Revísala antes de guardar' : 'Coordenadas capturadas');
+  }, err => {
+    if(btn) btn.disabled = false;
+    const msg = err.code === 1 ? 'Permiso de ubicación denegado' : 'No se pudo obtener la ubicación';
+    estado.textContent = '❌ ' + msg;
+    showToast(msg,'error');
+  }, { enableHighAccuracy:true, timeout:15000, maximumAge:0 });
 };
 
 window.deleteCliente = async function(id){
@@ -3569,7 +3595,7 @@ window.openDoticsMaintenanceForm = async function(chainId, doorId=null){
     ? (window.authState.employee ? [window.authState.employee] : [])
     : await dbGetAll('empleados');
   const id=window.db.nextId('REV');
-  const productTypes=['SECCIONAL','RAPIDA','RAPIDA PLEGABLE','BASCULANTE','CORREDERA','CORREDERA CRISTAL'];
+  const productTypes=['SECCIONAL','RAPIDA','RAPIDA PLEGABLE','BARRERA','BASCULANTE','CORREDERA','CORREDERA CRISTAL'];
   const doorType=String(door?.tipoPuerta||door?.tipo||'').trim().toLocaleUpperCase();
   window.__doticsVisitDraft={
     id,chainId:String(chain.id),chainName:chain.nombre,doorId:door?.id||null,productTypes,
@@ -4203,12 +4229,12 @@ window.showImportFolioModal = async function() {
   if (!main) return;
 
   if (!_importLoaded) {
-    main.innerHTML = '<div style="padding:24px;text-align:center;color:#666;">⏳ Cargando motor OCR... (~2 MB, solo la primera vez)</div>';
+    main.innerHTML = '<div style="padding:24px;text-align:center;color:var(--text-muted);">⏳ Cargando motor OCR... (~2 MB, solo la primera vez)</div>';
     try {
       await Tesseract.createWorker('spa', 1, {
         logger: m => {
           if (m.status === 'recognizing text') {
-            main.innerHTML = `<div style="padding:24px;text-align:center;color:#666;">🔍 Reconociendo texto... ${Math.round(m.progress * 100)}%</div>`;
+            main.innerHTML = `<div style="padding:24px;text-align:center;color:var(--text-muted);">🔍 Reconociendo texto... ${Math.round(m.progress * 100)}%</div>`;
           }
         }
       });
@@ -4224,19 +4250,19 @@ window.showImportFolioModal = async function() {
   const cadenasOptions = cadenas.map(c => `<option value="${c.id}">${escapeHtml(c.nombre)}</option>`).join('');
 
   main.innerHTML = `
-    <div id="import-modal" style="position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;z-index:9999;">
-      <div style="background:#fff;border-radius:12px;padding:24px;max-width:700px;width:90%;max-height:90vh;overflow-y:auto;">
-        <h2 style="margin:0 0 16px;">📄 Importar folio de clientes</h2>
-        <p style="color:#666;margin:0 0 16px;">Haz una foto o elige un folio con rutas y tiendas. Tesseract leerá el texto y te mostrará una vista previa editable antes de guardar.</p>
+    <div id="import-modal" style="position:fixed;inset:0;background:rgba(0,0,0,.65);display:flex;align-items:center;justify-content:center;z-index:9999;">
+      <div style="background:var(--surface);color:var(--text);border:1px solid var(--border);box-shadow:0 20px 50px rgba(0,0,0,.45);border-radius:14px;padding:24px;max-width:700px;width:90%;max-height:90vh;overflow-y:auto;">
+        <h2 style="margin:0 0 16px;color:var(--text);">📄 Importar folio de clientes</h2>
+        <p style="color:var(--text-muted);margin:0 0 16px;">Haz una foto o elige un folio con rutas y tiendas. Tesseract leerá el texto y te mostrará una vista previa editable antes de guardar.</p>
         
         <div style="margin-bottom:16px;">
           <label style="font-weight:600;display:block;margin-bottom:6px;">Selecciona la cadena (padre):</label>
-          <select id="import-cadena-select" style="width:100%;padding:8px;border:1px solid #ccc;border-radius:6px;">
+          <select id="import-cadena-select" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;background:var(--surface-alt);color:var(--text);">
             ${cadenasOptions}
           </select>
         </div>
 
-        <div id="import-upload-area" style="border:2px dashed #ccc;border-radius:8px;padding:32px;text-align:center;cursor:pointer;margin-bottom:16px;background:#fafafa;">
+        <div id="import-upload-area" style="border:2px dashed var(--border);border-radius:10px;padding:32px;text-align:center;cursor:pointer;margin-bottom:16px;background:var(--surface-alt);color:var(--text);">
           <input type="file" id="import-file" accept="image/*" capture="environment" style="display:none;">
           <div id="import-preview-container" style="margin-bottom:16px;"></div>
           <p id="import-upload-hint">📷 Clic o arrastra una imagen aquí</p>
@@ -4247,8 +4273,8 @@ window.showImportFolioModal = async function() {
         <div id="import-results" style="display:none;"></div>
 
         <div id="import-actions" style="display:none;margin-top:16px;text-align:right;">
-          <button id="import-cancel" style="background:#666;color:#fff;border:none;padding:8px 16px;border-radius:6px;margin-right:8px;">Cancelar</button>
-          <button id="import-import-btn" style="background:#2563eb;color:#fff;border:none;padding:8px 16px;border-radius:6px;">Importar todo</button>
+          <button id="import-cancel" style="background:transparent;color:var(--text);border:1px solid var(--border);padding:8px 16px;border-radius:8px;margin-right:8px;cursor:pointer;">Cancelar</button>
+          <button id="import-import-btn" style="background:var(--primary);color:#fff;border:none;padding:8px 16px;border-radius:8px;font-weight:600;cursor:pointer;">Importar todo</button>
         </div>
       </div>
     </div>
@@ -4282,11 +4308,11 @@ window.showImportFolioModal = async function() {
 
   uploadArea.addEventListener('click', () => fileInput.click());
 
-  uploadArea.addEventListener('dragover', e => { e.preventDefault(); uploadArea.style.borderColor = '#2563eb'; });
-  uploadArea.addEventListener('dragleave', () => { uploadArea.style.borderColor = '#ccc'; });
+  uploadArea.addEventListener('dragover', e => { e.preventDefault(); uploadArea.style.borderColor = 'var(--primary)'; });
+  uploadArea.addEventListener('dragleave', () => { uploadArea.style.borderColor = 'var(--border)'; });
   uploadArea.addEventListener('drop', e => {
     e.preventDefault();
-    uploadArea.style.borderColor = '#ccc';
+    uploadArea.style.borderColor = 'var(--border)';
     if (e.dataTransfer.files.length) handleFile(e.dataTransfer.files[0]);
   });
 
@@ -4306,7 +4332,7 @@ window.showImportFolioModal = async function() {
     img.src = URL.createObjectURL(file);
     status.style.display = 'block';
     status.innerHTML = '⏳ Procesando imagen...';
-    status.style.color = '#666';
+    status.style.color = 'var(--text-muted)';
 
     Tesseract.recognize(img.src, 'spa', {
       logger: m => {
@@ -4332,24 +4358,24 @@ window.showImportFolioModal = async function() {
       return;
     }
 
-    let html = '<h3 style="margin:0 0 12px;">Vista previa — revisa y corrige antes de importar:</h3>';
+    let html = '<h3 style="margin:0 0 12px;color:var(--text);">Vista previa — revisa y corrige antes de importar:</h3>';
 
     _importData.rutas.forEach((ruta, ri) => {
-      html += `<details open style="margin-bottom:10px;border:1px solid #e5e7eb;border-radius:8px;padding:10px;">
+      html += `<details open style="margin-bottom:10px;border:1px solid var(--border);border-radius:10px;padding:10px;background:var(--surface-alt);">
         <summary style="font-weight:600;cursor:pointer;">🛤️ RUTA
           <input type="number" data-ruta-num="${ri}" value="${ruta.numero}" min="1"
-            style="width:60px;margin:0 6px;padding:4px;border:1px solid #ccc;border-radius:4px;">
+            style="width:60px;margin:0 6px;padding:4px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);">
           (${ruta.clientes.length} tiendas)
         </summary>
         <div style="margin-top:8px;">`;
 
       ruta.clientes.forEach((cli, ci) => {
-        html += `<div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px dashed #eee;flex-wrap:wrap;">
+        html += `<div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px dashed var(--border);flex-wrap:wrap;">
           <input type="checkbox" checked data-inc="${ri}-${ci}" style="width:16px;height:16px;flex-shrink:0;">
           <input type="text" data-nombre="${ri}-${ci}" value="${escAttr(cli.nombre)}" placeholder="Nombre tienda"
-            style="flex:1 1 160px;min-width:140px;padding:6px;border:1px solid #ccc;border-radius:4px;">
+            style="flex:1 1 160px;min-width:140px;padding:6px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);">
           <input type="text" data-direccion="${ri}-${ci}" value="${escAttr(cli.direccion)}" placeholder="Dirección completa"
-            style="flex:2 1 240px;min-width:200px;padding:6px;border:1px solid #ccc;border-radius:4px;">
+            style="flex:2 1 240px;min-width:200px;padding:6px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);">
         </div>`;
       });
 

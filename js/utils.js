@@ -149,6 +149,26 @@ async function geocodificar(direccion){
   }
 }
 
+/** Coordenadas → dirección (Nominatim) */
+async function geocodificarInverso(lat, lng){
+  const url = 'https://nominatim.openstreetmap.org/reverse?format=json&addressdetails=1&zoom=18&lat='
+    + lat + '&lon=' + lng;
+  try {
+    const res = await fetch(url, { headers: { 'Accept-Language': 'es' } });
+    const data = await res.json();
+    if (!data || data.error) return null;
+    const a = data.address || {};
+    const calle = [a.road || a.pedestrian || a.industrial, a.house_number].filter(Boolean).join(' ');
+    const ciudad = a.city || a.town || a.village || a.municipality || '';
+    const partes = [calle, a.postcode, ciudad].filter(Boolean);
+    return { direccion: partes.length ? partes.join(', ') : data.display_name,
+             nombreCompleto: data.display_name };
+  } catch (e) {
+    console.error('Error geocodificarInverso:', e);
+    return null;
+  }
+}
+
 /** Haversine: distancia en línea recta entre dos puntos (km) */
 function calcularKmLineal(origen, destino){
   const R = 6371;
