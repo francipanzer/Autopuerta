@@ -171,6 +171,38 @@ function setupMobileMenu() {
   document.body.appendChild(backdrop);
 }
 
+// ── Indicador de estado de sincronización ─────────────────────────────
+function updateSyncStatus() {
+  const statusEl = document.getElementById('syncStatus');
+  if (!statusEl) return;
+
+  try {
+    const queue = JSON.parse(localStorage.getItem('autopuerta_sync_queue') || '[]');
+    const pending = Array.isArray(queue) ? queue.length : 0;
+    const online = navigator.onLine;
+
+    statusEl.className = 'sync-status ' + (online ? 'online' : 'offline');
+
+    if (!online) {
+      statusEl.innerHTML = '<i class="fas fa-circle"></i><span>🔴 Sin conexión</span>';
+    } else if (pending === 0) {
+      statusEl.innerHTML = '<i class="fas fa-circle"></i><span>🟢 Sincronizado</span>';
+    } else {
+      statusEl.innerHTML = `<i class="fas fa-circle"></i><span>🟡 ${pending} pendiente${pending !== 1 ? 's' : ''}</span>`;
+    }
+  } catch (e) {
+    console.error('Error updating sync status:', e);
+  }
+}
+
+// Escuchar eventos de sincronización
+window.addEventListener('load', () => {
+  updateSyncStatus();
+  window.addEventListener('online', updateSyncStatus);
+  window.addEventListener('offline', updateSyncStatus);
+  window.addEventListener('autopuerta:sync-state', updateSyncStatus);
+});
+
 let valgomNavStack = [{ page: 'dashboard', arg: null }];
 let exitConfirmed = false;
 
@@ -810,6 +842,8 @@ function abrirModalPuertas(cliente) {
         '<div class="ubic-form">' +
           '<input type="text" id="pu_nombre" placeholder="Nombre / matrícula (ej: Nave 1 - Acceso A)">' +
           '<select id="pu_tipo">' + opciones + '</select>' +
+          '<input type="text" id="pu_marca" placeholder="Marca (opcional)">' +
+          '<input type="text" id="pu_serie" placeholder="Número de serie (opcional)">' +
           '<select id="pu_estado">' +
             '<option value="operativa">🟢 Operativa</option>' +
             '<option value="averiada">🔴 Averiada</option>' +
@@ -873,11 +907,15 @@ async function pintarListaPuertas() {
       else if (dias <= 3) aviso = ' <span style="color:#f97316">🟠 Revisar en ' + dias + 'd</span>';
       else if (dias <= 7) aviso = ' <span style="color:#22c55e">🟢 Próxima en ' + dias + 'd</span>';
     }
+    const marcaInfo = p.marca ? `<small>Marca: ${escapeHtml(p.marca)}</small><br>` : '';
+    const serieInfo = p.numeroSerie ? `<small>S/N: ${escapeHtml(p.numeroSerie)}</small><br>` : '';
     return `
     <div class="ubic-item">
       <div>
         <strong>${escapeHtml(p.nombre)}</strong>
         <small>· ${tipo ? tipo.nombre : p.tipo}</small><br>
+        ${marcaInfo}
+        ${serieInfo}
         <small>${estados[p.estado] || p.estado}</small><br>
         <small>Próx. revisión: ${p.proximaRevision || '—'}${aviso}</small>
       </div>
@@ -892,6 +930,8 @@ async function pintarListaPuertas() {
 async function guardarPuerta() {
   const nombre = document.getElementById('pu_nombre').value.trim();
   const tipo   = document.getElementById('pu_tipo').value;
+  const marca  = document.getElementById('pu_marca').value.trim();
+  const serie  = document.getElementById('pu_serie').value.trim();
   const estado = document.getElementById('pu_estado').value;
   const ubId   = document.getElementById('pu_ubicacion').value;
   const notas  = document.getElementById('pu_notas').value.trim();
@@ -905,6 +945,8 @@ async function guardarPuerta() {
       id: 'PRT-' + Date.now(),
       nombre,
       tipo,
+      marca,
+      numeroSerie: serie,
       clienteId: getPuertaClienteActual(),
       ubicacionId: ubId || null,
       estado,
@@ -920,6 +962,8 @@ async function guardarPuerta() {
   }
 
   document.getElementById('pu_nombre').value = '';
+  document.getElementById('pu_marca').value = '';
+  document.getElementById('pu_serie').value = '';
   document.getElementById('pu_notas').value = '';
   document.getElementById('pu_nombre').focus();
 

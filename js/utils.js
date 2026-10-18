@@ -706,6 +706,18 @@ const TIPOS_PUERTA = {
       'Muelle contrapeso'
     ]
   },
+  corredera_cristal: {
+    nombre: 'Corredera Cristal',
+    diasRevision: 180,
+    checklist: [
+      'Células fotoeléctricas',
+      'Banda de seguridad',
+      'Motor / reductora',
+      'Guías y rodillos',
+      'Cristales y marcos',
+      'Estructura'
+    ]
+  },
   batiente: {
     nombre: 'Batiente',
     diasRevision: 180,

@@ -45,7 +45,8 @@ const TABLA = {
   tableros:      'tableros',
   tarjetasTablero: 'tarjetas_tablero',
   solicitudesMaterial: 'solicitudes_material',
-  incidencias: 'incidencias'
+  incidencias: 'incidencias',
+  manuales:      'manuales'
 };
 
 // ── Renombrado camelCase ↔ snake_case ──────────────────────
@@ -357,12 +358,50 @@ async function dbAdd(store,data){
 
 async function dbCreate(store,data){ return dbAdd(store,data); }
 
+// ── Merge inteligente para partes de trabajo ─────────────────────────────
+function mergePartesTrabajo(serverRecord, localRecord){
+  // Campos que se priorizan del servidor (no se sobrescriben)
+  const serverPriority=['id','createdAt','createdBy','updatedat'];
+  // Campos que se priorizan del local (última edición del usuario)
+  const localPriority=['estado','notas','ubicacionId','ubicacionNombre','ubicacionDireccion','kmInicial','kmFinal','horaEntrada','horaSalida','fotos'];
+  // Campos que se combinan (arrays)
+  const mergeFields=['puertaIds'];
+  
+  const merged={...serverRecord};
+  
+  // Aplicar campos con prioridad local
+  for(const field of localPriority){
+    if(localRecord[field]!==undefined && localRecord[field]!==null){
+      merged[field]=localRecord[field];
+    }
+  }
+  
+  // Combinar arrays
+  for(const field of mergeFields){
+    const serverArr=Array.isArray(serverRecord[field])?serverRecord[field]:[];
+    const localArr=Array.isArray(localRecord[field])?localRecord[field]:[];
+    // Unir arrays eliminando duplicados
+    merged[field]=[...new Set([...serverArr,...localArr])];
+  }
+  
+  // Mantener updatedAt más reciente
+  const serverTime=serverRecord.updatedat?new Date(serverRecord.updatedat).getTime():0;
+  const localTime=localRecord.updatedAt?new Date(localRecord.updatedAt).getTime():0;
+  merged.updatedAt=localTime>serverTime?localRecord.updatedAt:serverRecord.updatedat;
+  
+  return merged;
+}
+
 async function dbPut(store,data){
   rejectAuthenticatedOfflineWrite();
   const tableName=TABLA[store]||store;
   const input={...data};
   if(['partesTrabajo','revisiones','solicitudesMaterial'].includes(store) && window.authState?.user && !Object.prototype.hasOwnProperty.call(input,'createdBy')){
     input.createdBy=window.authState.user.id;
+  }
+  // Agregar updatedAt si no existe
+  if(!input.updatedAt){
+    input.updatedAt=new Date().toISOString();
   }
   const obj=toDB(input);
   if(!obj.id && store === 'partesTrabajo'){
@@ -376,7 +415,15 @@ async function dbPut(store,data){
   const update=rows=>{
     const index=rows.findIndex(record=>String(record.id)===String(obj.id));
     if(index===-1) rows.push(local);
-    else rows[index]=local;
+    else {
+      // Last-write-wins por updatedAt
+      const existing=rows[index];
+      const existingTime=existing.updatedAt?new Date(existing.updatedAt).getTime():0;
+      const newTime=local.updatedAt?new Date(local.updatedAt).getTime():Date.now();
+      if(newTime>=existingTime){
+        rows[index]=local;
+      }
+    }
     return rows;
   };
   if(!navigator.onLine){
@@ -385,6 +432,19 @@ async function dbPut(store,data){
     return local;
   }
   try{
+    // Para partes de trabajo, hacer merge por campos si hay conflicto
+    if(store==='partesTrabajo'){
+      const {data:existing}=await supabaseDB.from(tableName).select('*').eq('id',obj.id).maybeSingle();
+      if(existing && existing.updatedat){
+        const existingTime=new Date(existing.updatedat).getTime();
+        const newTime=obj.updatedat?new Date(obj.updatedat).getTime():Date.now();
+        if(newTime<existingTime){
+          // La versión del servidor es más reciente, hacer merge
+          const merged=mergePartesTrabajo(existing,fromJS({...obj}));
+          Object.assign(obj,toDB(merged));
+        }
+      }
+    }
     const upsertQuery=supabaseDB.from(tableName).upsert(obj);
     const {data:result,error}=await (store==='partesTrabajo'
       ? upsertQuery.select('id').maybeSingle()

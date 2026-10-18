@@ -567,8 +567,9 @@ function renderLineItems(cid, items){
   container.innerHTML = items.map((item,i)=>
     '<tr data-idx="'+i+'">'+
       '<td><input type="text" data-field="descripcion" value="'+escapeHtml(item.descripcion)+'" oninput="this.style.outline=\'\'" onchange="updateLineItem(\''+cid+'\','+i+',\'descripcion\',this.value)" style="min-width:200px"></td>'+
-      '<td><select data-field="tipoId" onchange="updateLineItem(\''+cid+'\','+i+',\'tipoId\',this.value)">'+
-        (window.__tipos||[]).map(t=>'<option value="'+t.id+'" '+(item.tipoId===t.id?'selected':'')+'>'+escapeHtml(t.nombre)+'</option>').join('')+'</td>'+
+      '<td><select data-field="tipoId" onchange="updateLineItem(\''+cid+'\','+i+',\'tipoId\',this.value)" style="min-width:180px">'+
+        '<option value="">— Sin tipo —</option>'+
+        (window.__tipos||[]).map(t=>'<option value="'+t.id+'" '+(String(item.tipoId||'')===String(t.id)?'selected':'')+'>'+escapeHtml(t.nombre)+'</option>').join('')+'</td>'+
       '<td><input type="number" data-field="cantidad" class="only-num-dec" min="0" step="0.01" inputmode="decimal" value="'+(Number(item.cantidad)||0)+'" onchange="updateLineItem(\''+cid+'\','+i+',\'cantidad\',this.value)" style="width:110px"></td>'+
       '<td><input type="number" data-field="precio" class="only-num-dec" min="0" step="0.01" inputmode="decimal" value="'+(Number(item.precio)||0)+'" onchange="updateLineItem(\''+cid+'\','+i+',\'precio\',this.value)" style="width:110px"></td>'+
       '<td><strong id="'+cid+'_subtotal_'+i+'">'+formatCurrency(item.cantidad*item.precio)+'</strong></td>'+
@@ -1489,6 +1490,9 @@ window.toggleVehiculoEstado = async function(id){
 //  ALMACÉN
 // ═══════════════════════════════════════════════════════════
 window.render_almacen = async function(el){
+  const tipos = await dbGetAll('tiposPuerta');
+  const tiposOptions = tipos.map(t => `<option value="${t.id}">${escapeHtml(t.nombre)}</option>`).join('');
+  
   el.innerHTML =
     '<div class="page-header"><div><h2>Almacén</h2><p>Control de stock y artículos</p></div>'+
     '<div class="header-actions">'+
@@ -1496,8 +1500,8 @@ window.render_almacen = async function(el){
       '<button class="btn btn-outline" onclick="generatePDF_almacen()"><i class="fas fa-file-pdf"></i> PDF</button></div></div>'+
     '<div class="search-bar">'+
       '<input type="text" placeholder="Buscar artículo..." id="searchArt" oninput="renderAlmacen()">'+
-      '<select id="filterCatArt" onchange="renderAlmacen()"><option value="">Todas</option>'+
-      '<option value="producto">Producto</option><option value="recambio">Recambio</option><option value="servicio">Servicio</option></select></div>'+
+      '<select id="filterCatArt" onchange="renderAlmacen()"><option value="">Todas las categorías</option>'+
+      tiposOptions+'</select></div>'+
     '<div class="card"><div  class="table-wrapper"><table><thead>'+
       '<tr><th>Referencia</th><th>Nombre</th><th>Categoría</th><th>Stock</th><th>Mín.</th><th>P. Venta</th><th>Estado</th><th>Acciones</th></tr>'+
     '</thead><tbody id="artBody"></tbody></table></div></div>';
@@ -1505,18 +1509,22 @@ window.render_almacen = async function(el){
 };
 
 window.renderAlmacen = async function(){
-  const items = await dbGetAll('almacen');
+  const [items, tipos] = await Promise.all([dbGetAll('almacen'), dbGetAll('tiposPuerta')]);
+  const tiposMap = new Map(tipos.map(t => [t.id, t.nombre]));
   const q = (document.getElementById('searchArt')?.value||'').toLowerCase();
   const cat = document.getElementById('filterCatArt')?.value||'';
   const filtered = items.filter(a=>{
     if(q && !JSON.stringify(a).toLowerCase().includes(q)) return false;
-    if(cat && a.categoria!==cat) return false;
+    // Filtrar por categoria o tipoPuerta (para compatibilidad)
+    if(cat && a.categoria!==cat && a.tipoPuerta!==cat) return false;
     return true;
   });
   document.getElementById('artBody').innerHTML = filtered.map(a=>{
     const bajo = a.stock <= a.stockMinimo;
+    const catId = a.categoria || a.tipoPuerta;
+    const catNombre = catId ? tiposMap.get(catId) || a.categoria || '—' : '—';
     return '<tr><td><strong>'+escapeHtml(a.referencia)+'</strong></td><td>'+escapeHtml(a.nombre)+'</td>'+
-      '<td><span class="badge badge-blue">'+(a.categoria||'—')+'</span></td>'+
+      '<td><span class="badge badge-blue">'+escapeHtml(catNombre)+'</span></td>'+
       '<td style="font-weight:700;color:'+(bajo?'var(--danger)':'var(--text)')+'">'+a.stock+'</td>'+
       '<td>'+a.stockMinimo+'</td><td>'+formatCurrency(a.precioVenta)+'</td>'+
       '<td><span class="badge '+(bajo?'badge-red':'badge-green')+'">'+(bajo?'Stock bajo':'OK')+'</span></td>'+
@@ -1537,11 +1545,18 @@ window.showArticuloForm = async function(id){
   id = id ? String(id) : null;
   const a = id ? await dbGet('almacen',id) : {};
   const nextId = a.id || window.db.nextId('ART');
+  
+  // Cargar tipos de puerta
+  const tipos = await dbGetAll('tiposPuerta');
+  const catId = a.categoria || a.tipoPuerta; // Usar categoria o tipoPuerta para compatibilidad
+  const tiposOptions = tipos.map(t => `<option value="${t.id}" ${String(catId)===String(t.id)?'selected':''}>${escapeHtml(t.nombre)}</option>`).join('');
 
   const form = '<div class="form-grid">'+
-    '<div class="form-group"><label>Referencia</label><input id="ar_ref" value="'+escapeHtml(a.referencia||'')+'"></div>'+
-    '<div class="form-group"><label>Categoría</label><select id="ar_cat">'+
-      ['producto','recambio','servicio'].map(c=>'<option value="'+c+'" '+(a.categoria===c?'selected':'')+'>'+c.charAt(0).toUpperCase()+c.slice(1)+'</option>').join('')+'</select></div>'+
+    '<div class="form-group"><label>ID (autogenerado)</label><input id="ar_id" value="'+escapeHtml(nextId)+'" readonly style="background:var(--surface-alt)"></div>'+
+    '<div class="form-group"><label>Categoría</label><select id="ar_tipo">'+
+      '<option value="">— Sin tipo —</option>'+
+      tiposOptions+
+    '</select></div>'+
     '<div class="form-group full"><label>Nombre *</label><input id="ar_nom" value="'+escapeHtml(a.nombre||'')+'"></div>'+
     '<div class="form-group"><label>Unidad</label><input id="ar_unid" value="'+escapeHtml(a.unidad||'unidad')+'"></div>'+
     '<div class="form-group"><label>Stock</label><input id="ar_stock" type="number" class="only-num" value="'+(a.stock||0)+'"></div>'+
@@ -1559,13 +1574,13 @@ window.showArticuloForm = async function(id){
 window.saveArticulo = async function(id){
   id = id ? String(id) : null;
   try {
-    const ref = document.getElementById('ar_ref').value.trim();
     const data = {
-      id: ref || window.db.nextId('ART'),
-      referencia: ref,
+      id: document.getElementById('ar_id').value.trim(),
+      referencia: document.getElementById('ar_id').value.trim(), // Usar ID como referencia
       nombre: document.getElementById('ar_nom').value.trim(),
       unidad: document.getElementById('ar_unid').value.trim(),
-      categoria: document.getElementById('ar_cat').value,
+      categoria: document.getElementById('ar_tipo').value, // Guardar en categoria para compatibilidad
+      tipoPuerta: document.getElementById('ar_tipo').value,
       stock: parseInt(document.getElementById('ar_stock').value)||0,
       stockMinimo: parseInt(document.getElementById('ar_min').value)||0,
       precioCompra: parseFloat(document.getElementById('ar_pc').value)||0,
@@ -1683,6 +1698,14 @@ window.render_configuracion = async function(el){
         '<div class="config-menu-content">'+
           '<h3>Sincronización de Datos</h3>'+
           '<p>Exportar, importar y borrar datos</p>'+
+        '</div>'+
+        '<div class="config-menu-arrow"><i class="fas fa-chevron-right"></i></div>'+
+      '</div>'+
+      '<div class="config-menu-item" onclick="navigateTo(\'manuales\')">'+
+        '<div class="config-menu-icon"><i class="fas fa-book"></i></div>'+
+        '<div class="config-menu-content">'+
+          '<h3>Manuales</h3>'+
+          '<p>Manuales técnicos por tipo de puerta y avería</p>'+
         '</div>'+
         '<div class="config-menu-arrow"><i class="fas fa-chevron-right"></i></div>'+
       '</div>'+
@@ -1808,9 +1831,9 @@ window.openConfigEmpresa=async function(){
       <div class="form-group"><label for="company_website">Web</label><input id="company_website" type="url" maxlength="180" value="${escapeHtml(settings.website)}" placeholder="https://"></div>
       <div class="form-group full"><label for="company_address">Dirección</label><input id="company_address" maxlength="220" value="${escapeHtml(settings.address)}"></div>
     </form>`,
-    `<button type="button" class="btn btn-primary" onclick="closeModal()">Cancelar</button>
+    `<div class="company-footer-btns"><button type="button" class="btn btn-primary" onclick="closeModal()">Cancelar</button>
     <button type="button" class="btn btn-primary" id="saveCompanySettings"><i class="fas fa-save"></i> Guardar datos</button>
-    <button type="button" class="btn btn-primary" id="btn-clearCompanySettings"><i class="fas fa-trash"></i> Borrar datos</button>`);
+    <button type="button" class="btn btn-primary" id="btn-clearCompanySettings"><i class="fas fa-trash"></i>     Borrar datos</button></div>`);
   document.getElementById('btn-clearCompanySettings').addEventListener('click',()=>{
     const form=document.getElementById('companySettingsForm');
     form.querySelectorAll('input').forEach(input=>{input.value='';});
@@ -3192,64 +3215,80 @@ window.render_revisiones_rutas = async function(cadenaId, cadenaNombre) {
   const main = document.getElementById('mainContent');
   if (!main) return;
 
-  const rutas = await getRutasByCadena(cadenaId);
-  
-  main.innerHTML = `
-    <div class="page-revisiones">
-      <div class="page-header">
-        <div>
-          <button class="btn btn-primary btn-sm" onclick="navigateTo('revisionesProgramadas')"><i class="fas fa-arrow-left"></i> Volver</button>
-        </div>
-        <div>
-          <h2 class="page-revisiones-title"><i class="fas fa-route"></i> Rutas · ${escapeHtml(cadenaNombre)}</h2>
-          <p class="page-revisiones-subtitle">Selecciona una ruta para ver sus tiendas</p>
-        </div>
-      </div>
-      <div id="rutas-container" class="stats-grid"></div>
-    </div>`;
-
-  const container = document.getElementById('rutas-container');
-  
-  if (rutas.length === 0) {
-    container.innerHTML = '<p style="padding:20px;text-align:center;color:var(--gray);grid-column:1/-1;">No hay rutas para esta cadena.</p>';
-    return;
-  }
-
-  // Usar estilos de stat-card para las rutas
-  for (const ruta of rutas) {
-    const puertas = await getPuertasPorRuta(ruta.id);
+  try {
+    const rutas = await getRutasByCadena(cadenaId);
     
-    // Calcular días hasta próxima revisión
-    let diasHastaRevision = null;
-    let bordeColor = '#22c55e'; // verde por defecto
+    main.innerHTML = `
+      <div class="page-revisiones">
+        <div class="page-header">
+          <div>
+            <button class="btn btn-outline btn-sm" onclick="navigateTo('revisionesProgramadas')"><i class="fas fa-arrow-left"></i> Volver</button>
+          </div>
+          <div>
+            <h2 class="page-revisiones-title"><i class="fas fa-route"></i> Rutas · ${escapeHtml(cadenaNombre)}</h2>
+            <p class="page-revisiones-subtitle">Selecciona una ruta para ver sus tiendas</p>
+          </div>
+        </div>
+        <div id="rutas-container" class="stats-grid"></div>
+      </div>`;
+
+    const container = document.getElementById('rutas-container');
     
-    if (ruta.proximaRevision) {
-      const proxima = new Date(ruta.proximaRevision);
-      const hoy = new Date();
-      const diffTime = proxima - hoy;
-      diasHastaRevision = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-      
-      // Rojo si faltan 15 días o menos, verde si más
-      if (diasHastaRevision <= 15) {
-        bordeColor = '#ef4444'; // rojo
-      }
+    if (rutas.length === 0) {
+      container.innerHTML = '<p style="padding:20px;text-align:center;color:var(--gray);grid-column:1/-1;">No hay rutas para esta cadena.</p>';
+      return;
     }
-    
-    const card = document.createElement('div');
-    card.className = 'stat-card';
-    card.style.cursor = 'pointer';
-    card.style.border = `2px solid ${bordeColor}`;
-    card.innerHTML = `
-      <div class="stat-icon" style="background:#dbeafe;color:#2563eb"><i class="fas fa-route"></i></div>
-      <div class="stat-info">
-        <h3>${escapeHtml(ruta.nombre)}</h3>
-        <p>${puertas.length} puerta${puertas.length>1?'s':''}</p>
-        ${diasHastaRevision !== null ? `<small style="color:${bordeColor}">Próxima revisión: ${diasHastaRevision} día${diasHastaRevision!==1?'s':''}</small>` : ''}
-        ${ruta.frecuenciaMeses ? `<small>cada ${ruta.frecuenciaMeses} mes${ruta.frecuenciaMeses>1?'es':''}</small>` : ''}
-      </div>
-    `;
-    card.addEventListener('click', () => window.render_revisiones_tiendas(ruta.id, ruta.nombre, cadenaId, cadenaNombre));
-    container.appendChild(card);
+
+    // Usar estilos de stat-card para las rutas
+    for (const ruta of rutas) {
+      let puertas = [];
+      try {
+        puertas = await getPuertasPorRuta(ruta.id);
+      } catch(e) {
+        console.error('Error cargando puertas de ruta:', e);
+        puertas = [];
+      }
+      
+      // Calcular días hasta próxima revisión
+      let diasHastaRevision = null;
+      let bordeColor = '#22c55e'; // verde por defecto
+      
+      if (ruta.proximaRevision || ruta.proximarevision) {
+        try {
+          const proximaStr = ruta.proximaRevision || ruta.proximarevision;
+          const proxima = new Date(proximaStr);
+          const hoy = new Date();
+          const diffTime = proxima - hoy;
+          diasHastaRevision = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+          
+          // Rojo si faltan 15 días o menos, verde si más
+          if (diasHastaRevision <= 15) {
+            bordeColor = '#ef4444'; // rojo
+          }
+        } catch(e) {
+          console.error('Error calculando días hasta revisión:', e);
+        }
+      }
+      
+      const card = document.createElement('div');
+      card.className = 'stat-card';
+      card.style.cursor = 'pointer';
+      card.style.border = `2px solid ${bordeColor}`;
+      card.innerHTML = `
+        <div class="stat-icon" style="background:#dbeafe;color:#2563eb"><i class="fas fa-route"></i></div>
+        <div class="stat-info">
+          <h3>${escapeHtml(ruta.nombre)}</h3>
+          <p>${puertas.length} puerta${puertas.length>1?'s':''}</p>
+          ${diasHastaRevision !== null ? `<small style="color:${bordeColor}">Próxima revisión: ${diasHastaRevision} día${diasHastaRevision!==1?'s':''}</small>` : ''}
+          ${ruta.frecuenciaMeses ? `<small>cada ${ruta.frecuenciaMeses} mes${ruta.frecuenciaMeses>1?'es':''}</small>` : ''}
+        </div>
+      `;
+      card.addEventListener('click', () => window.render_revisiones_tiendas(ruta.id, ruta.nombre, cadenaId, cadenaNombre));
+      container.appendChild(card);
+    }
+  } catch(e) {
+    console.error('Error en render_revisiones_rutas:', e);
+    main.innerHTML = '<div class="empty-state"><i class="fas fa-triangle-exclamation"></i><h3>Error al cargar rutas</h3><p>'+escapeHtml(e.message)+'</p></div>';
   }
 };
 
@@ -4832,4 +4871,135 @@ window.showImportFolioModal = async function() {
 };
 window.render_importFolio = function(main) {
   showImportFolioModal();
+};
+
+// ═══════════════════════════════════════════════════════════
+//  MANUALES
+// ═══════════════════════════════════════════════════════════
+window.getTiposManuales = async function(){
+  const tipos = await dbGetAll('tiposPuerta');
+  const norm = s => String(s||'').toLowerCase().replace(/^puerta\s+/,'').trim();
+  if(!tipos.some(t => norm(t.nombre)==='corredera cristal')){
+    const nuevo = {id:'TP-CORREDERA-CRISTAL', nombre:'Corredera Cristal', descripcion:'Puerta corredera de cristal', checklist:[]};
+    try{ await dbPut('tiposPuerta', nuevo); tipos.push(nuevo); }
+    catch(e){ console.warn('No se pudo crear el tipo Corredera Cristal', e); tipos.push(nuevo); }
+  }
+  return tipos;
+};
+
+window.render_manuales = async function(el){
+  const manuales = await dbGetAll('manuales');
+  const tipos = await getTiposManuales();
+  
+  const tiposOptions = tipos.map(t => `<option value="${t.id}">${escapeHtml(t.nombre)}</option>`).join('');
+  
+  el.innerHTML =
+    '<div class="page-header"><div><h2>Manuales</h2><p>Manuales técnicos por tipo de puerta y avería</p></div>'+
+    '<div class="header-actions"><button class="btn btn-primary" onclick="showSubirManualModal()"><i class="fas fa-upload"></i> Subir Manual</button></div></div>'+
+    '<div class="search-bar">'+
+      '<input type="text" placeholder="Buscar manual..." id="searchManual" oninput="renderManualesList()">'+
+      '<select id="filterTipoManual" onchange="renderManualesList()"><option value="">Todos los tipos</option>'+
+      tiposOptions+'</select></div>'+
+    '<div class="card"><div class="table-wrapper"><table><thead>'+
+      '<tr><th>Título</th><th>Tipo de puerta</th><th>Tipo de avería</th><th>Fecha</th><th>Acciones</th></tr>'+
+    '</thead><tbody id="manualesBody"></tbody></table></div></div>';
+  renderManualesList();
+};
+
+window.renderManualesList = async function(){
+  const manuales = await dbGetAll('manuales');
+  const q = (document.getElementById('searchManual')?.value||'').toLowerCase();
+  const tipo = document.getElementById('filterTipoManual')?.value||'';
+  const tipos = await getTiposManuales();
+  const tiposMap = new Map(tipos.map(t => [t.id, t.nombre]));
+  
+  const filtered = manuales.filter(m=>{
+    if(q && !JSON.stringify(m).toLowerCase().includes(q)) return false;
+    if(tipo && m.tipoPuerta!==tipo) return false;
+    return true;
+  });
+  
+  document.getElementById('manualesBody').innerHTML = filtered.map(m=>{
+    const tipoNombre = m.tipoPuerta ? tiposMap.get(m.tipoPuerta) || '—' : '—';
+    return '<tr>'+
+      '<td><strong>'+escapeHtml(m.titulo)+'</strong></td>'+
+      '<td><span class="badge badge-blue">'+escapeHtml(tipoNombre)+'</span></td>'+
+      '<td><span class="badge badge-purple">'+escapeHtml(m.tipoAveria||'—')+'</span></td>'+
+      '<td>'+new Date(m.createdAt).toLocaleDateString('es-ES')+'</td>'+
+      '<td class="actions-cell">'+
+        '<button class="btn btn-outline btn-sm" onclick="verManual(\''+m.id+'\')"><i class="fas fa-eye"></i> Ver</button>'+
+        '<button class="btn btn-outline btn-sm btn-icon" onclick="eliminarManual(\''+m.id+'\')"><i class="fas fa-trash"></i></button>'+
+      '</td></tr>';
+  }).join('') || '<tr><td colspan="5" style="text-align:center;padding:30px;color:var(--text-muted)">Sin manuales</td></tr>';
+};
+
+window.showSubirManualModal = async function(){
+  const tipos = await getTiposManuales();
+  const tiposOptions = tipos.map(t => `<option value="${t.id}">${escapeHtml(t.nombre)}</option>`).join('');
+  
+  const form = '<div class="form-grid">'+
+    '<div class="form-group full"><label>Título *</label><input id="man_titulo" placeholder="Ej: Motor averiado - Corredera"></div>'+
+    '<div class="form-group"><label>Tipo de puerta</label><select id="man_tipo">'+tiposOptions+'</select></div>'+
+    '<div class="form-group"><label>Tipo de avería</label><input id="man_averia" placeholder="Ej: motor, sensor, muelle..."></div>'+
+    '<div class="form-group full"><label>Archivo PDF *</label><input type="file" id="man_archivo" accept=".pdf" required></div>'+
+  '</div>';
+  
+  const footer = '<button class="btn btn-outline" onclick="closeModal()">Cancelar</button>'+
+    '<button class="btn btn-primary" onclick="subirManual()"><i class="fas fa-upload"></i> Subir</button>';
+  openModal('Subir Manual', form, footer);
+};
+
+window.subirManual = async function(){
+  const titulo = document.getElementById('man_titulo').value.trim();
+  const tipoPuerta = document.getElementById('man_tipo').value;
+  const tipoAveria = document.getElementById('man_averia').value.trim();
+  const archivoInput = document.getElementById('man_archivo');
+  
+  if(!titulo){ showToast('El título es obligatorio','error'); return; }
+  if(!archivoInput.files[0]){ showToast('Debes seleccionar un archivo PDF','error'); return; }
+  
+  const archivo = archivoInput.files[0];
+  if(archivo.type!=='application/pdf'){ showToast('El archivo debe ser un PDF','error'); return; }
+  
+  try{
+    // Leer el archivo como base64 para guardarlo
+    const reader = new FileReader();
+    reader.onload = async function(e){
+      const base64 = e.target.result;
+      const data = {
+        id: 'MAN-'+Date.now(),
+        titulo,
+        tipoPuerta,
+        tipoAveria,
+        pdfData: base64,
+        createdAt: new Date().toISOString()
+      };
+      
+      await dbPut('manuales', data);
+      closeModal();
+      showToast('Manual subido correctamente');
+      renderManualesList();
+    };
+    reader.readAsDataURL(archivo);
+  }catch(err){
+    console.error('Error al subir manual:', err);
+    showToast('Error al subir manual: '+err.message,'error');
+  }
+};
+
+window.verManual = async function(id){
+  const manual = await dbGet('manuales', id);
+  if(!manual || !manual.pdfData){ showToast('Manual no encontrado','error'); return; }
+  
+  // Abrir PDF en nueva pestaña
+  const blob = await fetch(manual.pdfData).then(r => r.blob());
+  const url = URL.createObjectURL(blob);
+  window.open(url, '_blank');
+};
+
+window.eliminarManual = async function(id){
+  if(!confirm('¿Eliminar este manual?')) return;
+  await dbDelete('manuales', id);
+  showToast('Manual eliminado');
+  renderManualesList();
 };
