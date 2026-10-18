@@ -592,3 +592,12 @@ body.light .icon-btn-danger{color:#dc2626}
   .hiperber-choice{justify-content:flex-start;width:100%;min-height:28px;padding:2px 3px;gap:3px;font-size:9px;overflow:hidden}
   .hiperber-choice input{flex:0 0 12px;width:12px;height:12px;min-height:12px}
 }
+/* =========================================
+   FIX BANNER NETLIFY: Formularios al frente
+   ========================================= */
+#formulario,
+.formulario,
+.formulario__contenido,
+#guardar-btn {
+  z-index: 2147483647 !important;
+}
