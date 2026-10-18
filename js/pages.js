@@ -56,17 +56,26 @@ window.render_dashboard = async function(el){
     const proximas = pendientes.length - urgencias;
     bannerHTML = `
       <div class="card" style="border-left:4px solid ${urgencias > 0 ? '#e11d48' : '#f59e0b'}; margin-bottom:20px;">
-        <div class="card-body" style="padding:12px 16px;">
-          <div style="display:flex;justify-content:space-between;align-items:center;">
-            <div>
-              <strong style="color:${urgencias > 0 ? '#e11d48' : '#f59e0b'};">
-                <i class="fas fa-exclamation-triangle"></i> ${urgencias > 0 ? urgencias + ' vencidas' : ''}${urgencias > 0 && proximas > 0 ? ' · ' : ''}${proximas > 0 ? proximas + ' próximas' : ''}
-              </strong>
-              <small style="display:block;color:var(--text-muted);margin-top:4px;">
-                ${pendientes.slice(0, 3).map(p => p.nombre).join(' · ')}${pendientes.length > 3 ? '...' : ''}
-              </small>
-            </div>
-            <button class="btn btn-sm btn-outline" onclick="navigateTo('revisionesProgramadas')">Ver todo</button>
+        <div class="card-body" style="padding:14px 16px;">
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:10px;">
+            <strong style="color:${urgencias > 0 ? '#e11d48' : '#f59e0b'};">
+              <i class="fas fa-exclamation-triangle"></i> ${urgencias > 0 ? urgencias + ' vencidas' : ''}${urgencias > 0 && proximas > 0 ? ' · ' : ''}${proximas > 0 ? proximas + ' próximas' : ''}
+            </strong>
+            <button class="btn btn-sm btn-primary" onclick="navigateTo('revisionesProgramadas')">Ver todo</button>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:6px;">
+            ${pendientes.slice(0, 5).map(p => {
+              const col = p.dias < 0 ? '#e11d48' : '#f59e0b';
+              const cuando = p.dias < 0 ? `Vencida hace ${Math.abs(p.dias)} d` : p.dias === 0 ? 'Hoy' : `En ${p.dias} d`;
+              const titulo = p.tipo === 'ruta' && p.cadenaNombre
+                ? `<strong>${escapeHtml(p.cadenaNombre)}</strong> <span style="color:var(--text-muted)">›</span> ${escapeHtml(p.rutaNombre)}`
+                : `<strong>${escapeHtml(p.nombre)}</strong>`;
+              return `<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:8px 12px;border-radius:8px;background:${col}14;border:1px solid ${col}40;">
+                <span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"><i class="fas fa-${p.tipo === 'ruta' ? 'route' : p.tipo === 'cliente' ? 'user' : 'door-open'}" style="color:${col};margin-right:8px;"></i>${titulo}</span>
+                <span style="color:${col};font-weight:700;font-size:12px;white-space:nowrap;">${cuando}</span>
+              </div>`;
+            }).join('')}
+            ${pendientes.length > 5 ? `<small style="color:var(--text-muted);">y ${pendientes.length - 5} más…</small>` : ''}
           </div>
         </div>
       </div>`;
@@ -305,7 +314,7 @@ window.renderPaginatedRows = function(tbody, items, renderRow, { colspan = 1, em
 window.render_clientes = async function(el){
   el.innerHTML =
     '<div class="page-header"><div><h2>Clientes</h2><p>Gestión de clientes</p></div>'+
-    '<div class="header-actions"><button class="btn btn-primary" onclick="showClienteForm()"><i class="fas fa-plus"></i> Nuevo Cliente</button></div></div>'+
+    '<div class="header-actions"><button class="btn btn-primary" onclick="showClienteForm()"><i class="fas fa-plus"></i> Nuevo Cliente</button><button class="btn btn-success" onclick="showImportFolioModal()"><i class="fas fa-file-image"></i> Importar datos</button></div></div>'+
     '<div class="search-bar">'+
       '<input type="text" placeholder="Buscar cliente..." id="searchCliente" oninput="renderClientes()">'+
       '<select id="filterTipo" onchange="renderClientes()"><option value="">Todos</option><option value="empresa">Empresa</option><option value="particular">Particular</option></select></div>'+
@@ -1715,16 +1724,74 @@ window.getCompanySettings=async function(){
   try{
     if(!window.authState?.user) return {...COMPANY_SETTINGS_DEFAULTS,...cached};
     const {data,error}=await window.supabaseDB.from('company_settings')
-      .select('trade_name,legal_name,tax_id,address,phone,email,website')
-      .eq('id',true).maybeSingle();
+      .select('trade_name,legal_name,tax_id,address,phone,email,website,id')
+      .maybeSingle();
     if(error) throw error;
-    const settings={...COMPANY_SETTINGS_DEFAULTS,...data};
+    const settings={
+      trade_name: data?.trade_name ?? '',
+      legal_name: data?.legal_name ?? '',
+      tax_id: data?.tax_id ?? '',
+      address: data?.address ?? '',
+      phone: data?.phone ?? '',
+      email: data?.email ?? '',
+      website: data?.website ?? '',
+      id: data?.id ?? null
+    };
     localStorage.setItem(COMPANY_SETTINGS_KEY,JSON.stringify(settings));
     return settings;
   }catch(error){
     console.warn('[Configuración] No se pudieron cargar los datos de empresa:',error.message);
     return {...COMPANY_SETTINGS_DEFAULTS,...cached};
   }
+};
+
+window.isValidCifCif = function(nif) {
+  const text = String(nif || '').trim();
+  if (!text) return false;
+
+  if (/^\d{8}[A-Z]$/.test(text)) {
+    const numeros = text.slice(0, 8);
+    const letra = text.slice(8).toUpperCase();
+    const validos = 'TRWAGMYFPDXBNJZSQVHLCKET';
+    const control = validos.charAt(numeros % 23);
+    return letra === control;
+  }
+
+  if (/^[A-Z]\d{7}$/.test(text)) {
+    const ultima = text.slice(-1);
+    const numeros = text.slice(0, 7);
+    const letra = text.slice(0, 1).toUpperCase();
+    const validos = 'TRWAGMYFPDXBNJZSQVHLCKET';
+    const control = validos.charAt((numeros + letra).split('').reduce((a, b) => a + b.charCodeAt(0), 0) % 23);
+    return ultima === control;
+  }
+
+  if (/^\d{1,2}\/\d{1,2}\/\d{2,4}$/.test(text)) {
+    return true;
+  }
+
+  if (/^[A-Z]\d{1,2}[A-Z]$/.test(text)) {
+    const letra1 = text[0];
+    const numeros = text.slice(1, 3);
+    const control = text[3];
+    const validos = 'TRWAGMYFPDXBNJZSQVHLCKET';
+    const controlChar = validos.charAt((letra1 + numeros).split('').reduce((a, b) => a + b.charCodeAt(0), 0) % 23);
+    if (controlChar !== control) return false;
+  }
+
+  if (/^[XYZ]\d{7}[A-Z]$/.test(text)) {
+    const letra = text[0];
+    const numeros = text.slice(1, 8);
+    const control = text[8];
+    const validos = 'TRWAGMYFPDXBNJZSQVHLCKET';
+    const controlChar = validos.charAt((letra + numeros).split('').reduce((a, b) => a + b.charCodeAt(0), 0) % 23);
+    if (controlChar !== control) return false;
+    if (letra === 'X') return control === 'K' || control === 'L' || control === 'T';
+    if (letra === 'Y') return control === 'A' || control === 'I' || control === 'E';
+    if (letra === 'Z') return control === 'B' || control === 'C' || control === 'D';
+  }
+
+  return false;
 };
 
 window.openConfigEmpresa=async function(){
@@ -1741,7 +1808,14 @@ window.openConfigEmpresa=async function(){
       <div class="form-group"><label for="company_website">Web</label><input id="company_website" type="url" maxlength="180" value="${escapeHtml(settings.website)}" placeholder="https://"></div>
       <div class="form-group full"><label for="company_address">Dirección</label><input id="company_address" maxlength="220" value="${escapeHtml(settings.address)}"></div>
     </form>`,
-    '<button type="button" class="btn btn-outline" onclick="closeModal()">Cancelar</button><button type="button" class="btn btn-primary" id="saveCompanySettings"><i class="fas fa-save"></i> Guardar datos</button>');
+    `<button type="button" class="btn btn-primary" onclick="closeModal()">Cancelar</button>
+    <button type="button" class="btn btn-primary" id="saveCompanySettings"><i class="fas fa-save"></i> Guardar datos</button>
+    <button type="button" class="btn btn-primary" id="btn-clearCompanySettings"><i class="fas fa-trash"></i> Borrar datos</button>`);
+  document.getElementById('btn-clearCompanySettings').addEventListener('click',()=>{
+    const form=document.getElementById('companySettingsForm');
+    form.querySelectorAll('input').forEach(input=>{input.value='';});
+    form.querySelector('#company_trade_name').focus();
+  });
   document.getElementById('saveCompanySettings').addEventListener('click',async event=>{
     const button=event.currentTarget;
     button.disabled=true;
@@ -1755,12 +1829,111 @@ window.openConfigEmpresa=async function(){
       email:form.querySelector('#company_email').value.trim(),
       website:form.querySelector('#company_website').value.trim()
     };
+    const errors=[];
+
+    if (!next.tax_id) errors.push('El CIF / NIF es obligatorio.');
+    else if (!window.isValidCifCif(next.tax_id)) errors.push('El CIF / NIF no es válido.');
+
+    if (!next.trade_name) errors.push('El nombre comercial es obligatorio.');
+    if (!next.legal_name) errors.push('La razón social es obligatoria.');
+    if (!next.address) errors.push('La dirección es obligatoria.');
+    if (!next.phone) errors.push('El teléfono es obligatorio.');
+    if (!next.email) errors.push('El correo electrónico es obligatorio.');
+    else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(next.email)) errors.push('Introduce un correo electrónico válido.');
+    if (!next.website) errors.push('El sitio web es obligatorio.');
+    else if (!/^https?:\/\/.+\..+$/.test(next.website)) errors.push('Introduce una URL válida, por ejemplo https://www.miempresa.com.');
+
+    if (errors.length) {
+      const message=errors.join(' ');
+      showToast(message, 'error');
+      button.disabled=false;
+      return;
+    }
+
     try{
-      const {error}=await window.supabaseDB.from('company_settings').upsert({
-        id:true,...next,updated_at:new Date().toISOString(),updated_by:window.authState.user.id
+      const now=new Date().toISOString();
+      const payload={
+        trade_name: next.trade_name,
+        legal_name: next.legal_name,
+        tax_id: next.tax_id,
+        address: next.address,
+        phone: next.phone,
+        email: next.email,
+        website: next.website,
+        updated_at: now,
+        updated_by: window.authState.user?.id || null,
+        created_by: window.authState?.user?.id || window.authState?.employee?.id || null
+      };
+
+      if (payload.created_by == null) {
+        payload.created_by = payload.updated_by;
+      }
+
+      if (payload.updated_by == null) {
+        payload.updated_by = payload.created_by;
+      }
+      let existingId=null;
+
+      const { data: existing, error: selectError } = await window.supabaseDB.from('company_settings')
+        .select('id')
+        .maybeSingle();
+
+      if (selectError?.message?.includes('Could not find the table')) {
+        console.warn('[Configuración] company_settings no existe aún.');
+      } else if (selectError) {
+        console.warn('[Configuración] No se pudo buscar la configuración existente:', selectError.message);
+      } else if (existing && existing.id) {
+        existingId = existing.id;
+      }
+
+      if (!existingId) {
+        let generateId = null;
+
+        try {
+          const { data: newIdData, error: newIdError } = await window.supabaseDB.from('company_settings')
+            .select('id')
+            .maybeSingle();
+
+          if (!newIdError && newIdData && newIdData.id) {
+            existingId = newIdData.id;
+          }
+        } catch (error) {
+          console.warn('[Configuración] No se pudo obtener un id existente:', error.message);
+        }
+
+        if (!existingId) {
+          try {
+            if (window.crypto && window.crypto.randomUUID) {
+              existingId = window.crypto.randomUUID();
+            } else if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+              existingId = crypto.randomUUID();
+            } else {
+              existingId = String(Date.now()) + '-' + Math.random().toString(16).slice(2);
+            }
+          } catch (error) {
+            console.warn('[Configuración] No se pudo generar un id:', error.message);
+          }
+        }
+      }
+
+      const { error: upsertError } = await window.supabaseDB.from('company_settings').upsert({
+        id: existingId,
+        trade_name: payload.trade_name,
+        legal_name: payload.legal_name,
+        tax_id: payload.tax_id,
+        address: payload.address,
+        phone: payload.phone,
+        email: payload.email,
+        website: payload.website,
+        created_at: payload.created_at,
+        updated_at: payload.updated_at,
+        created_by: payload.created_by,
+        updated_by: payload.updated_by
       });
-      if(error) throw error;
-      localStorage.setItem(COMPANY_SETTINGS_KEY,JSON.stringify(next));
+
+      if (upsertError) throw upsertError;
+
+      localStorage.setItem(COMPANY_SETTINGS_KEY,JSON.stringify(payload));
       closeModal();
       showToast('Datos de empresa guardados');
     }catch(error){
@@ -2451,7 +2624,19 @@ window.recalcAllFleetKms = async function(silent) {
  * Genera un informe de todos los vehículos y sus partes del día.
  * Devuelve objeto con resumen + detalle por vehículo.
  */
-window.generateDailyReport = async function(dateStr = todayStr()) {
+/** Hora (HH:MM) de entrada/salida de un parte: usa el dato guardado o, si no existe, las marcas de creación/cierre. */
+function horaParte(p, tipo) {
+  const guardada = tipo === 'entrada' ? (p.horaEntrada ?? p.hora_entrada) : (p.horaSalida ?? p.hora_salida);
+  if (guardada) return String(guardada).slice(0, 5);
+  const marca = tipo === 'entrada' ? (p.createdAt ?? p.createdat) : (p.estado === 'completado' ? (p.updatedAt ?? p.updatedat) : null);
+  if (!marca) return '';
+  const d = new Date(marca);
+  return isNaN(d) ? '' : d.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
+}
+
+const fechaLocalHoy = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
+
+window.generateDailyReport = async function(dateStr = fechaLocalHoy()) {
   try {
     // 1. Obtener TODOS los partes del día (una sola query por índice compuesto)
     const partesHoy = (await cargarPartesConMatricula()).filter(p => String(p.fecha || '').slice(0, 10) === dateStr);
@@ -2467,13 +2652,22 @@ window.generateDailyReport = async function(dateStr = todayStr()) {
     });
 
     // 4. Construir detalle por vehículo
-    const detalle = vehiculos.map(v => {
+    const detalle = await Promise.all(vehiculos.map(async v => {
       const partes = (porMatricula[v.matricula] || [])
-        .sort((a, b) => (a.hora_entrada || '').localeCompare(b.hora_entrada || ''));
+        .sort((a, b) => (horaParte(a, 'entrada') || '99:99').localeCompare(horaParte(b, 'entrada') || '99:99'));
 
-      const primeraEntrada = partes[0]?.hora_entrada || '—';
-      const ultimaSalida = partes[partes.length - 1]?.hora_salida || '—';
-      const kmsRecorridos = partes.reduce((acc, p) => acc + Number(p.kms || 0), 0);
+      const entradas = partes.map(p => horaParte(p, 'entrada')).filter(Boolean).sort();
+      const salidas = partes.map(p => horaParte(p, 'salida')).filter(Boolean).sort();
+      const primeraEntrada = entradas[0] || '—';
+      const ultimaSalida = salidas[salidas.length - 1] || '—';
+
+      // Mismo criterio que el recálculo de km del vehículo: ruta real por jornada, o suma redondeada
+      const conKms = partes.filter(p => Number(p.kms) > 0);
+      let kmsRecorridos = 0;
+      if (conKms.length) {
+        const kmRuta = await calcularKmJornada(conKms).catch(() => null);
+        kmsRecorridos = kmRuta ?? Math.ceil(conKms.reduce((acc, p) => acc + Number(p.kms || 0), 0) / 10) * 10;
+      }
 
       return {
         matricula: v.matricula,
@@ -2483,10 +2677,11 @@ window.generateDailyReport = async function(dateStr = todayStr()) {
         primera_entrada: primeraEntrada,
         ultima_salida: ultimaSalida,
         kms_recorridos: kmsRecorridos,
+        km_total: Number(v.km) || 0,
         tecnico: partes.map(p => p.empleadoNombre).filter(Boolean)[0] || '—',
         estado: partes.length ? '✅ Activo' : '⚪ Inactivo'
       };
-    });
+    }));
 
     // 5. Construir informe completo
     const informe = {
@@ -2532,10 +2727,12 @@ window.render_daily_report = async function(containerId = 'dailyReportContainer'
 
   container.innerHTML = `
     <div class="card" style="grid-column: 1/-1;">
-      <h3>📋 Informe Diario — ${informe.fecha}</h3>
-      <p style="color:#6b7280;font-size:0.85em;">Generado: ${informe.generado}</p>
-
-      <div style="display:flex;gap:1rem;margin:1rem 0;flex-wrap:wrap;">
+      <div class="card-header">
+        <h3>📋 Informe Diario — ${informe.fecha}</h3>
+        <small style="color:var(--text-muted);">Generado: ${informe.generado}</small>
+      </div>
+      <div style="padding:16px 20px;">
+      <div style="display:flex;gap:1rem;margin-bottom:1rem;flex-wrap:wrap;">
         <div style="background:#f0f9ff;border:1px solid #bae6fd;border-radius:8px;padding:12px 16px;">
           <div style="font-size:0.8em;color:#0369a1;">Partes hoy</div>
           <div style="font-size:1.5em;font-weight:bold;color:#0c4a6e;">${informe.resumen.total_partes}</div>
@@ -2550,40 +2747,45 @@ window.render_daily_report = async function(containerId = 'dailyReportContainer'
         </div>
       </div>
 
-      <canvas id="chartKmsDia" height="100"></canvas>
+      <div style="height:220px;"><canvas id="chartKmsDia"></canvas></div>
 
-      <table style="width:100%;margin-top:1rem;border-collapse:collapse;font-size:0.9em;">
+      <div class="table-wrapper" style="margin-top:1rem;">
+      <table>
         <thead>
-          <tr style="background:#f3f4f6;text-align:left;border-bottom:2px solid #e5e7eb;">
-            <th style="padding:8px;">Matrícula</th>
-            <th style="padding:8px;">Modelo</th>
-            <th style="padding:8px;">Técnico</th>
-            <th style="padding:8px;">Partes</th>
-            <th style="padding:8px;">Entrada</th>
-            <th style="padding:8px;">Salida</th>
-            <th style="padding:8px;">KMs</th>
-            <th style="padding:8px;">Estado</th>
+          <tr>
+            <th>Matrícula</th>
+            <th>Modelo</th>
+            <th>Técnico</th>
+            <th>Partes</th>
+            <th>Entrada</th>
+            <th>Salida</th>
+            <th>KMs hoy</th>
+            <th>KMs totales</th>
+            <th>Estado</th>
           </tr>
         </thead>
         <tbody>
           ${informe.detalle.map(d => `
-            <tr style="border-bottom:1px solid #e5e7eb;">
-              <td style="padding:8px;font-weight:bold;color:#2563eb;letter-spacing:0.5px;">${escapeHtml(d.matricula)}</td>
-              <td style="padding:8px;">${escapeHtml(d.modelo)}</td>
-              <td style="padding:8px;">${escapeHtml(d.tecnico)}</td>
-              <td style="padding:8px;text-align:center;">${d.num_partes}</td>
-              <td style="padding:8px;">${escapeHtml(d.primera_entrada)}</td>
-              <td style="padding:8px;">${escapeHtml(d.ultima_salida)}</td>
-              <td style="padding:8px;"><strong>${d.kms_recorridos}</strong></td>
-              <td style="padding:8px;">${escapeHtml(d.estado)}</td>
+            <tr>
+              <td style="font-weight:bold;color:#2563eb;letter-spacing:0.5px;">${escapeHtml(d.matricula)}</td>
+              <td>${escapeHtml(d.modelo)}</td>
+              <td>${escapeHtml(d.tecnico)}</td>
+              <td style="text-align:center;">${d.num_partes}</td>
+              <td>${escapeHtml(d.primera_entrada)}</td>
+              <td>${escapeHtml(d.ultima_salida)}</td>
+              <td>${d.kms_recorridos ? '<strong>' + d.kms_recorridos + '</strong>' : '—'}</td>
+              <td><strong>${d.km_total.toLocaleString('es-ES')}</strong></td>
+              <td>${escapeHtml(d.estado)}</td>
             </tr>
           `).join('')}
         </tbody>
       </table>
+      </div>
 
       <div style="margin-top:1rem;display:flex;gap:0.5rem;">
         <button onclick="exportReportCSV()" class="btn btn-secondary btn-sm">Exportar CSV</button>
         <button onclick="window.print()" class="btn btn-primary btn-sm">Imprimir</button>
+      </div>
       </div>
     </div>
   `;
@@ -2629,13 +2831,13 @@ window.render_daily_report = async function(containerId = 'dailyReportContainer'
 /**
  * Exporta el informe diario a CSV.
  */
-window.exportReportCSV = async function(dateStr = todayStr()) {
+window.exportReportCSV = async function(dateStr = fechaLocalHoy()) {
   const informe = await generateDailyReport(dateStr);
   if (!informe) return;
 
-  const headers = ['Matrícula','Modelo','Técnico','Partes','Entrada','Salida','KMs','Estado'];
+  const headers = ['Matrícula','Modelo','Técnico','Partes','Entrada','Salida','KMs hoy','KMs totales','Estado'];
   const rows = informe.detalle.map(d =>
-    [d.matricula, d.modelo, d.tecnico, d.num_partes, d.primera_entrada, d.ultima_salida, d.kms_recorridos, d.estado]
+    [d.matricula, d.modelo, d.tecnico, d.num_partes, d.primera_entrada, d.ultima_salida, d.kms_recorridos, d.km_total, d.estado]
   );
 
   const csv = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
@@ -2996,7 +3198,7 @@ window.render_revisiones_rutas = async function(cadenaId, cadenaNombre) {
     <div class="page-revisiones">
       <div class="page-header">
         <div>
-          <button class="btn btn-outline btn-sm" onclick="navigateTo('revisionesProgramadas')"><i class="fas fa-arrow-left"></i> Volver</button>
+          <button class="btn btn-primary btn-sm" onclick="navigateTo('revisionesProgramadas')"><i class="fas fa-arrow-left"></i> Volver</button>
         </div>
         <div>
           <h2 class="page-revisiones-title"><i class="fas fa-route"></i> Rutas · ${escapeHtml(cadenaNombre)}</h2>
@@ -3054,24 +3256,125 @@ window.render_revisiones_rutas = async function(cadenaId, cadenaNombre) {
 // ═══════════════════════════════════════════════════════════
 //  REVISIONES PROGRAMADAS - VISTA DE TIENDAS (NIVEL 3)
 // ═══════════════════════════════════════════════════════════
+const ordenarTiendasRuta = lista => [...lista].sort((a, b) => {
+  const oa = a.ordenRuta ?? Infinity, ob = b.ordenRuta ?? Infinity;
+  return oa !== ob ? oa - ob : String(a.nombre || '').localeCompare(String(b.nombre || ''), 'es');
+});
+
+/** Mejor orden de visita saliendo y volviendo a Ceutí. pts: [{lat,lng}] → {orden:[índices], km} */
+function calcularOrdenOptimo(pts) {
+  const n = pts.length;
+  const nodos = [OFICINA, ...pts];
+  const d = nodos.map(a => nodos.map(b => kmEntreCoordenadas(a.lat, a.lng, b.lat, b.lng) * FACTOR_CARETERA));
+  const largo = t => {
+    let s = d[0][t[0]];
+    for (let i = 1; i < t.length; i++) s += d[t[i - 1]][t[i]];
+    return s + d[t[t.length - 1]][0];
+  };
+  let mejor = null, mejorLen = Infinity;
+  const probar = t => { const l = largo(t); if (l < mejorLen - 1e-9) { mejor = t.slice(); mejorLen = l; } };
+
+  if (n <= 8) {
+    const permutar = (t, k) => {
+      if (k === t.length) return probar(t);
+      for (let i = k; i < t.length; i++) {
+        [t[k], t[i]] = [t[i], t[k]];
+        permutar(t, k + 1);
+        [t[k], t[i]] = [t[i], t[k]];
+      }
+    };
+    permutar(Array.from({ length: n }, (_, i) => i + 1), 0);
+  } else {
+    // Vecino más cercano desde cada punto de partida + mejora 2-opt
+    for (let inicio = 1; inicio <= n; inicio++) {
+      const t = [inicio], libres = new Set(Array.from({ length: n }, (_, i) => i + 1));
+      libres.delete(inicio);
+      while (libres.size) {
+        let sig = null, dm = Infinity;
+        for (const c of libres) if (d[t[t.length - 1]][c] < dm) { dm = d[t[t.length - 1]][c]; sig = c; }
+        t.push(sig); libres.delete(sig);
+      }
+      let mejora = true;
+      while (mejora) {
+        mejora = false;
+        for (let i = 0; i < n - 1; i++) for (let j = i + 1; j < n; j++) {
+          const nuevo = [...t.slice(0, i), ...t.slice(i, j + 1).reverse(), ...t.slice(j + 1)];
+          if (largo(nuevo) < largo(t) - 1e-9) { t.splice(0, n, ...nuevo); mejora = true; }
+        }
+      }
+      probar(t);
+    }
+  }
+  return { orden: mejor.map(i => i - 1), km: Math.round(mejorLen) };
+}
+
+/** Ordena las tiendas de una ruta para hacer los mínimos km posibles (Ceutí → tiendas → Ceutí) y guarda el orden. */
+window.optimizarRutaTiendas = async function(rutaId, cadenaId, rutaNombre, cadenaNombre) {
+  try {
+    const todos = await dbGetAll('clientes');
+    const tiendas = ordenarTiendasRuta(todos.filter(c => String(c.rutaId ?? c.rutaid ?? '') === String(rutaId)));
+    if (tiendas.length < 2) return showToast('La ruta necesita al menos 2 tiendas para optimizarla', 'warning');
+    showToast('Calculando el recorrido más corto…');
+
+    const sinCoord = [];
+    for (const t of tiendas) {
+      if (Number(t.lat) && Number(t.lng)) continue;
+      const g = t.direccion ? await geocodificar(t.direccion) : null;
+      if (g) {
+        t.lat = g.lat; t.lng = g.lng;
+        await dbPut('clientes', t);
+      } else sinCoord.push(t);
+      if (t.direccion) await new Promise(r => setTimeout(r, 1100)); // límite de Nominatim
+    }
+
+    const conCoord = tiendas.filter(t => !sinCoord.includes(t));
+    if (conCoord.length < 2) return showToast('Faltan coordenadas: revisa las direcciones de las tiendas', 'error');
+
+    const puntos = conCoord.map(t => ({ lat: Number(t.lat), lng: Number(t.lng) }));
+    const kmAntes = Math.round(kmCircuitoOrden(puntos));
+    const { orden, km } = calcularOrdenOptimo(puntos);
+    const nuevoOrden = [...orden.map(i => conCoord[i]), ...sinCoord];
+
+    for (let i = 0; i < nuevoOrden.length; i++) {
+      if (nuevoOrden[i].ordenRuta !== i + 1) await dbPut('clientes', { ...nuevoOrden[i], ordenRuta: i + 1 });
+    }
+
+    showToast(`Ruta optimizada: ${km} km (antes ${kmAntes} km)` + (sinCoord.length ? ` · ${sinCoord.length} sin ubicar al final` : ''), sinCoord.length ? 'warning' : 'success');
+
+    if (document.getElementById('tiendas-container')) await window.render_revisiones_tiendas(rutaId, rutaNombre, cadenaId, cadenaNombre);
+    else if (document.getElementById('clientes-ruta-lista')) await render_clientes_ruta(rutaId);
+  } catch (e) {
+    console.error('optimizarRutaTiendas falló:', e);
+    showToast('No se pudo guardar el orden. ¿Has ejecutado SUPABASE_ORDEN_RUTA.sql? ' + (e.message || ''), 'error');
+  }
+};
+
+function kmCircuitoOrden(pts) {
+  const nodos = [OFICINA, ...pts, OFICINA];
+  let s = 0;
+  for (let i = 1; i < nodos.length; i++) s += kmEntreCoordenadas(nodos[i - 1].lat, nodos[i - 1].lng, nodos[i].lat, nodos[i].lng) * FACTOR_CARETERA;
+  return s;
+}
+
 window.render_revisiones_tiendas = async function(rutaId, rutaNombre, cadenaId, cadenaNombre) {
   const main = document.getElementById('mainContent');
   if (!main) return;
 
   const clientes = await dbGetAll('clientes');
-  const tiendas = clientes.filter(c => String(c.rutaId ?? c.rutaid ?? '') === String(rutaId));
+  const tiendas = ordenarTiendasRuta(clientes.filter(c => String(c.rutaId ?? c.rutaid ?? '') === String(rutaId)));
   
   main.innerHTML = `
     <div class="page-revisiones">
       <div class="page-header">
         <div>
-          <button class="btn btn-outline btn-sm" onclick="window.render_revisiones_rutas('${cadenaId}', '${escapeHtml(cadenaNombre)}')"><i class="fas fa-arrow-left"></i> Volver a rutas</button>
+          <button class="btn btn-primary btn-sm" onclick="window.render_revisiones_rutas('${cadenaId}', '${escapeHtml(cadenaNombre)}')"><i class="fas fa-arrow-left"></i> Volver a rutas</button>
         </div>
         <div>
           <h2 class="page-revisiones-title"><i class="fas fa-store"></i> Tiendas · ${escapeHtml(rutaNombre)}</h2>
           <p class="page-revisiones-subtitle">${tiendas.length} tienda${tiendas.length>1?'s':''} en esta ruta</p>
         </div>
         <div class="header-actions">
+          <button class="btn btn-primary btn-sm" onclick="window.optimizarRutaTiendas('${rutaId}', '${cadenaId}', '${escapeHtml(rutaNombre)}', '${escapeHtml(cadenaNombre)}')"><i class="fas fa-route"></i> Optimizar ruta</button>
           <button class="btn btn-primary btn-sm" onclick="window.generarPDFRutaCompleta('${rutaId}', '${escapeHtml(rutaNombre)}', '${cadenaId}', '${escapeHtml(cadenaNombre)}')"><i class="fas fa-file-pdf"></i> PDF de ruta</button>
         </div>
       </div>
@@ -3094,7 +3397,7 @@ window.render_revisiones_tiendas = async function(rutaId, rutaNombre, cadenaId, 
     card.innerHTML = `
       <div class="stat-icon" style="background:#dbeafe;color:#2563eb"><i class="fas fa-store"></i></div>
       <div class="stat-info">
-        <h3>${escapeHtml(tienda.nombre)}</h3>
+        <h3>${index + 1}. ${escapeHtml(tienda.nombre)}</h3>
         <p>${escapeHtml(tienda.direccion || 'Sin dirección')}</p>
         ${esUltimaTienda ? '<small style="color:var(--warning)">Última tienda de la ruta</small>' : ''}
       </div>
@@ -3298,11 +3601,11 @@ async function openHiperberReviewForm(chainId) {
   ]);
 
   const routeIds = new Set(routes.map(r => String(r.id)));
-  const supermarkets = clients.filter(client =>
+  const supermarkets = ordenarTiendasRuta(clients.filter(client =>
     String(client.cadenaId ?? client.cadenaid ?? '') === String(chain.id) ||
     String(client.padreId ?? client.padreid ?? '') === String(chain.id) ||
     routeIds.has(String(client.rutaId ?? client.rutaid ?? ''))
-  );
+  ));
 
   // Mapa rutaId → nombre de ruta
   const routeNameById = {};
@@ -3372,13 +3675,13 @@ function renderHiperberStores() {
 
   const storeHtml = (store, storeIndex) =>
     '<section class="hiperber-store" style="margin-left:18px;">' +
-      '<h4>' + escapeHtml(store.nombre) + '</h4>' +
-      (store.direccion ? '<div style="font-size:12px;color:var(--text-muted);margin:-4px 0 8px 2px;">📍 ' + escapeHtml(store.direccion) + '</div>' : '') +
+      '<div class="hiperber-store-head"><h4>' + escapeHtml(store.nombre) + '</h4>' +
+      (store.direccion ? '<span class="hiperber-store-addr"><i class="fas fa-location-dot"></i> ' + escapeHtml(store.direccion) + '</span>' : '') + '</div>' +
       '<div class="table-wrapper hiperber-table-wrapper"><table class="hiperber-checklist"><thead><tr><th>Puerta</th><th>HALLAZGO</th><th>CORRECTIVO</th><th>RESULTADO</th></tr></thead><tbody>' +
         store.puertas.map((door, doorIndex) =>
           '<tr><td data-label="Puerta"><input class="hiperber-door-name" type="text" aria-label="Puerta de ' + escapeHtml(store.nombre) + '" placeholder="' + (door.nueva ? 'Añade una puerta' : 'Nombre de la puerta') + '" value="' + escapeHtml(door.nombre) + '" oninput="updateHiperberDoor(' + storeIndex + ',' + doorIndex + ',\'nombre\',this.value)"><small>' + escapeHtml(door.tipo || '') + '</small></td>' +
             hiperberDecisionCell(storeIndex, doorIndex, door, 'hallazgo', [['ok','OK'],['x','X']]) +
-            hiperberDecisionCell(storeIndex, doorIndex, door, 'correctivo', [['ok','OK'],['hecho','Hecho'],['x','X']]) +
+            hiperberDecisionCell(storeIndex, doorIndex, door, 'correctivo', [['ok','OK'],['hecho','✔'],['x','X']]) +
             hiperberDecisionCell(storeIndex, doorIndex, door, 'resultado', [['ok','OK'],['x','X']]) + '</tr>'
         ).join('') +
       '</tbody></table></div>' +
@@ -4095,6 +4398,7 @@ async function render_rutas(mainOrChainId, requestedChainId) {
         <div style="padding:12px 20px;border-top:1px solid var(--border);display:flex;gap:8px;">
           <button class="btn btn-sm btn-outline" onclick="showRutaForm('${ruta.id}')">✏️ Editar</button>
           <button class="btn btn-sm btn-outline" onclick="render_clientes_ruta('${ruta.id}')">👥 Clientes</button>
+          <button class="btn btn-sm btn-primary" onclick="optimizarRutaTiendas('${escapeHtml(ruta.id)}','${escapeHtml(cadenaId)}','${escapeHtml(ruta.nombre)}','')"><i class="fas fa-route"></i> Optimizar</button>
           <button type="button" class="btn btn-sm btn-danger" onclick="deleteRuta('${escapeHtml(ruta.id)}','${escapeHtml(cadenaId)}')"><i class="fas fa-trash"></i> Borrar</button>
         </div>
       </div>`;
@@ -4120,7 +4424,7 @@ async function render_clientes_ruta(rutaid) {
   try {
     ruta = await getRutaById(rutaid);
     const todos = await dbGetAll('clientes');
-    clientes = todos.filter(c => String(c.rutaId ?? c.rutaid) === String(rutaid));
+    clientes = ordenarTiendasRuta(todos.filter(c => String(c.rutaId ?? c.rutaid) === String(rutaid)));
   } catch (e) {
     console.error('render_clientes_ruta falló:', e);
   }
@@ -4143,13 +4447,16 @@ async function render_clientes_ruta(rutaid) {
         </nav>
         <h2>👥 Clientes de ${escapeHtml(ruta?.nombre || 'esta ruta')}</h2>
       </div>
+      <div class="header-actions">
+        <button type="button" class="btn btn-primary btn-sm" onclick="optimizarRutaTiendas('${escapeHtml(String(rutaid))}','${escapeHtml(cadenaId)}','${escapeHtml(ruta?.nombre || '')}','${escapeHtml(cadena?.nombre || '')}')"><i class="fas fa-route"></i> Optimizar ruta</button>
+      </div>
     </div>
     <div id="clientes-ruta-lista">
-      ${clientes.length ? clientes.map(c => `
+      ${clientes.length ? clientes.map((c, idx) => `
         <div class="card" style="margin-bottom:10px;cursor:pointer;" onclick="showClienteForm('${escapeHtml(String(c.id))}')">
           <div class="card-body" style="padding:14px 18px;">
             <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;">
-              <strong>${escapeHtml(c.nombre)}</strong>
+              <strong>${idx + 1}. ${escapeHtml(c.nombre)}</strong>
               <button type="button" class="btn btn-outline btn-sm" title="Editar cliente"
                 onclick="event.stopPropagation(); showClienteForm('${escapeHtml(String(c.id))}')">
                 <i class="fas fa-pen"></i> Editar
@@ -4273,7 +4580,7 @@ window.showImportFolioModal = async function() {
         <div id="import-results" style="display:none;"></div>
 
         <div id="import-actions" style="display:none;margin-top:16px;text-align:right;">
-          <button id="import-cancel" style="background:transparent;color:var(--text);border:1px solid var(--border);padding:8px 16px;border-radius:8px;margin-right:8px;cursor:pointer;">Cancelar</button>
+          <button id="import-cancel" class="btn btn-primary" style="margin-right:8px;">Cancelar</button>
           <button id="import-import-btn" style="background:var(--primary);color:#fff;border:none;padding:8px 16px;border-radius:8px;font-weight:600;cursor:pointer;">Importar todo</button>
         </div>
       </div>

@@ -388,7 +388,7 @@ function abrirPadFirma(titulo){
       '</div>' +
       '<div style="display:flex;gap:10px;flex:0 0 auto">' +
         '<button type="button" id="padClear" style="flex:1;min-height:52px;border:1px solid #64748b;border-radius:10px;background:transparent;color:#fff;font:inherit;font-size:15px">Borrar</button>' +
-        '<button type="button" id="padCancel" style="flex:1;min-height:52px;border:1px solid #64748b;border-radius:10px;background:transparent;color:#fff;font:inherit;font-size:15px">Cancelar</button>' +
+        '<button type="button" id="padCancel" style="flex:1;min-height:52px;border:1px solid transparent;border-radius:10px;background:linear-gradient(135deg,#22c55e 0%,#16a34a 100%);color:#fff;font:inherit;font-size:15px;font-weight:700">Cancelar</button>' +
         '<button type="button" id="padOk" style="flex:2;min-height:52px;border:0;border-radius:10px;background:#16a34a;color:#fff;font:inherit;font-size:16px;font-weight:600" disabled>Aceptar</button>' +
       '</div>';
     document.body.appendChild(overlay);
@@ -857,6 +857,7 @@ async function getPendientesRevision() {
 
   try {
     const todasRutas = await dbGetAll('rutas');
+    const cadenasMap = new Map((await dbGetAll('cadenas')).map(c => [String(c.id), c.nombre]));
     for (const r of todasRutas) {
       const ruta = {
         ...r,
@@ -870,8 +871,10 @@ async function getPendientesRevision() {
         pendientes.push({
           id: ruta.id,
           tipo: 'ruta',
-          nombre: ruta.nombre,
-          detalle: `Ruta ${ruta.nombre} (Cadena ${ruta.cadenaId})`,
+          nombre: cadenasMap.has(String(ruta.cadenaId)) ? `${cadenasMap.get(String(ruta.cadenaId))} · ${ruta.nombre}` : ruta.nombre,
+          cadenaNombre: cadenasMap.get(String(ruta.cadenaId)) || '',
+          rutaNombre: ruta.nombre,
+          detalle: `Ruta ${ruta.nombre} (Cadena ${cadenasMap.get(String(ruta.cadenaId)) || ruta.cadenaId})`,
           proxima: ruta.proximaRevision,
           dias: Math.ceil((proxima - hoy) / (1000*60*60*24)),
           clase: proxima < hoy ? 'badge-red' : 'badge-yellow'

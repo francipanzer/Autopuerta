@@ -1142,7 +1142,7 @@ function renderNivel1Rutas(rutas, puertas, clientes) {
   let html = `
     <div class="review-header" style="display:flex;justify-content:space-between;align-items:center;margin:20px 0 24px 0;">
       <h2 style="margin:0;font-size:1.4rem;color:#1e293b;">📋 Informe de Revisión</h2>
-      <button class="btn-back" onclick="goHome()" style="padding:8px 16px;border:1px solid #cbd5e1;border-radius:8px;background:#fff;cursor:pointer;font-size:0.9rem;color:#475569;">← Volver</button>
+      <button class="btn btn-primary" onclick="goHome()">← Volver</button>
     </div>
     <p style="color:#64748b;font-size:0.9rem;margin-bottom:20px;">Selecciona una ruta para ver las puertas pendientes de revisión</p>
     <div class="review-rutas-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px;">
@@ -1200,7 +1200,7 @@ async function renderNivel2Detalle(rutaId, puertas, clientes, hoy) {
   let html = `
     <div class="review-header" style="display:flex;justify-content:space-between;align-items:center;margin:20px 0 24px 0;">
       <h2 style="margin:0;font-size:1.3rem;color:#1e293b;">🗺️ ${escapeHtml(ruta?.nombre || 'Ruta')} <span style="font-size:0.9rem;color:#64748b;">(${pendientes.length} puerta(s))</span></h2>
-      <button class="btn-back" onclick="abrirRondaRevisiones()" style="padding:8px 16px;border:1px solid #cbd5e1;border-radius:8px;background:#fff;cursor:pointer;font-size:0.9rem;color:#475569;">← Volver a rutas</button>
+      <button class="btn btn-primary" onclick="abrirRondaRevisiones()">← Volver a rutas</button>
     </div>
   `;
 
