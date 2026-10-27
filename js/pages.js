@@ -1,6 +1,4 @@
-// ═══════════════════════════════════════════════════════════
 //  DASHBOARD — ACTUALIZADO (CON BANNER PENDIENTES)
-// ═══════════════════════════════════════════════════════════
 let dashboardItvCountdownTimer=null;
 
 function diasHastaFechaITV(value){
@@ -48,31 +46,39 @@ window.render_dashboard = async function(el){
   const vehiculos = await dbGetAll('vehiculos');
   const almacen = await dbGetAll('almacen');
 
-  // ── Banner Pendientes (revisión de puertas + sin cadena) ──
+  // Banner Pendientes (revisión de rutas + clientes sin cadena + puertas sueltas)
   const pendientes = await getPendientesRevision();
   let bannerHTML = '';
   if (pendientes.length > 0) {
-    const urgencias = pendientes.filter(p => p.dias < 0).length;
+    const urgencias = pendientes.filter(p => p.dias <= 0).length;
     const proximas = pendientes.length - urgencias;
     bannerHTML = `
       <div class="card" style="border-left:4px solid ${urgencias > 0 ? '#e11d48' : '#f59e0b'}; margin-bottom:20px;">
         <div class="card-body" style="padding:14px 16px;">
           <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:10px;">
             <strong style="color:${urgencias > 0 ? '#e11d48' : '#f59e0b'};">
-              <i class="fas fa-exclamation-triangle"></i> ${urgencias > 0 ? urgencias + ' vencidas' : ''}${urgencias > 0 && proximas > 0 ? ' · ' : ''}${proximas > 0 ? proximas + ' próximas' : ''}
+              <i class="fas fa-exclamation-triangle"></i> ${urgencias > 0 ? urgencias + (urgencias === 1 ? ' vencida  hoy' : ' vencidas  hoy') : ''}${urgencias > 0 && proximas > 0 ? ' · ' : ''}${proximas > 0 ? proximas + ' próximas' : ''}
             </strong>
             <button class="btn btn-sm btn-primary" onclick="navigateTo('revisionesProgramadas')">Ver todo</button>
           </div>
           <div style="display:flex;flex-direction:column;gap:6px;">
             ${pendientes.slice(0, 5).map(p => {
-              const col = p.dias < 0 ? '#e11d48' : '#f59e0b';
-              const cuando = p.dias < 0 ? `Vencida hace ${Math.abs(p.dias)} d` : p.dias === 0 ? 'Hoy' : `En ${p.dias} d`;
-              const titulo = p.tipo === 'ruta' && p.cadenaNombre
-                ? `<strong>${escapeHtml(p.cadenaNombre)}</strong> <span style="color:var(--text-muted)">›</span> ${escapeHtml(p.rutaNombre)}`
+              const col = p.dias <= 0 ? '#e11d48' : '#f59e0b';
+              const cuando = p.dias < 0 ? `Vencida hace ${Math.abs(p.dias)} d` : p.dias === 0 ? '¡Vence HOY!' : `En ${p.dias} d`;
+              // Título + destino según el tipo (fila clicable)
+              const titulo = p.tipo === 'ruta'
+                ? `<strong>${escapeHtml(p.cadenaNombre)}</strong> · ${escapeHtml(p.rutaNombre || '')}`
                 : `<strong>${escapeHtml(p.nombre)}</strong>`;
-              return `<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:8px 12px;border-radius:8px;background:${col}14;border:1px solid ${col}40;">
+              const accion = p.tipo === 'ruta'
+                ? `verRutasDeCadena('${String(p.cadenaId || '').replace(/'/g, "")}')`
+                : p.tipo === 'cliente'
+                  ? `verTiendasDeCliente('${String(p.id || '').replace(/'/g, "")}')`
+                  : p.clienteId
+                    ? `gestionarPuertas('${String(p.clienteId).replace(/'/g, "")}')`
+                    : `navigateTo('revisionesProgramadas')`;
+              return `<div onclick="${accion}" title="Abrir revisión" style="cursor:pointer;display:flex;justify-content:space-between;align-items:center;gap:10px;padding:8px 12px;border-radius:8px;background:${col}14;border:1px solid ${col}40;">
                 <span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"><i class="fas fa-${p.tipo === 'ruta' ? 'route' : p.tipo === 'cliente' ? 'user' : 'door-open'}" style="color:${col};margin-right:8px;"></i>${titulo}</span>
-                <span style="color:${col};font-weight:700;font-size:12px;white-space:nowrap;">${cuando}</span>
+                <span style="color:${col};font-weight:700;font-size:12px;white-space:nowrap;">${cuando} <i class="fas fa-chevron-right" style="font-size:10px;margin-left:4px"></i></span>
               </div>`;
             }).join('')}
             ${pendientes.length > 5 ? `<small style="color:var(--text-muted);">y ${pendientes.length - 5} más…</small>` : ''}
@@ -81,14 +87,13 @@ window.render_dashboard = async function(el){
       </div>`;
   }
 
-  // ── Métricas ──
+  // Métricas
   const totalPresupuesto = presupuestos.reduce((s,p)=>s+(p.total||0),0);
-  const partesAbiertos = partes.filter(p=>p.estado==='abierto').length;
-  const partesCompletados = partes.filter(p=>p.estado==='completado').length;
+  const partesTotal = partes.length;
   const vehiculosEnRuta = vehiculos.filter(v=>v.estado==='en_ruta').length;
   const stockBajoItems = almacen.filter(a=>a.stock<=a.stockMinimo);
 
-  // ── Lógica de Alertas ITV ──
+  // Lógica de Alertas ITV
   let alertasHTML = '';
   let numAlertas = 0;
 
@@ -122,7 +127,7 @@ window.render_dashboard = async function(el){
     }
   });
 
-  // ── Próximas revisiones agrupadas por cliente ──
+  // Próximas revisiones agrupadas por cliente
   const puertas = await dbGetAll('puertas');
   let revHTML = '';
   let numRev = 0;
@@ -148,41 +153,43 @@ window.render_dashboard = async function(el){
     });
     
     const resumenTipos = Object.entries(conteoTipos)
-      .map(([tipo, cant]) => `${tipo} ×${cant}`)
+      .map(([tipo, cant]) => `${tipo} -${cant}`)
       .join(', ');
     
     const proximaFecha = lista.map(p=>p.proximaRevision).sort()[0];
     const diasMin = diasHasta(proximaFecha);
     
     let color, etiqueta;
-    if(diasMin < 0){       color='#ef4444'; etiqueta=`<strong>ATRASADA</strong> ${Math.abs(diasMin)} días`; }
-    else if(diasMin <= 3){ color='#f97316'; etiqueta=`Revisar en <strong>${diasMin}</strong> día(s)`; }
+    if(diasMin < 0){       color='#ef4444'; etiqueta=`<strong>ATRASADA</strong> ${Math.abs(diasMin)} día(s)`; }
+    else if(diasMin === 0){ color='#ef4444'; etiqueta=`<strong>¡VENCE HOY!</strong>`; }
+    else if(diasMin === 1){ color='#f97316'; etiqueta=`Vence <strong>mañana</strong>`; }
+    else if(diasMin <= 3){ color='#f97316'; etiqueta=`Revisar en <strong>${diasMin}</strong> días`; }
     else {                 color='#22c55e'; etiqueta=`Próxima en <strong>${diasMin}</strong> días`; }
 
     revHTML += `
-      <div style="display:flex; justify-content:space-between; align-items:center; padding:12px; border-radius:6px; margin-bottom:8px; border-left:4px solid ${color}; background-color:${color}18;">
+      <div onclick="gestionarPuertas('${clienteId}')" title="Ver puertas y revisiones de este cliente" style="cursor:pointer;display:flex; justify-content:space-between; align-items:center; padding:12px; border-radius:6px; margin-bottom:8px; border-left:4px solid ${color}; background-color:${color}18;">
         <div>
           <strong style="display:block; font-size:1rem;">${escapeHtml(nombreCliente)}</strong>
-          <small style="color:#6b7280; display:block; margin-top:2px;">🚪 ${lista.length} puerta(s): ${escapeHtml(resumenTipos)}</small>
-          <small style="color:#6b7280; display:block; margin-top:2px;">📅 ${proximaFecha} — ${etiqueta}</small>
+          <small style="color:#6b7280; display:block; margin-top:2px;">Puertas (${lista.length} puerta(s): ${escapeHtml(resumenTipos)}</small>
+          <small style="color:#6b7280; display:block; margin-top:2px;">Próxima: ${proximaFecha} — ${etiqueta}</small>
         </div>
-        <button class="btn btn-primary btn-sm" onclick="gestionarPuertas('${clienteId}')">Ver</button>
+        <button class="btn btn-primary btn-sm" onclick="event.stopPropagation(); gestionarPuertas('${clienteId}')">Ver</button>
       </div>`;
   });
 
-  // ── Saludo dinámico ──
+  // Saludo dinámico
   const h = new Date().getHours();
   const saludo = h<12 ? 'Buenos días' : h<20 ? 'Buenas tardes' : 'Buenas noches';
 
-  // ── Nombre del técnico ──
+  // Nombre del técnico
   const nombreTecnico = window.authState?.employee?.nombre || window.authState?.profile?.full_name || '';
   const nombreTecnicoMayus = nombreTecnico ? nombreTecnico.toUpperCase() : '';
 
-  // ── Renderizado HTML: Dashboard ──
+  // Renderizado HTML: Dashboard
   el.innerHTML = `
     <div class="page-header">
       <div>
-        <h2>${saludo} 👋</h2>
+        <h2>${saludo}</h2>
         <p>Resumen general · ${new Date().toLocaleDateString('es-ES',{weekday:'long',day:'numeric',month:'long'})}</p>
       </div>
       ${nombreTecnicoMayus ? `<div class="tecnico-badge">${escapeHtml(nombreTecnicoMayus)}</div>` : ''}
@@ -193,8 +200,7 @@ window.render_dashboard = async function(el){
     <div class="stats-grid">
       <div class="stat-card"><div class="stat-icon" style="background:#dbeafe;color:#2563eb"><i class="fas fa-users"></i></div><div class="stat-info"><h3>${clientes.length}</h3><p>Clientes</p></div></div>
       <div class="stat-card"><div class="stat-icon" style="background:#dcfce7;color:#16a34a"><i class="fas fa-file-invoice-dollar"></i></div><div class="stat-info"><h3>${formatCurrency(totalPresupuesto)}</h3><p>Presupuestos</p></div></div>
-      <div class="stat-card"><div class="stat-icon" style="background:#ffedd5;color:#ea580c"><i class="fas fa-clipboard-list"></i></div><div class="stat-info"><h3>${partesAbiertos}</h3><p>Partes abiertos</p></div></div>
-      <div class="stat-card"><div class="stat-icon" style="background:#e0e7ff;color:#4f46e5"><i class="fas fa-circle-check"></i></div><div class="stat-info"><h3>${partesCompletados}</h3><p>Completados</p></div></div>
+      <div class="stat-card" onclick="navigateTo('partesTrabajo')" style="cursor:pointer"><div class="stat-icon" style="background:#ffedd5;color:#ea580c"><i class="fas fa-clipboard-list"></i></div><div class="stat-info"><h3>${partesTotal}</h3><p>Partes de trabajo</p></div></div>
       <div class="stat-card"><div class="stat-icon" style="background:#fef3c7;color:#d97706"><i class="fas fa-truck"></i></div><div class="stat-info"><h3>${vehiculosEnRuta}</h3><p>Vehículos en ruta</p></div></div>
       <div class="stat-card" style="cursor:pointer${stockBajoItems.length?';border-left:4px solid #dc2626':''}" onclick="navigateTo('almacen')" title="Ver almacén"><div class="stat-icon" style="background:#fee2e2;color:#dc2626"><i class="fas fa-triangle-exclamation"></i></div><div class="stat-info"><h3>${stockBajoItems.length}</h3><p>Stock bajo</p></div></div>
     </div>
@@ -227,7 +233,7 @@ window.render_dashboard = async function(el){
     </div>
 
     <div class="card" style="margin-top:20px; grid-column: 1 / -1;">
-      <div class="card-header"><h3>Últimos presupuestos</h3><button class="btn btn-outline btn-sm" onclick="navigateTo('presupuestos')">Ver todos</button></div>
+      <div class="card-header"><h3>sltimos presupuestos</h3><button class="btn btn-outline btn-sm" onclick="navigateTo('presupuestos')">Ver todos</button></div>
       <div class="table-wrapper"><table><thead><tr><th>ID</th><th>Cliente</th><th>Fecha</th><th>Total</th><th>Estado</th></tr></thead><tbody>
         ${presupuestos.slice(-5).reverse().map(p =>
           `<tr><td>${escapeHtml(p.id)}</td><td>${escapeHtml(p.clienteNombre)}</td><td>${formatDate(p.fecha)}</td><td>${formatCurrency(p.total)}</td>
@@ -237,12 +243,12 @@ window.render_dashboard = async function(el){
     </div>
 
     <div class="card" style="margin-top:20px; grid-column: 1 / -1;">
-      <div class="card-header"><h3>Últimas tareas en curso</h3><button class="btn btn-outline btn-sm" onclick="navigateTo('partesTrabajo')">Ver todos</button></div>
-      <div class="table-wrapper"><table><thead><tr><th>Parte</th><th>Cliente</th><th>Tipo</th><th>Estado</th><th>Fecha</th></tr></thead><tbody>
-        ${partes.filter(p => p.estado !== 'completado').slice(-5).reverse().map(p =>
+      <div class="card-header"><h3>ultimas tareas en curso</h3><button class="btn btn-outline btn-sm" onclick="navigateTo('partesTrabajo')">Ver todos</button></div>
+      <div class="table-wrapper"><table><thead><tr><th>Parte</th><th>Cliente</th><th>Tipo</th><th>Fecha</th></tr></thead><tbody>
+        ${partes.slice(-5).reverse().map(p =>
           `<tr><td>${escapeHtml(p.id)}</td><td>${escapeHtml(p.clienteNombre)}</td><td>${escapeHtml(p.tipoPuerta)}</td>
-          <td><span class="badge ${getBadgeClass(p.estado)}">${getStatusLabel(p.estado)}</span></td><td>${formatDate(p.fecha)}</td></tr>`
-        ).join('') || '<tr><td colspan="5" style="text-align:center;padding:30px;color:var(--text-muted)">Sin tareas en curso</td></tr>'}
+          <td>${formatDate(p.fecha)}</td></tr>`
+        ).join('') || '<tr><td colspan="4" style="text-align:center;padding:30px;color:var(--text-muted)">Sin tareas en curso</td></tr>'}
       </tbody></table></div>
     </div>
 
@@ -251,11 +257,13 @@ window.render_dashboard = async function(el){
 
   actualizarCuentaAtrasITV();
 
-  // ── Gráfico actividad ──
-  setTimeout(() => {
+  // Gráfico actividad
+  setTimeout(async () => {
     try {
       const canvas = document.getElementById('dashChart');
-      if(!canvas || !window.Chart) return;
+      if(!canvas) return;
+      await window.ensureChart();
+      if(!document.body.contains(canvas)) return;
       
       const prev = Chart.getChart('dashChart'); 
       if(prev) prev.destroy();
@@ -268,21 +276,26 @@ window.render_dashboard = async function(el){
         counts.push(partes.filter(p=>p.fecha===iso).length);
       }
 
+      // (8) Degradado suave bajo la línea, con el color primario del tema
+      const primary=getComputedStyle(document.documentElement).getPropertyValue('--primary').trim()||'#16a34a';
+      const ctx2d=canvas.getContext('2d');
+      const grad=ctx2d.createLinearGradient(0,0,0,canvas.clientHeight||180);
+      grad.addColorStop(0,primary+'55');
+      grad.addColorStop(1,primary+'00');
+
       new Chart(canvas,{
         type:'line',
-        data:{ labels:dias, datasets:[{ label:'Partes', data:counts, borderColor:'#3b82f6', backgroundColor:'rgba(59,130,246,0.1)', fill:true, tension:0.35, pointRadius:2 }] },
+        data:{ labels:dias, datasets:[{ label:'Partes', data:counts, borderColor:primary, backgroundColor:grad, fill:true, tension:0.35, pointRadius:2 }] },
         options:{ responsive:true, plugins:{legend:{display:false}}, scales:{y:{beginAtZero:true,ticks:{stepSize:1}}} }
       });
     } catch(e){ console.warn('Error gráfico dashboard:', e); }
   }, 100);
 
-  // ── Informe diario de flota ──
+  // Informe diario de flota
   render_daily_report('dailyReportContainer').catch(console.error);
 };
 
-// ═══════════════════════════════════════════════════════════
 //  CLIENTES
-// ═══════════════════════════════════════════════════════════
 // Pinta filas por tandas y carga la siguiente al llegar al final (o con el botón)
 window.renderPaginatedRows = function(tbody, items, renderRow, { colspan = 1, empty = '', pageSize = 50 } = {}) {
   if (!tbody) return;
@@ -314,7 +327,7 @@ window.renderPaginatedRows = function(tbody, items, renderRow, { colspan = 1, em
 window.render_clientes = async function(el){
   el.innerHTML =
     '<div class="page-header"><div><h2>Clientes</h2><p>Gestión de clientes</p></div>'+
-    '<div class="header-actions"><button class="btn btn-primary" onclick="showClienteForm()"><i class="fas fa-plus"></i> Nuevo Cliente</button><button class="btn btn-success" onclick="showImportFolioModal()"><i class="fas fa-file-image"></i> Importar datos</button></div></div>'+
+    '<div class="header-actions"><button class="btn btn-primary" onclick="showClienteForm()"><i class="fas fa-plus"></i> Nuevo Cliente</button><button class="btn btn-success" onclick="showImportClientesModal()"><i class="fas fa-file-excel"></i> Importar Excel/CSV</button><button class="btn btn-outline" onclick="showImportFolioModal()"><i class="fas fa-file-image"></i> Importar datos</button></div></div>'+
     '<div class="search-bar">'+
       '<input type="text" placeholder="Buscar cliente..." id="searchCliente" oninput="renderClientes()">'+
       '<select id="filterTipo" onchange="renderClientes()"><option value="">Todos</option><option value="empresa">Empresa</option><option value="particular">Particular</option></select></div>'+
@@ -325,10 +338,10 @@ window.render_clientes = async function(el){
 };
 
 window.renderClientes = async function(){
-  const clientes = await dbGetAll('clientes');
-  const cadenas = await dbGetAll('cadenas');
-  const rutas = await dbGetAll('rutas');
-  const allClientes = await dbGetAll('clientes');
+  const [clientes, cadenas, rutas] = await Promise.all([
+    dbGetAll('clientes'), dbGetAll('cadenas'), dbGetAll('rutas')
+  ]);
+  const allClientes = clientes;
   
   // Mapas para lookup rápido
   const cadenaMap = new Map(cadenas.map(c => [String(c.id), c.nombre]));
@@ -379,13 +392,13 @@ async function showClienteForm(editId = null, opts = {}) {
     try { rutasCache = await getRutasByCadena(String(c.cadenaId)); } catch(e){ rutasCache = []; }
   }
 
-  const opcionesCadenaMant = '<option value="">— Sin cadena —</option>' +
+  const opcionesCadenaMant = '<option value="">— Sin cadena</option>' +
     cadenasMant.map(cm => `<option value="${cm.id}" ${c.cadenaId==cm.id?'selected':''}>${escapeHtml(cm.nombre)}</option>`).join('');
 
-  const opcionesRuta = '<option value="">— Sin ruta —</option>' +
+  const opcionesRuta = '<option value="">— Sin ruta</option>' +
     rutasCache.map(r => `<option value="${r.id}" ${c.rutaId==r.id?'selected':''}>${escapeHtml(r.nombre)}</option>`).join('');
 
-  const opcionesPadre = '<option value="">— Ninguno (cliente suelto) —</option>' +
+  const opcionesPadre = '<option value="">— Ninguno (cliente suelto)</option>' +
     cadenasPadre.map(p => `<option value="${p.id}" ${c.padreId==p.id?'selected':''}>${escapeHtml(p.nombre)}</option>`).join('');
 
   const esCadenaChecked = (opts?.nuevoPadre === true || c.esCadena) ? 'checked' : '';
@@ -415,7 +428,7 @@ async function showClienteForm(editId = null, opts = {}) {
           '<i class="fas fa-location-crosshairs"></i></button>'+
       '</div>'+
       '<small id="cf_geo_estado" style="color:var(--text-muted);font-size:11px">'+
-        (c.lat ? '✅ '+c.lat.toFixed(4)+', '+c.lng.toFixed(4) : '⚠️ Sin coordenadas (pulsa el mapa)')+
+        (c.lat ? 'o. '+c.lat.toFixed(4)+', '+c.lng.toFixed(4) : '📍 Sin coordenadas (pulsa el mapa)')+
       '</small>'+
     '</div>'+
     '<div class="form-group full"><label>Notas</label><textarea id="cf_nota">'+escapeHtml(c.nota||'')+'</textarea></div>'+
@@ -430,7 +443,7 @@ async function showClienteForm(editId = null, opts = {}) {
   document.getElementById('cf_cadena').addEventListener('change', async (e) => {
     const sel = document.getElementById('cf_ruta');
     const cid = e.target.value;
-    sel.innerHTML = '<option value="">— Sin ruta —</option>';
+    sel.innerHTML = '<option value="">— Sin ruta</option>';
     if (!cid) return;
     const rutas = await getRutasByCadena(cid);
     sel.innerHTML += rutas.map(r => `<option value="${r.id}">${escapeHtml(r.nombre)}</option>`).join('');
@@ -458,7 +471,7 @@ window.saveCliente = async function(id){
       rutaId:   document.getElementById('cf_ruta')?.value || null,
     };
 
-    // ── Validación en línea ──
+    // Validación en línea
     let ok = true;
     ok &= setFieldError('cf_nombre',   validators.required(data.nombre, 'El nombre'));
     ok &= setFieldError('cf_email',    validators.email(data.email));
@@ -480,15 +493,15 @@ window.geolocalizarCliente = async function(){
   const dir = document.getElementById('cf_direccion').value.trim();
   if(!dir){ showToast('Escribe una dirección primero','error'); return; }
   const estado = document.getElementById('cf_geo_estado');
-  estado.textContent = '🔍 Buscando...';
+  estado.textContent = 'Buscando...';
   const geo = await geocodificar(dir);
   if(!geo){
-    estado.textContent = '❌ No encontrada. Revisa la dirección.';
+    estado.textContent = 'O No encontrada. Revisa la dirección.';
     showToast('Dirección no encontrada','error');
     return;
   }
   window.__geoCliente = geo;
-  estado.textContent = '✅ ' + geo.nombreCompleto.split(',').slice(0,3).join(',');
+  estado.textContent = 'o. ' + geo.nombreCompleto.split(',').slice(0,3).join(',');
   showToast('Coordenadas encontradas');
 };
 
@@ -496,7 +509,7 @@ window.usarUbicacionActualCliente = function(){
   const estado = document.getElementById('cf_geo_estado');
   const btn = document.getElementById('cf_btn_gps');
   if(!navigator.geolocation){ showToast('Tu dispositivo no permite obtener la ubicación','error'); return; }
-  estado.textContent = '📡 Obteniendo ubicación...';
+  estado.textContent = 'Y" Obteniendo ubicación...';
   if(btn) btn.disabled = true;
   navigator.geolocation.getCurrentPosition(async pos => {
     const lat = pos.coords.latitude, lng = pos.coords.longitude;
@@ -505,13 +518,13 @@ window.usarUbicacionActualCliente = function(){
     if(!document.getElementById('cf_direccion')) return;
     window.__geoCliente = { lat, lng, nombreCompleto: res?.nombreCompleto || '' };
     if(res) document.getElementById('cf_direccion').value = res.direccion;
-    estado.textContent = '✅ ' + lat.toFixed(4) + ', ' + lng.toFixed(4)
+    estado.textContent = 'o. ' + lat.toFixed(4) + ', ' + lng.toFixed(4)
       + (res ? '' : ' (dirección no encontrada, escríbela a mano)');
     showToast(res ? 'Dirección capturada. Revísala antes de guardar' : 'Coordenadas capturadas');
   }, err => {
     if(btn) btn.disabled = false;
     const msg = err.code === 1 ? 'Permiso de ubicación denegado' : 'No se pudo obtener la ubicación';
-    estado.textContent = '❌ ' + msg;
+    estado.textContent = 'O ' + msg;
     showToast(msg,'error');
   }, { enableHighAccuracy:true, timeout:15000, maximumAge:0 });
 };
@@ -520,34 +533,36 @@ window.deleteCliente = async function(id){
   await dbDelete('clientes',id);
   showToast('Cliente eliminado');navigateTo('clientes');
 };
-// ═══════════════════════════════════════════════════════════
 //  PRESUPUESTOS
-// ═══════════════════════════════════════════════════════════
 window.render_presupuestos = async function(el){
   el.innerHTML =
     '<div class="page-header"><div><h2>Presupuestos</h2><p>Genera y gestiona presupuestos</p></div>'+
     '<div class="header-actions">'+
+      '<button class="btn btn-outline" onclick="importarPresupuestoFoto()" title="Importar un presupuesto desde una foto (OCR)"><i class="fas fa-wand-magic-sparkles"></i> Importar desde foto</button>'+
       '<button class="btn btn-primary" onclick="showPresupuestoForm()"><i class="fas fa-plus"></i> Nuevo Presupuesto</button>'+
       '<button class="btn btn-outline" onclick="showPlantillasPresupuesto()"><i class="fas fa-bookmark"></i> Plantillas</button>'+
       '<button class="btn btn-outline" onclick="generatePDF_presupuestos()"><i class="fas fa-file-pdf"></i> Exportar todo</button></div></div>'+
     '<div class="search-bar"><input type="text" placeholder="Buscar..." id="searchPres" oninput="renderPresupuestos()"></div>'+
     '<div class="card"><div  class="table-wrapper"><table><thead>'+
-      '<tr><th>ID</th><th>Cliente</th><th>Fecha</th><th>Válido hasta</th><th>Total</th><th>Estado</th><th>Acciones</th></tr>'+
+      '<tr><th>ID</th><th>Cliente</th><th>Fecha</th><th>Válido hasta</th><th>Total</th><th>Parte</th><th>Estado</th><th>Acciones</th></tr>'+
     '</thead><tbody id="presBody"></tbody></table></div></div>';
   renderPresupuestos();
 };
 
 window.renderPresupuestos = async function(){
   const presupuestos = await dbGetAll('presupuestos');
+  window.__presupuestosCache = Object.fromEntries(presupuestos.map(p=>[p.id,p]));
   const q = (document.getElementById('searchPres')?.value||'').toLowerCase();
   const filtered = presupuestos.filter(p=>JSON.stringify(p).toLowerCase().includes(q));
   document.getElementById('presBody').innerHTML = filtered.map(p=>
     '<tr><td><strong>'+escapeHtml(p.id)+'</strong></td><td>'+escapeHtml(p.clienteNombre)+'</td>'+
     '<td>'+formatDate(p.fecha)+'</td><td>'+formatDate(p.validoHasta)+'</td>'+
     '<td>'+formatCurrency(p.total)+'</td>'+
+    '<td>'+(p.parteId ? '<span class="badge badge-purple" title="Parte de trabajo asociado">'+escapeHtml(p.parteId)+'</span>' : '<span class="badge badge-gray">Individual</span>')+'</td>'+
     '<td><span class="badge '+getBadgeClass(p.estado)+'">'+getStatusLabel(p.estado)+'</span></td>'+
     '<td class="actions-cell">'+
       '<button class="btn btn-outline btn-sm btn-icon" title="Editar" data-action="edit-presupuesto" data-id="'+escapeHtml(p.id)+'"><i class="fas fa-pen"></i></button>'+
+      (p.medidasPlanta && p.medidasPlanta.sistema==='hoja-v1' ? '<button class="btn btn-outline btn-sm btn-icon" title="Ver hoja de medidas" onclick="HOJA_MEDIDAS.abrirVista(window.__presupuestosCache[\''+p.id+'\'].medidasPlanta)"><i class="fas fa-ruler-combined"></i></button>' : '')+
       '<button class="btn btn-outline btn-sm btn-icon" title="Enviar al cliente" onclick="sendPresupuesto(\''+p.id+'\')"><i class="fas fa-paper-plane"></i></button>'+
       '<button class="btn btn-outline btn-sm btn-icon" title="PDF" onclick="generatePDF_presupuesto(\''+p.id+'\')"><i class="fas fa-file-pdf"></i></button>'+
       '<button class="btn btn-outline btn-sm btn-icon" title="Guardar como plantilla" onclick="savePresupuestoAsTemplate(\''+p.id+'\')"><i class="fas fa-bookmark"></i></button>'+
@@ -557,7 +572,7 @@ window.renderPresupuestos = async function(){
   ).join('') || '<tr><td colspan="8" style="text-align:center;padding:30px;color:var(--text-muted)">Sin presupuestos</td></tr>';
 };
 
-// ── Líneas de concepto ─────────────────────────────────────
+// Líneas de concepto """""""""""""""""""?
 window.__lineItems = {};
 
 function renderLineItems(cid, items){
@@ -568,7 +583,7 @@ function renderLineItems(cid, items){
     '<tr data-idx="'+i+'">'+
       '<td><input type="text" data-field="descripcion" value="'+escapeHtml(item.descripcion)+'" oninput="this.style.outline=\'\'" onchange="updateLineItem(\''+cid+'\','+i+',\'descripcion\',this.value)" style="min-width:200px"></td>'+
       '<td><select data-field="tipoId" onchange="updateLineItem(\''+cid+'\','+i+',\'tipoId\',this.value)" style="min-width:180px">'+
-        '<option value="">— Sin tipo —</option>'+
+        '<option value="">— Sin tipo</option>'+
         (window.__tipos||[]).map(t=>'<option value="'+t.id+'" '+(String(item.tipoId||'')===String(t.id)?'selected':'')+'>'+escapeHtml(t.nombre)+'</option>').join('')+'</td>'+
       '<td><input type="number" data-field="cantidad" class="only-num-dec" min="0" step="0.01" inputmode="decimal" value="'+(Number(item.cantidad)||0)+'" onchange="updateLineItem(\''+cid+'\','+i+',\'cantidad\',this.value)" style="width:110px"></td>'+
       '<td><input type="number" data-field="precio" class="only-num-dec" min="0" step="0.01" inputmode="decimal" value="'+(Number(item.precio)||0)+'" onchange="updateLineItem(\''+cid+'\','+i+',\'precio\',this.value)" style="width:110px"></td>'+
@@ -635,8 +650,16 @@ window.showPresupuestoForm = async function(id, tpl){
   id = id ? String(id) : null;
   await dbGetAll('tiposPuerta').then(r=>{window.__tipos=r});
   window.__lineItems = {};
+  const importado = !id && !tpl ? window.__presupuestoImportado : null;
+  window.__presupuestoImportado = null;
   const p = id ? await dbGet('presupuestos',id)
     : (tpl ? {notas:tpl.notas||'', lineItems:JSON.parse(JSON.stringify(tpl.lineItems||[]))} : {});
+  if(importado){
+    if(importado.fecha) p.fecha=importado.fecha;
+    if(importado.lineItems?.length) p.lineItems=importado.lineItems;
+    if(importado.clienteNombre) p.__clienteNombreOCR=importado.clienteNombre;
+  }
+  window.__pfDatosActuales = p;
   const items = p.lineItems || [{descripcion:'',tipoId:'',cantidad:1,precio:0}];
   const lid = id ? 'pf_edit' : 'pf_new';
   window.__lineItems[lid] = items;
@@ -644,24 +667,57 @@ window.showPresupuestoForm = async function(id, tpl){
   const nextId = p.id || window.db.nextId('PRES');
 
   const clientes = await dbGetAll('clientes');
+  // Coincidencia difusa del nombre detectado por OCR con la lista de clientes
+  let clienteOCRId='';
+  if(p.__clienteNombreOCR){
+    const norm=s=>String(s||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]/g,'');
+    const objetivo=norm(p.__clienteNombreOCR);
+    const match=clientes.find(c=>norm(c.nombre)===objetivo)
+      || clientes.find(c=>norm(c.nombre).includes(objetivo) || objetivo.includes(norm(c.nombre)));
+    if(match) clienteOCRId=match.id;
+  }
+  // Partes de trabajo del día del presupuesto (por defecto hoy si es nuevo)
+  const fechaBase = p.fecha || getToday();
+  const partes = await dbGetAll('partesTrabajo');
+  const partesDelDia = partes.filter(pt => pt.fecha === fechaBase)
+    .map(pt => ({ id: pt.id, clienteNombre: pt.clienteNombre || '', desc: (pt.descripcion || '').slice(0, 60) }));
+  const partesOptions = '<option value="">— Sin parte asociado (presupuesto individual) —</option>' +
+    partesDelDia.map(pt => '<option value="' + escapeHtml(pt.id) + '" ' + (p.parteId === pt.id ? 'selected' : '') + '>' +
+      escapeHtml(pt.id) + ' · ' + escapeHtml(pt.clienteNombre) + (pt.desc ? ' — ' + escapeHtml(pt.desc) : '') + '</option>').join('');
+
   const form = '<div class="form-grid">'+
     '<div class="form-group"><label>ID</label><input id="pf_id" value="'+escapeHtml(nextId)+'"></div>'+
     '<div class="form-group"><label>Cliente *</label><select id="pf_cliente">'+
-      '<option value="">— Seleccionar —</option>'+
-      clientes.map(c=>'<option value="'+c.id+'" data-nombre="'+escapeHtml(c.nombre)+'" '+(p.clienteId===c.id?'selected':'')+'>'+escapeHtml(c.nombre)+'</option>').join('')+'</select></div>'+
+      '<option value="">— Seleccionar</option>'+
+      clientes.map(c=>'<option value="'+c.id+'" data-nombre="'+escapeHtml(c.nombre)+'" '+((p.clienteId===c.id||clienteOCRId===c.id)?'selected':'')+'>'+escapeHtml(c.nombre)+'</option>').join('')+'</select></div>'+
     '<div class="form-group"><label>Fecha</label><input id="pf_fecha" type="date" value="'+(p.fecha||getToday())+'"></div>'+
     '<div class="form-group"><label>Válido hasta</label><input id="pf_valido" type="date" value="'+(p.validoHasta||'')+'"></div>'+
     '<div class="form-group"><label>Estado</label><select id="pf_estado">'+
       ['borrador','enviado','aprobado','rechazado'].map(e=>'<option value="'+e+'" '+(p.estado===e?'selected':'')+'>'+getStatusLabel(e)+'</option>').join('')+'</select></div>'+
-    '<div class="form-group full"><label>Notas</label><textarea id="pf_notas">'+escapeHtml(p.notas||'')+'</textarea></div>'+
+    '<div class="form-group full"><label>Parte de trabajo del día (opcional)</label><select id="pf_parte">'+
+      partesOptions+
+    '</select>'+
+    '<small style="color:var(--text-muted);display:block;margin-top:4px">Asocia este presupuesto a un parte de la misma fecha. Si es un presupuesto individual, deja "Sin parte asociado".</small></div>'+
+    '<div class="form-group full" style="display:none"><label>Notas</label><textarea id="pf_notas">'+escapeHtml(p.notas||'')+'</textarea></div>'+
+  '</div>'+
+  '<div class="pf-medidas-row" style="margin:12px 0;display:flex;gap:10px;align-items:center;flex-wrap:wrap">'+
+    '<label style="font-weight:600">Tipo de puerta:</label>'+
+    '<select id="pf_tipo_hoja" style="padding:8px 10px;border:1px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);font-size:14px">'+
+      '<option value="">— Elegir tipo —</option>'+
+      (window.__tipos||[]).map(t=>'<option value="'+escapeHtml(t.nombre)+'" '+(p.medidasPlanta?.tipoNombre===t.nombre?'selected':'')+'>'+escapeHtml(t.nombre)+'</option>').join('')+
+    '</select>'+
+    '<button class="btn btn-outline btn-sm" id="pf_btn_hoja" onclick="abrirHojaMedidasPresupuesto(\''+lid+'\')"><i class="fas fa-ruler-combined"></i> Abrir hoja de medidas</button>'+
+    '<span id="'+lid+'_medidas_info" class="pf-medidas-info" style="font-size:13px;color:var(--text-muted)">'+
+      (p.medidasPlanta ? '<i class="fas fa-check-circle" style="color:#16a34a"></i> Hoja de medidas adjunta ('+escapeHtml(p.medidasPlanta.tipoNombre||'')+')' : 'Elige el tipo y rellena la hoja del técnico')+
+    '</span>'+
   '</div>'+
   '<h3 style="margin:20px 0 10px">Conceptos</h3>'+
   '<div class="table-wrapper"><table><thead><tr><th>Descripción</th><th>Tipo</th><th>Cant.</th><th>Precio</th><th>Subtotal</th><th></th></tr></thead><tbody id="'+lid+'_items"></tbody></table></div>'+
   '<button class="btn btn-primary btn-sm" style="margin-top:10px" onclick="addLineItem(\''+lid+'\')"><i class="fas fa-plus"></i> Añadir línea</button>'+
   '<div class="totals-box" id="'+lid+'_totals" style="display:none">'+
-    '<div class="row"><span>Subtotal:</span><span id="'+lid+'_subtotal">0,00 €</span></div>'+
-    '<div class="row"><span>IVA (21%):</span><span id="'+lid+'_iva">0,00 €</span></div>'+
-    '<div class="row grand"><span>TOTAL:</span><span id="'+lid+'_total">0,00 €</span></div>'+
+    '<div class="row"><span>Subtotal:</span><span id="'+lid+'_subtotal">0,00 ,</span></div>'+
+    '<div class="row"><span>IVA (21%):</span><span id="'+lid+'_iva">0,00 ,</span></div>'+
+    '<div class="row grand"><span>TOTAL:</span><span id="'+lid+'_total">0,00 ,</span></div>'+
   '</div>'+
   '<p style="margin-top:12px;color:var(--text-muted);font-size:13px"><i class="fas fa-info-circle"></i> Los totales se calcularán al guardar el presupuesto</p>';
 
@@ -669,8 +725,96 @@ window.showPresupuestoForm = async function(id, tpl){
     '<button class="btn btn-primary btn-save-presupuesto" data-action="save-presupuesto" data-id="'+(id ? escapeHtml(id) : '')+'"><i class="fas fa-save"></i> Guardar</button>';
   openModal(id?'Editar Presupuesto':'Nuevo Presupuesto',form,footer);
 
+  // Al elegir un parte del día, autocompletar el cliente del parte
+  document.getElementById('pf_parte').addEventListener('change', async e => {
+    const parteId = e.target.value;
+    if(!parteId) return;
+    try {
+      const parte = await dbGet('partesTrabajo', parteId);
+      if(parte?.clienteId){
+        const selCliente = document.getElementById('pf_cliente');
+        selCliente.value = parte.clienteId;
+        // Si el cliente no estaba en la lista, añadirlo
+        if(selCliente.value !== parte.clienteId){
+          const opt = document.createElement('option');
+          opt.value = parte.clienteId;
+          opt.dataset.nombre = parte.clienteNombre || '';
+          opt.textContent = parte.clienteNombre || parte.clienteId;
+          selCliente.appendChild(opt);
+          selCliente.value = parte.clienteId;
+        }
+        showToast('Cliente cargado desde el parte ' + parteId, 'info');
+      }
+    } catch(err){ console.warn('No se pudo cargar el parte:', err); }
+  });
+
   renderLineItems(lid, items);
+
+  // Al cambiar el tipo de puerta, abrir la hoja de medidas automáticamente
+  document.getElementById('pf_tipo_hoja')?.addEventListener('change', e=>{
+    if(e.target.value) abrirHojaMedidasPresupuesto(lid);
+  });
 };
+
+// Abre la hoja de medidas asociada al tipo de puerta elegido en el presupuesto.
+window.abrirHojaMedidasPresupuesto = function(lid){
+  const tipo = document.getElementById('pf_tipo_hoja')?.value;
+  if(!tipo){ showToast('Elige primero el tipo de puerta','error'); return; }
+  const p = window.__pfDatosActuales || {};
+  const previos = p.medidasPlanta?.sistema==='hoja-v1' && p.medidasPlanta.tipoNombre===tipo ? p.medidasPlanta.valores : {};
+  window.HOJA_MEDIDAS.abrirHoja(tipo, null, previos, (datos)=>{
+    datos.tipoId = tipo;
+    window.__presupuestoMedidas = datos;
+    const info=document.getElementById(lid+'_medidas_info');
+    if(info) info.innerHTML='<i class="fas fa-check-circle" style="color:#16a34a"></i> Hoja de medidas adjunta ('+escapeHtml(tipo)+')';
+    showToast('Hoja de medidas lista: se adjuntará al guardar el presupuesto');
+  });
+};
+
+// ═══ Importar presupuesto desde una foto (OCR) ═══
+window.importarPresupuestoFoto = async function(){
+  if(!window.REPOSTAJES){ showToast('Módulo OCR no disponible','error'); return; }
+  // Reutiliza el lector OCR de tickets exponiendo un helper específico
+  const input=document.createElement('input');
+  input.type='file'; input.accept='image/*'; input.capture='environment';
+  input.onchange=async ()=>{
+    const f=input.files?.[0]; if(!f) return;
+    const r=new FileReader();
+    r.onload=async ()=>{
+      showToast('Leyendo presupuesto…','info');
+      try{
+        const {datos,texto}=await window.REPOSTAJES.ocrDocumento(r.result);
+        abrirFormPresupuestoDesdeOCR(datos,texto);
+      }catch(e){
+        console.error(e);
+        showToast('No se pudo leer la imagen: '+(e.message||e),'error');
+      }
+    };
+    r.readAsDataURL(f);
+  };
+  input.click();
+};
+
+function abrirFormPresupuestoDesdeOCR(datos,texto){
+  // Líneas: cada línea del texto con importe se convierte en concepto
+  const lineas=[];
+  (texto||'').split(/\n+/).forEach(linea=>{
+    const m=linea.replace(/,/g,'.').match(/^(.{3,60}?)[\s.:\-]+(\d+(?:\.\d{1,2})?)\s*(?:€|EUR|EUROS)?\s*$/i);
+    if(m && m[1] && !/^(TOTAL|SUBTOTAL|IVA|BASE)/i.test(m[1].trim())){
+      const precio=parseFloat(m[2]);
+      if(precio>0) lineas.push({descripcion:m[1].trim().replace(/^[\d.\-\s]+/,''),tipoId:'',cantidad:1,precio});
+    }
+  });
+  const total=lineas.reduce((s,l)=>s+l.precio*l.cantidad,0);
+  window.__presupuestoImportado={
+    clienteNombre:datos.cliente||'',
+    fecha:datos.fecha||getToday(),
+    lineItems:lineas.length?lineas:[{descripcion:'(edita la descripción)',tipoId:'',cantidad:1,precio:0}],
+    totalDetectado:datos.importe||total||null
+  };
+  window.showPresupuestoForm(null);
+  showToast(lineas.length?('Detectadas '+lineas.length+' líneas — revisa y ajusta'):('No he detectado líneas claras; rellena el formulario a mano'),'info');
+}
 
 window.savePresupuesto = async function(id){
   id = id ? String(id) : null;
@@ -689,7 +833,7 @@ window.savePresupuesto = async function(id){
       });
     });
 
-    // ── Validación en línea ──
+    // Validación en línea
     let ok = true;
 
     // Cliente obligatorio
@@ -760,14 +904,25 @@ window.savePresupuesto = async function(id){
       id: document.getElementById('pf_id').value.trim(),
       clienteId, clienteNombre,
       fecha,
-      validoHasta: valido,
+      validoHasta: valido || null,
       estado: document.getElementById('pf_estado').value,
+      parteId: document.getElementById('pf_parte')?.value || null,
       notas: document.getElementById('pf_notas').value.trim(),
       lineItems: items,
       subtotal: sub,
       iva: sub*0.21,
       total: sub*1.21
     };
+    // Adjuntar plantilla de medidas si el usuario la preparó en esta sesión
+    if(window.__presupuestoMedidas){
+      data.medidasPlanta = window.__presupuestoMedidas;
+    } else if(!(data.id && window.__pfDatosActuales?.medidasPlanta)){
+      // Si edita y no ha tocado la hoja, conserva la existente
+      delete data.medidasPlanta;
+    }
+    if(id && window.__pfDatosActuales?.medidasPlanta && !window.__presupuestoMedidas){
+      data.medidasPlanta = window.__pfDatosActuales.medidasPlanta;
+    }
 
     await dbPut('presupuestos', data);
     closeModal();
@@ -802,7 +957,7 @@ window.deletePresupuesto = async function(id){
   showToast('Presupuesto eliminado');navigateTo('presupuestos');
 };
 
-// ── Plantillas de presupuesto (guardadas en este dispositivo) ──
+// Plantillas de presupuesto (guardadas en este dispositivo)
 const PLANTILLAS_KEY = 'valgom_plantillas_presupuesto';
 function getPlantillasPresupuesto(){
   try { return JSON.parse(localStorage.getItem(PLANTILLAS_KEY)) || []; } catch(e){ return []; }
@@ -845,14 +1000,14 @@ window.borrarPlantillaPresupuesto = function(tid){
   showPlantillasPresupuesto();
 };
 
-// ── Enviar presupuesto por email / compartir ──
+// Enviar presupuesto por email / compartir
 window.sendPresupuesto = async function(id){
   const p = await dbGet('presupuestos',id);
   if(!p){ showToast('Presupuesto no encontrado','error'); return; }
   const cliente = p.clienteId ? await dbGet('clientes',p.clienteId) : null;
   const email = (cliente && cliente.email) || '';
   const asunto = 'Presupuesto '+p.id+' — Valgom';
-  const texto = 'Hola'+(p.clienteNombre?' '+p.clienteNombre:'')+',\n\nTe adjuntamos el presupuesto '+p.id+' por un total de '+formatCurrency(p.total)+' (IVA incluido).\n\nQuedamos a tu disposición para cualquier duda.\n\nUn saludo,\nValgom';
+  const texto = 'Hola'+(p.clienteNombre? ' '+p.clienteNombre:'')+',\n\nTe adjuntamos el presupuesto '+p.id+' por un total de '+formatCurrency(p.total)+' (IVA incluido).\n\nQuedamos a tu disposición para cualquier duda.\n\nUn saludo,\nValgom';
   let enviado = false;
   try {
     const file = await window.generatePDF_presupuesto(id, {asFile:true});
@@ -880,50 +1035,42 @@ window.sendPresupuesto = async function(id){
   }
 };
 
-// ═══════════════════════════════════════════════════════════
 //  PARTES DE TRABAJO (CON CAMPO HORAS)
-// ═══════════════════════════════════════════════════════════
 window.render_partesTrabajo = async function(el){
   el.innerHTML =
     '<div class="page-header"><div><h2>Partes de Trabajo</h2><p>Seguimiento de instalaciones y reparaciones</p></div>'+
     '<div class="header-actions"><button class="btn btn-primary" onclick="showParteForm()"><i class="fas fa-plus"></i> Nuevo Parte</button></div></div>'+
     '<div class="search-bar">'+
       '<input type="text" placeholder="Buscar..." id="searchParte" oninput="renderPartes()">'+
-      '<select id="filterEstadoParte" onchange="renderPartes()"><option value="">Todos</option>'+
-        '<option value="abierto">Abierto</option><option value="en_ruta">En ruta</option>'+
-        '<option value="en_taller">En taller</option><option value="completado">Completado</option></select>'+
       '<select id="filterClienteParte" onchange="renderPartes()"><option value="">Todos los clientes</option></select>'+
       '<input type="date" id="filterFechaDesde" onchange="renderPartes()" title="Desde">'+
       '<input type="date" id="filterFechaHasta" onchange="renderPartes()" title="Hasta">'+
     '</div>'+
     '<div class="card"><div  class="table-wrapper"><table><thead>'+
-            '<tr><th>ID</th><th>Cliente</th><th>Ubicación</th><th>Puertas</th><th>Técnico</th><th>Tipo Puerta</th><th>Kms</th><th>Horas</th><th>Fotos</th><th>Estado</th><th>Fecha</th><th>Acciones</th></tr>'+
+            '<tr><th>ID</th><th>Cliente</th><th>Ubicación</th><th>Puertas</th><th>Técnico</th><th>Tipo Puerta</th><th>Kms</th><th>Horas</th><th>Fotos</th><th>Fecha</th><th>Acciones</th></tr>'+
     '</thead><tbody id="parteBody"></tbody></table></div></div>';
 
-  // Rellenar desplegable de clientes
+  // La tabla se pinta ya; el desplegable de clientes se rellena en paralelo
+  renderPartes();
   const clientes = await dbGetAll('clientes');
   const selCli = document.getElementById('filterClienteParte');
+  if(!selCli) return;
   selCli.innerHTML = '<option value="">Todos los clientes</option>' +
-    clientes.sort((a,b)=>(a.nombre||'').localeCompare(b.nombre||''))
+    clientes.slice().sort((a,b)=>(a.nombre||'').localeCompare(b.nombre||''))
       .map(c=>'<option value="'+escapeHtml(c.id)+'">'+escapeHtml(c.nombre)+'</option>').join('');
-
-  renderPartes();
 };
 
 window.renderPartes = async function(){
-  const partes = await dbGetAll('partesTrabajo');
-  const puertas = await dbGetAll('puertas');
+  const [partes, puertas] = await Promise.all([dbGetAll('partesTrabajo'), dbGetAll('puertas')]);
   const mapPuertas = Object.fromEntries(puertas.map(p => [p.id, p.nombre]));
 
   const q = (document.getElementById('searchParte')?.value||'').toLowerCase();
-  const estado = document.getElementById('filterEstadoParte')?.value||'';
   const clienteId = document.getElementById('filterClienteParte')?.value||'';
   const desde = document.getElementById('filterFechaDesde')?.value||'';
   const hasta = document.getElementById('filterFechaHasta')?.value||'';
 
   const filtered = partes.filter(p=>{
-    if(q && !JSON.stringify(p).toLowerCase().includes(q)) return false;
-    if(estado && p.estado!==estado) return false;
+    if(q && !JSON.stringify(p,(key,value)=>(key==='fotos'||key.startsWith('firma'))?undefined:value).toLowerCase().includes(q)) return false;
     if(clienteId && p.clienteId!==clienteId) return false;
     if(desde && p.fecha < desde) return false;
     if(hasta && p.fecha > hasta) return false;
@@ -931,34 +1078,95 @@ window.renderPartes = async function(){
   });
 
   renderPaginatedRows(document.getElementById('parteBody'), filtered, p=>
-    '<tr><td><strong>'+escapeHtml(p.id)+'</strong></td><td>'+escapeHtml(p.clienteNombre)+'</td>'+
+    '<tr><td><strong>'+escapeHtml(p.id)+'</strong></td><td>'+(p.interno ? '<span class="badge badge-orange" title="Desplazamiento interno: '+escapeHtml(p.motivoInterno||'')+'">🔧 Interno</span>' : escapeHtml(p.clienteNombre))+'</td>'+
     '<td>'+(p.ubicacionNombre ? escapeHtml(p.ubicacionNombre)+'<br><small style="color:#666">'+escapeHtml(p.ubicacionDireccion||'')+'</small>' : '—')+'</td>'+
     '<td>' + ((p.puertaIds && p.puertaIds.length)
       ? p.puertaIds.map(id => '<span class="badge badge-blue" style="margin:1px">' + escapeHtml(mapPuertas[id] || id) + '</span>').join('')
       : '—') + '</td>' +
     '<td>'+(p.empleadoNombre ? escapeHtml(p.empleadoNombre) : '—')+'</td>'+
-    '<td><span class="badge badge-blue">'+escapeHtml(p.tipoPuerta)+'</span></td>'+
+    '<td>'+(p.interno ? '<span class="badge badge-gray">Interno</span>' : '<span class="badge badge-blue">'+escapeHtml(p.tipoPuerta)+'</span>')+'</td>'+
     '<td>'+(p.kms||0)+' km</td>'+
     '<td>'+(p.horas ? p.horas+' h' : '—')+'</td>'+
-    '<td>' + (p.fotos?.length
-  ? p.fotos.map(f =>
-      '<img class="inc-foto" src="'+escapeHtml(f)+'" title="Ver foto" style="width:42px;height:42px;object-fit:cover;' +
-        'border-radius:6px;margin-right:4px;border:1px solid var(--border);vertical-align:middle;cursor:zoom-in">').join('')
-  : '—') + '</td>' +
-    '<td><span class="badge '+getBadgeClass(p.estado)+'">'+getStatusLabel(p.estado)+'</span></td>'+
+    '<td>' + (p.fotosurls?.length || p.fotos?.length
+  ? (p.fotosurls || p.fotos).map(f =>
+      '<img class="inc-foto" loading="lazy" decoding="async" src="'+escapeHtml(f)+'" title="Ver foto" style="width:42px;height:42px;object-fit:cover;' +
+        'border-radius:6px;margin-right:4px;border:1px solid var(--border);vertical-align:middle;cursor:zoom-in">').join('') +
+    (p.fotoscount > (p.fotosurls?.length || 0) ? '<span class="badge badge-blue" title="Fotos antiguas: ábrelas al editar o en el PDF">+'+(p.fotoscount-(p.fotosurls?.length||0))+'</span>' : '')
+  : (p.fotoscount ? '<span class="badge badge-blue" title="🔍 Ábrelas al editar o en el PDF">📸 '+p.fotoscount+'</span>' : '—')) + '</td>' +
     '<td>'+formatDate(p.fecha)+'</td>'+
     '<td class="actions-cell">'+
       '<button class="btn btn-outline btn-sm btn-icon" title="Editar" data-action="edit-parte" data-id="'+escapeHtml(p.id)+'"><i class="fas fa-pen"></i></button>'+
       '<button class="btn btn-outline btn-sm btn-icon" title="PDF" onclick="generatePDF_partes(\''+p.id+'\')"><i class="fas fa-file-pdf"></i></button>'+
       '<button class="btn btn-outline btn-sm btn-icon" title="Eliminar" onclick="confirmDelete(\'Parte '+escapeHtml(p.id)+'\', ()=>deleteParte('+p.id+'))"><i class="fas fa-trash"></i></button>'+
     '</td></tr>'
-  , {colspan:12, empty:'<tr><td colspan="12" style="text-align:center;padding:30px;color:var(--text-muted)">Sin partes de trabajo</td></tr>'});
+  , {colspan:11, empty:'<tr><td colspan="11" style="text-align:center;padding:30px;color:var(--text-muted)">Sin partes de trabajo</td></tr>'});
 };
+const MATERIAL_UNIDADES = ['ud', 'l', 'kg', 'm', 'caja'];
+
+function materialesParteHtml() {
+  const st = window.__materialesParte || { lines: [], almacen: [] };
+  const optU = sel => MATERIAL_UNIDADES.map(u => '<option value="' + u + '"' + (u === sel ? ' selected' : '') + '>' + u + '</option>').join('');
+  const rows = st.lines.map((l, i) => {
+    const art = l.articuloId ? st.almacen.find(a => String(a.id) === String(l.articuloId)) : null;
+    const hint = art ? 'Stock en almacén: ' + (Number(art.stock) || 0) : '';
+    return '<div class="mat-row">' +
+      '<div class="mat-name"><input list="pt_mat_list" value="' + escapeHtml(l.descripcion || '') + '" placeholder="Material (ej: rueda puerta seccional)" oninput="updateMaterialParte(' + i + ',\'descripcion\',this.value)">' +
+        '<small id="pt_mat_hint_' + i + '" class="mat-hint">' + escapeHtml(hint) + '</small></div>' +
+      '<input type="number" min="0" step="0.01" inputmode="decimal" value="' + (l.cantidad || '') + '" placeholder="Cant." oninput="updateMaterialParte(' + i + ',\'cantidad\',this.value)">' +
+      '<select onchange="updateMaterialParte(' + i + ',\'unidad\',this.value)">' + optU(l.unidad || 'ud') + '</select>' +
+      '<button type="button" class="btn btn-outline btn-sm btn-icon" title="Quitar" onclick="removeMaterialParte(' + i + ')"><i class="fas fa-trash"></i></button>' +
+    '</div>';
+  }).join('');
+  return rows || '<small style="color:var(--text-muted)">Sin material. Pulsa «Añadir material» si has usado alguno.</small>';
+}
+
+window.addMaterialParte = function() {
+  window.__materialesParte.lines.push({ articuloId: '', descripcion: '', cantidad: '', unidad: 'ud' });
+  const box = document.getElementById('pt_materiales');
+  if (box) { box.innerHTML = materialesParteHtml(); box.querySelector('.mat-row:last-child input')?.focus(); }
+};
+
+window.removeMaterialParte = function(i) {
+  window.__materialesParte.lines.splice(i, 1);
+  const box = document.getElementById('pt_materiales');
+  if (box) box.innerHTML = materialesParteHtml();
+};
+
+window.updateMaterialParte = function(i, field, value) {
+  const st = window.__materialesParte;
+  const line = st?.lines[i];
+  if (!line) return;
+  line[field] = value;
+  if (field === 'descripcion') {
+    // Si coincide con un artículo del almacén (nombre o referencia) se vincula y descontará stock
+    const v = String(value).trim().toLowerCase();
+    const art = v ? st.almacen.find(a => String(a.nombre || '').trim().toLowerCase() === v || String(a.referencia || '').trim().toLowerCase() === v) : null;
+    line.articuloId = art ? art.id : '';
+    if (art) line.descripcion = art.nombre;
+  }
+  const art = line.articuloId ? st.almacen.find(a => String(a.id) === String(line.articuloId)) : null;
+  const hint = document.getElementById('pt_mat_hint_' + i);
+  if (hint) {
+    const stock = art ? Number(art.stock) || 0 : null;
+    hint.textContent = art ? 'Stock en almacén: ' + stock + (parseFloat(line.cantidad) > stock ? ' (cantidad superior al stock)' : '') : '';
+    hint.style.color = art && parseFloat(line.cantidad) > stock ? 'var(--danger)' : '';
+  }
+};
+
 window.showParteForm = async function(id, prefill) {
   id = id ? String(id) : null;
   const p = id ? await dbGet('partesTrabajo', id) : (prefill || {});
   const clientes = await dbGetAll('clientes');
   const vehiculos = await dbGetAll('vehiculos');
+  const almacenArticulos = await dbGetAll('almacen').catch(() => []);
+  // Tipos de puerta para el select (mismo catálogo que Almacén/Manuales)
+  window.__tiposPuertaCache = await dbGetAll('tiposPuerta').catch(() => []);
+  window.__materialesParte = {
+    almacen: almacenArticulos,
+    lines: (Array.isArray(p.materiales) ? p.materiales : []).map(m => ({
+      articuloId: m.articuloId || '', descripcion: m.descripcion || '', cantidad: m.cantidad ?? '', unidad: m.unidad || 'ud'
+    }))
+  };
   const empleados = window.isTechnician?.()
     ? (window.authState.employee ? [window.authState.employee] : [])
     : await dbGetAll('empleados');
@@ -970,7 +1178,7 @@ window.showParteForm = async function(id, prefill) {
   const clienteIdSeleccionado = clienteSeleccionado?.id || '';
   const clienteNombrePrefill = String(p.clienteNombre || clienteSeleccionado?.nombre || '').trim();
   const clienteSinFicha = !clienteSeleccionado && clienteNombrePrefill;
-  const clienteDni = clienteSeleccionado?.dni || '';
+  const clienteDni = p.clienteDni || clienteSeleccionado?.dni || '';
 
   // Matrícula preseleccionada: directa (p.matricula) o vía vehiculoId
   let matriculaSel = p.matricula || '';
@@ -979,49 +1187,87 @@ window.showParteForm = async function(id, prefill) {
   }
 
   // Fotos del formulario: las ya guardadas más las nuevas (todas como imagen comprimida)
-  window.__fotosParte = { form: Array.isArray(p.fotos) ? p.fotos.filter(f => typeof f === 'string' && f.startsWith('data:image/')) : [] };
+  window.__fotosParte = { form: Array.isArray(p.fotos) ? p.fotos.filter(f => typeof f === 'string' && /^(data:image\/|https?:)/.test(f)) : [] };
+  // Fotos del albarán (desplazamiento interno): guardadas + nuevas
+  window.__fotosAlbaran = Array.isArray(p.fotosAlbaran) ? p.fotosAlbaran.filter(f => typeof f === 'string' && /^(data:image\/|https?:)/.test(f)) : [];
 
   const form = '<div class="form-grid">' +
+    // Tipo de parte: normal (con cliente) o interno (desplazamiento sin cliente)
+    '<div class="form-group full"><label>Tipo de parte</label>' +
+      '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">' +
+        '<label style="display:flex;align-items:center;gap:6px;font-weight:600"><input type="radio" name="pt_tipo_parte" id="pt_tipo_normal" value="normal" ' + (!p.interno ? 'checked' : '') + '> Trabajo normal</label>' +
+        '<label style="display:flex;align-items:center;gap:6px;font-weight:600"><input type="radio" name="pt_tipo_parte" id="pt_tipo_interno" value="interno" ' + (p.interno ? 'checked' : '') + '> Desplazamiento interno</label>' +
+      '</div>' +
+      '<small style="color:var(--text-muted);display:block;margin-top:4px">"Desplazamiento interno" = recogida de material, taller, formación... No se asigna a ningún cliente y sus KMs cuentan para el vehículo.</small>' +
+    '</div>' +
     '<div class="form-group"><label>ID</label><input id="pt_id" value="' + escapeHtml(nextId) + '"></div>' +
-    '<div class="form-group"><label>Cliente *</label><select id="pt_cliente">' +
-      '<option value="">— Seleccionar —</option>' +
+    '<div class="form-group normal-only"><label>Cliente *</label><select id="pt_cliente">' +
+      '<option value="">— Seleccionar</option>' +
       (clienteSinFicha ? '<option value="__incidencia__" data-nombre="' + escapeHtml(clienteNombrePrefill) + '" selected>' + escapeHtml(clienteNombrePrefill) + ' (incidencia)</option>' : '') +
       clientes.map(c => '<option value="' + c.id + '" data-nombre="' + escapeHtml(c.nombre) + '" ' + (String(clienteIdSeleccionado) === String(c.id) ? 'selected' : '') + '>' + escapeHtml(c.nombre) + '</option>').join('') +
     '</select></div>' +
-    '<div class="form-group"><label>Ubicación del trabajo</label><select id="pt_ubicacion"><option value="">-- Selecciona un cliente primero --</option></select></div>' +
-    '<div class="form-group full"><label>🚪 Puertas a revisar</label>' +
+    '<div class="form-group normal-only"><label>Ubicación del trabajo</label><select id="pt_ubicacion"><option value="">-- Selecciona un cliente primero --</option></select></div>' +
+    '<div class="form-group full normal-only"><label>Puertas a revisar</label>' +
       '<select id="pt_puertas" multiple style="height:140px">' +
         '<option value="">-- Selecciona un cliente primero --</option>' +
       '</select>' +
       '<small style="color:var(--text-muted);display:block;margin-top:4px">Ctrl+Clic para seleccionar varias</small>' +
     '</div>' +
     '<div class="form-group"><label>Técnico asignado</label><select id="pt_empleado">' +
-      '<option value="">— Sin asignar —</option>' +
+      '<option value="">— Sin asignar</option>' +
       empleados.map(e => '<option value="' + e.id + '" data-nombre="' + escapeHtml(e.nombre) + '" ' + (p.empleadoId === e.id ? 'selected' : '') + '>' + escapeHtml(e.nombre) + '</option>').join('') +
     '</select></div>' +
-    '<div class="form-group"><label>Tipo Puerta *</label><input id="pt_tipo" value="' + escapeHtml(p.tipoPuerta || '') + '" placeholder="Ej: seccional, corredera..."></div>' +
-    '<div class="form-group full"><label>Descripción del trabajo *</label><textarea id="pt_desc" rows="3">' + escapeHtml(p.descripcion || '') + '</textarea></div>' +
-    '<div class="form-group"><label>Kms (Ceuti ↔ Cliente)</label>' +
+    '<div class="form-group normal-only"><label>Tipo Puerta *</label><select id="pt_tipo">' +
+      '<option value="">— Seleccionar tipo —</option>' +
+      (window.__tiposPuertaCache || []).map(t => '<option value="' + escapeHtml(t.nombre) + '" ' + (String(p.tipoPuerta || '') === String(t.nombre) ? 'selected' : '') + '>' + escapeHtml(t.nombre) + '</option>').join('') +
+    '</select></div>' +
+    '<div class="form-group full normal-only"><label>Descripción del trabajo *</label><textarea id="pt_desc" rows="3">' + escapeHtml(p.descripcion || '') + '</textarea></div>' +
+    '<div class="form-group normal-only"><label>Kms (Ceuti — Cliente)</label>' +
       '<input id="pt_kms" class="only-num" value="' + (p.kms || '') + '" placeholder="Se calcula al elegir cliente">' +
     '</div>' +
-    '<div class="form-group"><label>Horas *</label><input id="pt_horas" type="number" step="0.5" class="only-num-dec" value="' + (p.horas ?? '') + '" placeholder="Ej: 1.5" required></div>' +
-    '<div class="form-group"><label>Vehículo *</label><select id="pt_vehiculo"><option value="">— Seleccionar vehículo —</option>' +
+    // ===== Desplazamiento interno: origen / destino / kms calculados =====
+    '<div class="form-group interno-only" style="display:' + (p.interno ? 'block' : 'none') + '"><label>Salida (origen)</label>' +
+      '<select id="pt_int_origen"></select>' +
+    '</div>' +
+    '<div class="form-group interno-only" style="display:' + (p.interno ? 'block' : 'none') + '"><label>Llegada (destino)</label>' +
+      '<select id="pt_int_destino"></select>' +
+    '</div>' +
+    '<div class="form-group interno-only" style="display:' + (p.interno ? 'block' : 'none') + '"><label>Kms del desplazamiento</label>' +
+      '<input id="pt_kms_interno" class="only-num" value="' + (p.kms || '') + '" placeholder="Se calculan al elegir salida y llegada">' +
+      '<small id="pt_int_kms_hint" style="color:var(--text-muted);display:block;margin-top:4px">Se calculan solos si origen y destino tienen coordenadas. Si no, escríbelos a mano.</small>' +
+    '</div>' +
+    '<div class="form-group interno-only" style="display:' + (p.interno ? 'block' : 'none') + '"><label>Motivo del desplazamiento</label>' +
+      '<input id="pt_motivo_interno" value="' + escapeHtml(p.motivoInterno || '') + '" placeholder="Ej: recogida de material en proveedor, taller...">' +
+    '</div>' +
+    // ===== Desplazamiento interno: foto del albarán recogido/entregado =====
+    '<div class="form-group full interno-only" style="display:' + (p.interno ? 'block' : 'none') + '"><label>Foto del albarán (recogido / entregado)</label>' +
+      '<small style="color:var(--text-muted);display:block;margin-top:2px">Constancia visual del albarán para administración. Se adjunta al parte.</small>' +
+      '<div id="pt_albaran_thumbs" style="display:flex;gap:8px;flex-wrap:wrap;margin:8px 0">' +
+        (p.fotosAlbaran || []).map((f,i) => '<div style="position:relative;width:90px;height:90px;border-radius:8px;overflow:hidden;border:2px solid var(--primary)"><img class="inc-foto" src="' + f + '" style="width:100%;height:100%;object-fit:cover;cursor:zoom-in"><button type="button" onclick="eliminarFotoAlbaran(' + i + ')" style="position:absolute;top:2px;right:2px;width:20px;height:20px;border-radius:50%;background:#dc2626;color:#fff;border:none;cursor:pointer;font-size:12px;">-</button></div>').join('') +
+      '</div>' +
+      '<button type="button" class="btn btn-outline btn-sm" onclick="document.getElementById(\'pt_albaran_input\').click()"><i class="fas fa-camera"></i> Añadir foto de albarán</button>' +
+      '<input type="file" id="pt_albaran_input" accept="image/*" capture="environment" multiple style="display:none" onchange="addFotosAlbaran(this)">' +
+    '</div>' +
+    '<div class="form-group normal-only"><label>Horas *</label><input id="pt_horas" type="number" step="0.5" class="only-num-dec" value="' + (p.horas ?? '') + '" placeholder="Ej: 1.5" required></div>' +
+    '<div class="form-group"><label>Vehículo *</label><select id="pt_vehiculo"><option value="">— Seleccionar vehículo</option>' +
         vehiculos.map(v => '<option value="' + escapeHtml(v.id) + '" data-matricula="' + escapeHtml(v.matricula) + '" ' + (normMatricula(matriculaSel) === normMatricula(v.matricula) ? 'selected' : '') + '>' + escapeHtml(v.matricula) + ' - ' + escapeHtml(v.marca) + ' ' + escapeHtml(v.modelo) + '</option>').join('') +
     '</select></div>' +
-    '<div class="form-group"><label>Estado</label><select id="pt_estado">' +
-      ['abierto', 'en_ruta', 'en_taller', 'completado'].map(e => '<option value="' + e + '" ' + (p.estado === e ? 'selected' : '') + '>' + getStatusLabel(e) + '</option>').join('') +
-    '</select></div>' +
     '<div class="form-group"><label>Fecha</label><input id="pt_fecha" type="date" value="' + (p.fecha || getToday()) + '"></div>' +
-    '<div class="form-group full"><label>Notas</label><textarea id="pt_notas">' + escapeHtml(p.notas || '') + '</textarea></div>' +
-    '<div class="form-group full"><label>📷 Fotos (máx. ' + MAX_FOTOS_PARTE + ')</label>' +
+    '<div class="form-group full normal-only"><label>Material utilizado</label>' +
+      '<div id="pt_materiales">' + materialesParteHtml() + '</div>' +
+      '<datalist id="pt_mat_list">' + almacenArticulos.map(a => '<option value="' + escapeHtml(a.nombre) + '">' + escapeHtml(a.referencia || '') + '</option>').join('') + '</datalist>' +
+      '<button type="button" class="btn btn-outline btn-sm" style="margin-top:6px" onclick="addMaterialParte()"><i class="fas fa-plus"></i> Añadir material</button>' +
+    '</div>' +
+    '<div class="form-group full normal-only"><label>Notas</label><textarea id="pt_notas">' + escapeHtml(p.notas || '') + '</textarea></div>' +
+    '<div class="form-group full normal-only"><label>Fotos (máx. ' + MAX_FOTOS_PARTE + ')</label>' +
       '<div id="pt_fotos_thumbs" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px">' +
-        window.__fotosParte.form.map((f,i) => '<div style="position:relative;width:80px;height:80px;border-radius:8px;overflow:hidden;border:2px solid var(--primary)"><img class="inc-foto" src="' + f + '" style="width:100%;height:100%;object-fit:cover;cursor:zoom-in"><button type="button" onclick="eliminarFotoParte(' + i + ')" style="position:absolute;top:2px;right:2px;width:20px;height:20px;border-radius:50%;background:#dc2626;color:#fff;border:none;cursor:pointer;font-size:12px;">×</button></div>').join('') +
+        window.__fotosParte.form.map((f,i) => '<div style="position:relative;width:80px;height:80px;border-radius:8px;overflow:hidden;border:2px solid var(--primary)"><img class="inc-foto" src="' + f + '" style="width:100%;height:100%;object-fit:cover;cursor:zoom-in"><button type="button" onclick="eliminarFotoParte(' + i + ')" style="position:absolute;top:2px;right:2px;width:20px;height:20px;border-radius:50%;background:#dc2626;color:#fff;border:none;cursor:pointer;font-size:12px;">-</button></div>').join('') +
       '</div>' +
       '<button type="button" class="btn btn-outline btn-sm" onclick="document.getElementById(\'pt_foto_input\').click()"><i class="fas fa-camera"></i> Añadir fotos</button>' +
       '<input type="file" id="pt_foto_input" accept="image/*" multiple style="display:none" onchange="addFotosParte(this)">' +
     '</div>' +
   '</div>' +
-  '<div style="margin-top:24px;padding-top:20px;border-top:2px solid var(--border)">' +
+  '<div class="normal-only" style="margin-top:24px;padding-top:20px;border-top:2px solid var(--border)">' +
     '<h3 style="margin-bottom:16px;font-size:16px;color:var(--primary)">Firmas y validación</h3>' +
     '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:16px">' +
       '<div>' +
@@ -1051,6 +1297,75 @@ window.showParteForm = async function(id, prefill) {
 
   openModal(id ? 'Editar Parte' : 'Nuevo Parte', form, footer);
 
+  // --- Toggle interno/normal: muestra u oculta campos según el tipo ---
+  const aplicarModo = () => {
+    const interno = document.getElementById('pt_tipo_interno')?.checked;
+    document.querySelectorAll('.interno-only').forEach(el => el.style.display = interno ? 'block' : 'none');
+    document.querySelectorAll('.normal-only').forEach(el => el.style.display = interno ? 'none' : '');
+  };
+  document.querySelectorAll('input[name="pt_tipo_parte"]').forEach(r => r.addEventListener('change', aplicarModo));
+  aplicarModo();
+
+  // --- Desplazamiento interno: origen/destino (oficina, proveedores y clientes) + kms automáticos ---
+  (async () => {
+    try {
+      const [proveedores, todosClientes] = await Promise.all([dbGetAll('proveedores').catch(() => []), dbGetAll('clientes')]);
+      const selOrigen = document.getElementById('pt_int_origen');
+      const selDestino = document.getElementById('pt_int_destino');
+      if (!selOrigen || !selDestino) return;
+
+      // Punto = { id, nombre, lat, lng }. OFICINA (Ceuti) siempre disponible como origen.
+      const puntos = [
+        { id: '__oficina__', nombre: '🏠 Oficina (Ceuti)', lat: OFICINA.lat, lng: OFICINA.lng },
+        ...proveedores.map(v => ({ id: 'prov:' + v.id, nombre: '📦 ' + v.nombre, lat: v.lat, lng: v.lng })),
+        ...todosClientes.map(c => ({ id: 'cli:' + c.id, nombre: '🔧 ' + c.nombre, lat: c.lat, lng: c.lng }))
+      ];
+
+      const optHtml = (lista, selId) => '<option value="">— Seleccionar —</option>' +
+        lista.map(x => `<option value="${escapeHtml(x.id)}" data-lat="${x.lat ?? ''}" data-lng="${x.lng ?? ''}" ${x.id === selId ? 'selected' : ''}>${escapeHtml(x.nombre)}</option>`).join('');
+      selOrigen.innerHTML = optHtml(puntos, p.internoOrigen || '__oficina__');
+      selDestino.innerHTML = optHtml(puntos, p.internoDestino || '');
+
+      const coordsDe = (sel) => {
+        const o = sel.selectedOptions[0];
+        if (!o || !o.value) return null;
+        const lat = parseFloat(o.dataset.lat), lng = parseFloat(o.dataset.lng);
+        return (isNaN(lat) || isNaN(lng)) ? null : { lat, lng };
+      };
+
+      const recalcKms = async () => {
+        const a = coordsDe(selOrigen), b = coordsDe(selDestino);
+        const hint = document.getElementById('pt_int_kms_hint');
+        const input = document.getElementById('pt_kms_interno');
+        if (!a || !b) {
+          input.readOnly = false;
+          if (hint) { hint.textContent = 'Se calculan solos si origen y destino tienen coordenadas. Si no, escríbelos a mano.'; hint.style.color = ''; }
+          return;
+        }
+        // Misma coordenada: inválido — aviso y no se calcula nada
+        if (selOrigen.value === selDestino.value) {
+          input.value = '';
+          input.readOnly = false;
+          if (hint) { hint.textContent = '⚠️ El punto de salida y de llegada son el mismo: elige puntos distintos.'; hint.style.color = 'var(--danger)'; }
+          showToast('El punto de salida y el de llegada son el mismo', 'error');
+          return;
+        }
+        if (hint) hint.style.color = '';
+        // Ruta real por carretera (OSRM); si no hay conexión, estimación haversine × FACTOR_CARETERA
+        const hint0 = '⏳ Calculando ruta real…';
+        if (hint) hint.textContent = hint0;
+        const real = await kmRutaReal(a.lat, a.lng, b.lat, b.lng).catch(() => null);
+        const kms = Math.round(real != null ? real : kmEntreCoordenadas(a.lat, a.lng, b.lat, b.lng) * getFactorCarretera());
+        input.value = kms || '';
+        input.readOnly = true;
+        if (hint) hint.textContent = '✅ ' + kms + ' km (trayecto de salida). Si el vehículo vuelve al origen, crea otro desplazamiento de vuelta.';
+      };
+      selOrigen.addEventListener('change', recalcKms);
+      selDestino.addEventListener('change', recalcKms);
+      recalcKms();
+    } catch (e) { console.warn('[parte interno] init:', e); }
+  })();
+
   setTimeout(async ()=>{
     const sel = document.getElementById('pt_cliente');
     if (sel) {
@@ -1071,7 +1386,7 @@ window.showParteForm = async function(id, prefill) {
           showToast('Kms calculados: ' + kms + ' (ida+vuelta)');
         } else {
           document.getElementById('pt_kms').value = '';
-          showToast('⚠️ Cliente sin coordenadas: rellena los KMs a mano y geolocalízalo en Clientes', 'error');
+          showToast('📍 Cliente sin coordenadas: rellena los KMs a mano y geolocalízalo en Clientes', 'error');
         }
 
         if (cli?.dni) {
@@ -1176,7 +1491,7 @@ window.saveParte = async function(id){
     const clienteNombre = clienteOption?.dataset.nombre || '';
     const empSel = document.getElementById('pt_empleado');
 
-    // --- UBICACIÓN ---
+    // --- UBICACI"N ---
     const selUbic = document.getElementById('pt_ubicacion');
     const ubicacionId = selUbic?.value || '';
     const ubicacionNombre = selUbic?.options[selUbic.selectedIndex]?.dataset.nombre || '';
@@ -1195,11 +1510,14 @@ window.saveParte = async function(id){
     const selOption = vehSel?.options[vehSel.selectedIndex];
     const matriculaRaw = selOption?.dataset?.matricula || null;
 
-    // ── Validación en línea ──
+    // Tipo de parte: interno (sin cliente) o normal
+    const esInterno = document.getElementById('pt_tipo_interno')?.checked;
+
+    // Validación en línea
     let ok = true;
 
-    // Cliente obligatorio
-    if(!clienteId && !(clienteSinFicha && clienteNombre)){
+    // Cliente obligatorio (solo en partes normales)
+    if (!esInterno && !clienteId && !(clienteSinFicha && clienteNombre)) {
       setFieldError('pt_cliente', 'Selecciona un cliente');
       ok = false;
     } else {
@@ -1214,11 +1532,27 @@ window.saveParte = async function(id){
       clearFieldError('pt_vehiculo');
     }
 
-    // Tipo de puerta obligatorio
-    ok = setFieldError('pt_tipo', validators.required(document.getElementById('pt_tipo').value.trim(), 'El tipo de puerta')) && ok;
+    // Tipo de puerta obligatorio (solo en partes normales)
+    ok = setFieldError('pt_tipo', esInterno ? '' : validators.required(document.getElementById('pt_tipo').value.trim(), 'El tipo de puerta')) && ok;
 
-    // Descripción obligatoria
+    // Descripción obligatoria (en internos se genera sola desde motivo + origen/destino)
+    if (esInterno && !document.getElementById('pt_desc').value.trim()) {
+      const origen = document.getElementById('pt_int_origen')?.selectedOptions[0]?.textContent.trim() || '';
+      const destino = document.getElementById('pt_int_destino')?.selectedOptions[0]?.textContent.trim() || '';
+      document.getElementById('pt_desc').value = 'Desplazamiento interno: ' + origen + ' → ' + destino +
+        (document.getElementById('pt_motivo_interno').value.trim() ? ' (' + document.getElementById('pt_motivo_interno').value.trim() + ')' : '');
+    }
     ok = setFieldError('pt_desc', validators.required(document.getElementById('pt_desc').value.trim(), 'La descripción')) && ok;
+
+    // En internos, los kms calculados/manual del bloque interno son los del parte
+    if (esInterno) {
+      const selO = document.getElementById('pt_int_origen'), selD = document.getElementById('pt_int_destino');
+      if (!selO.value || !selD.value) { showToast('Elige el punto de salida y de llegada', 'error'); return; }
+      if (selO.value === selD.value) { showToast('El punto de salida y el de llegada son el mismo', 'error'); return; }
+      const kmsInt = parseInt(document.getElementById('pt_kms_interno').value) || 0;
+      document.getElementById('pt_kms').value = kmsInt || '';
+      if (!kmsInt) { showToast('Indica los kilómetros del desplazamiento', 'error'); return; }
+    }
 
     // Fecha obligatoria
     ok = setFieldError('pt_fecha', validators.required(document.getElementById('pt_fecha').value, 'La fecha')) && ok;
@@ -1241,6 +1575,19 @@ window.saveParte = async function(id){
       clearFieldError('pt_dni_cliente');
     }
 
+    // Material utilizado: las líneas vacías se descartan; con material debe haber cantidad > 0
+    const materialesParte = [];
+    for (const [index, line] of (window.__materialesParte?.lines || []).entries()) {
+      const descripcion = String(line.descripcion || '').trim();
+      const cantidad = parseFloat(line.cantidad) || 0;
+      if (!descripcion && !cantidad) continue;
+      if (!descripcion || cantidad <= 0) {
+        showToast('Material, línea ' + (index + 1) + ': indica el material y una cantidad mayor que 0', 'error');
+        return;
+      }
+      materialesParte.push({ articuloId: line.articuloId || '', descripcion, cantidad, unidad: line.unidad || 'ud' });
+    }
+
     if(!ok){ 
       showToast('Revisa los campos marcados','error'); 
       return; 
@@ -1258,7 +1605,12 @@ window.saveParte = async function(id){
 
     const parteData = {
       createdBy: existingPart?.createdBy ?? (id ? null : window.authState?.user?.id ?? null),
-      clienteId, clienteNombre,
+      interno: !!esInterno,
+      motivoInterno: esInterno ? (document.getElementById('pt_motivo_interno').value.trim() || null) : null,
+      internoOrigen: esInterno ? (document.getElementById('pt_int_origen').value || null) : null,
+      internoDestino: esInterno ? (document.getElementById('pt_int_destino').value || null) : null,
+      clienteId: esInterno ? null : clienteId,
+      clienteNombre: esInterno ? 'Interno' : clienteNombre,
       empleadoId: empSel.value || null,
       empleadoNombre: empSel.value ? empSel.options[empSel.selectedIndex].dataset.nombre : '',
       empleadoDni: dniTecnico,
@@ -1272,9 +1624,10 @@ window.saveParte = async function(id){
       fotos: window.__fotosParte?.form || [],
       firmaTecnico: firmaTecnico,
       firmaCliente: firmaCliente,
-      estado: document.getElementById('pt_estado').value,
+      estado: 'completado',
       fecha: document.getElementById('pt_fecha').value,
       notas: document.getElementById('pt_notas').value.trim(),
+      materiales: materialesParte,
       ubicacionId,
       ubicacionNombre,
       ubicacionDireccion,
@@ -1289,6 +1642,19 @@ window.saveParte = async function(id){
       showToast('Parte guardado pero sin fotos','error');
     }
     window.__fotosParte = { form: [] };
+
+    // 1b. Guardar fotos del albarán (desplazamiento interno) en Storage
+    if(esInterno && (window.__fotosAlbaran || []).length){
+      const subidas = [];
+      for(const f of window.__fotosAlbaran){
+        if(typeof f === 'string' && f.startsWith('data:image/')) subidas.push(await window.uploadParteFoto(f) || f);
+        else subidas.push(f);
+      }
+      parteData.fotosAlbaran = subidas;
+    } else if(!esInterno) {
+      parteData.fotosAlbaran = null;
+    }
+    window.__fotosAlbaran = [];
 
     // 2. Persistir en DB
     let parteGuardado;
@@ -1333,9 +1699,7 @@ window.deleteParte = async function(id) {
     showToast('Error al eliminar: ' + err.message, 'error');
   }
 };
-// ═══════════════════════════════════════════════════════════
 //  VEHÍCULOS
-// ═══════════════════════════════════════════════════════════
 window.render_vehiculos = async function(el){
   const vehiculos = await dbGetAll('vehiculos');
   el.innerHTML =
@@ -1393,9 +1757,7 @@ window.deleteVehiculo = async function(id){
   showToast('Vehículo eliminado');navigateTo('vehiculos');
 };
 
-// ═══════════════════════════════════════════════════════════
 //  ITV
-// ═══════════════════════════════════════════════════════════
 window.marcarITVPasada = async function(id){
   try {
     const v = await dbGet('vehiculos', id);
@@ -1406,7 +1768,7 @@ window.marcarITVPasada = async function(id){
     v.itv = itvStr;
     await dbPut('vehiculos', v);
     closeModal();
-    showToast('✅ ITV registrada. Próxima: ' + formatDate(itvStr));
+    showToast('o. ITV registrada. Próxima: ' + formatDate(itvStr));
     navigateTo('vehiculos');
   } catch(err){
     console.error('Error al registrar ITV:', err);
@@ -1486,9 +1848,7 @@ window.toggleVehiculoEstado = async function(id){
   navigateTo('vehiculos');
 };
 
-// ═══════════════════════════════════════════════════════════
-//  ALMACÉN
-// ═══════════════════════════════════════════════════════════
+//  ALMAC?N
 window.render_almacen = async function(el){
   const tipos = await dbGetAll('tiposPuerta');
   const tiposOptions = tipos.map(t => `<option value="${t.id}">${escapeHtml(t.nombre)}</option>`).join('');
@@ -1503,7 +1863,7 @@ window.render_almacen = async function(el){
       '<select id="filterCatArt" onchange="renderAlmacen()"><option value="">Todas las categorías</option>'+
       tiposOptions+'</select></div>'+
     '<div class="card"><div  class="table-wrapper"><table><thead>'+
-      '<tr><th>Referencia</th><th>Nombre</th><th>Categoría</th><th>Stock</th><th>Mín.</th><th>P. Venta</th><th>Estado</th><th>Acciones</th></tr>'+
+      '<tr><th></th><th>Referencia</th><th>Nombre</th><th>Categoría</th><th>Stock</th><th>Mín.</th><th>P. Venta</th><th>Estado</th><th>Acciones</th></tr>'+
     '</thead><tbody id="artBody"></tbody></table></div></div>';
   renderAlmacen();
 };
@@ -1523,7 +1883,8 @@ window.renderAlmacen = async function(){
     const bajo = a.stock <= a.stockMinimo;
     const catId = a.categoria || a.tipoPuerta;
     const catNombre = catId ? tiposMap.get(catId) || a.categoria || '—' : '—';
-    return '<tr><td><strong>'+escapeHtml(a.referencia)+'</strong></td><td>'+escapeHtml(a.nombre)+'</td>'+
+    return '<tr><td>'+((window.__articuloFoto||a.foto)?'<img src="'+escapeHtml(a.foto)+'" style="width:40px;height:40px;object-fit:cover;border-radius:6px;border:1px solid var(--border)">':'<div style="width:40px;height:40px;border-radius:6px;border:1px dashed var(--border);display:flex;align-items:center;justify-content:center;color:var(--text-muted)"><i class="fas fa-image"></i></div>')+'</td>'+ // foto
+      '<td><strong>'+escapeHtml(a.referencia)+'</strong></td><td>'+escapeHtml(a.nombre)+'</td>'+
       '<td><span class="badge badge-blue">'+escapeHtml(catNombre)+'</span></td>'+
       '<td style="font-weight:700;color:'+(bajo?'var(--danger)':'var(--text)')+'">'+a.stock+'</td>'+
       '<td>'+a.stockMinimo+'</td><td>'+formatCurrency(a.precioVenta)+'</td>'+
@@ -1554,7 +1915,7 @@ window.showArticuloForm = async function(id){
   const form = '<div class="form-grid">'+
     '<div class="form-group"><label>ID (autogenerado)</label><input id="ar_id" value="'+escapeHtml(nextId)+'" readonly style="background:var(--surface-alt)"></div>'+
     '<div class="form-group"><label>Categoría</label><select id="ar_tipo">'+
-      '<option value="">— Sin tipo —</option>'+
+      '<option value="">— Sin tipo</option>'+
       tiposOptions+
     '</select></div>'+
     '<div class="form-group full"><label>Nombre *</label><input id="ar_nom" value="'+escapeHtml(a.nombre||'')+'"></div>'+
@@ -1564,11 +1925,41 @@ window.showArticuloForm = async function(id){
    '<div class="form-group"><label>Precio compra</label><input id="ar_pc" type="number" class="only-num-dec" step="0.01" value="'+formatoPrecioES(a.precioCompra)+'"></div>'+
 '<div class="form-group"><label>Precio venta</label><input id="ar_pv" type="number" class="only-num-dec" step="0.01" value="'+formatoPrecioES(a.precioVenta)+'"></div>'+
     '<div class="form-group"><label>Proveedor</label><input id="ar_prov" value="'+escapeHtml(a.proveedor||'')+'"></div>'+
+    '<div class="form-group full"><label>Foto del artículo</label>'+
+      '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">'+
+        '<img id="ar_foto_thumb" src="'+(a.foto||'')+'" alt="" style="width:64px;height:64px;object-fit:cover;border-radius:8px;border:1px solid var(--border);'+(a.foto?'':'display:none')+'">'+
+        '<div style="display:flex;gap:6px;flex-wrap:wrap">'+
+          '<button type="button" class="btn btn-outline btn-sm" onclick="document.getElementById(\'ar_foto_input\').click()"><i class="fas fa-image"></i> Elegir foto</button>'+
+          '<input id="ar_foto_input" type="file" accept="image/*" style="display:none">'+
+          '<button type="button" class="btn btn-outline btn-sm" onclick="document.getElementById(\'ar_foto_cam\').click()"><i class="fas fa-camera"></i> Hacer foto</button>'+
+          '<input id="ar_foto_cam" type="file" accept="image/*" capture="environment" style="display:none">'+
+          '<button type="button" class="btn btn-outline btn-sm" id="ar_foto_borrar" style="'+(a.foto?'':'display:none')+'"><i class="fas fa-trash"></i> Quitar</button>'+
+        '</div>'+
+      '</div>'+
+      '<small style="color:var(--text-muted);display:block;margin-top:4px">Opcional · se guarda comprimida con el artículo</small>'+
+    '</div>'+
   '</div>';
 
   const footer = '<button class="btn btn-outline" onclick="closeModal()">Cancelar</button>'+
     '<button class="btn btn-primary btn-save-articulo" data-action="save-articulo" data-id="'+(id ? escapeHtml(id) : '')+'"><i class="fas fa-save"></i> Guardar</button>';
   openModal(id?'Editar Artículo':'Nuevo Artículo',form,footer);
+
+  // --- Gestión de la foto del artículo ---
+  window.__articuloFoto = a.foto || null;
+  const thumb=document.getElementById('ar_foto_thumb'),
+        btnBorrar=document.getElementById('ar_foto_borrar');
+  const pintarFoto=()=>{
+    if(window.__articuloFoto){ thumb.src=window.__articuloFoto; thumb.style.display=''; btnBorrar.style.display=''; }
+    else { thumb.src=''; thumb.style.display='none'; btnBorrar.style.display='none'; }
+  };
+  const cargarFoto=async file=>{
+    if(!file) return;
+    try{ window.__articuloFoto=await compressDoticsPhoto(file); pintarFoto(); }
+    catch(e){ showToast(e.message||'No se pudo procesar la foto','error'); }
+  };
+  document.getElementById('ar_foto_input').addEventListener('change',e=>{ cargarFoto(e.target.files[0]); e.target.value=''; });
+  document.getElementById('ar_foto_cam').addEventListener('change',e=>{ cargarFoto(e.target.files[0]); e.target.value=''; });
+  btnBorrar.addEventListener('click',()=>{ window.__articuloFoto=null; pintarFoto(); });
 };
 
 window.saveArticulo = async function(id){
@@ -1585,7 +1976,8 @@ window.saveArticulo = async function(id){
       stockMinimo: parseInt(document.getElementById('ar_min').value)||0,
       precioCompra: parseFloat(document.getElementById('ar_pc').value)||0,
       precioVenta: parseFloat(document.getElementById('ar_pv').value)||0,
-      proveedor: document.getElementById('ar_prov').value.trim()
+      proveedor: document.getElementById('ar_prov').value.trim(),
+      foto: window.__articuloFoto || null
     };
     if(!data.nombre){ showToast('El nombre es obligatorio','error'); return; }
     await dbPut('almacen', data);
@@ -1630,14 +2022,12 @@ window.applyStock = async function(id){
   closeModal();showToast('Stock actualizado: '+a.stock);navigateTo('almacen');
 };
 
-// ═══════════════════════════════════════════════════════════
-//  CONFIGURACIÓN
-// ═══════════════════════════════════════════════════════════
+// CONFIGURACIÓN
 window.render_configuracion = async function(el){
   el.innerHTML =
     '<div class="page-header"><div><h2>Configuración</h2><p>Ajustes de la aplicación</p></div></div>'+
     '<div class="config-menu">'+
-      '<div class="config-menu-item" onclick="navigateTo(\'empleados\')">'+
+      '<div class="config-menu-item" draggable="true" onclick="navigateTo(\'empleados\')">'+
         '<div class="config-menu-icon"><i class="fas fa-users-gear"></i></div>'+
         '<div class="config-menu-content">'+
           '<h3>Empleados</h3>'+
@@ -1645,7 +2035,7 @@ window.render_configuracion = async function(el){
         '</div>'+
         '<div class="config-menu-arrow"><i class="fas fa-chevron-right"></i></div>'+
       '</div>'+
-      '<div class="config-menu-item" onclick="navigateTo(\'vehiculos\')">'+
+      '<div class="config-menu-item" draggable="true" onclick="navigateTo(\'vehiculos\')">'+
         '<div class="config-menu-icon"><i class="fas fa-truck"></i></div>'+
         '<div class="config-menu-content">'+
           '<h3>Vehículos</h3>'+
@@ -1661,7 +2051,7 @@ window.render_configuracion = async function(el){
         '</div>'+
         '<div class="config-menu-arrow"><i class="fas fa-chevron-right"></i></div>'+
       '</div>'+
-      '<div class="config-menu-item" onclick="navigateTo(\'informesKms\')">'+
+      '<div class="config-menu-item" draggable="true" onclick="navigateTo(\'informesKms\')">'+
         '<div class="config-menu-icon"><i class="fas fa-chart-pie"></i></div>'+
         '<div class="config-menu-content">'+
           '<h3>Informes KMs</h3>'+
@@ -1669,7 +2059,7 @@ window.render_configuracion = async function(el){
         '</div>'+
         '<div class="config-menu-arrow"><i class="fas fa-chevron-right"></i></div>'+
       '</div>'+
-      '<div class="config-menu-item" onclick="navigateTo(\'cadenas\')">'+
+      '<div class="config-menu-item" draggable="true" onclick="navigateTo(\'cadenas\')">'+
         '<div class="config-menu-icon"><i class="fas fa-route"></i></div>'+
         '<div class="config-menu-content">'+
           '<h3>Cadenas y Rutas</h3>'+
@@ -1677,7 +2067,23 @@ window.render_configuracion = async function(el){
         '</div>'+
         '<div class="config-menu-arrow"><i class="fas fa-chevron-right"></i></div>'+
       '</div>'+
-      '<div class="config-menu-item" onclick="openConfigCorreo()">'+
+      '<div class="config-menu-item" draggable="true" onclick="openConfigApariencia()">'+
+        '<div class="config-menu-icon"><i class="fas fa-palette"></i></div>'+
+        '<div class="config-menu-content">'+
+          '<h3>Apariencia</h3>'+
+          '<p>Color de la aplicación y de los botones</p>'+
+        '</div>'+
+        '<div class="config-menu-arrow"><i class="fas fa-chevron-right"></i></div>'+
+      '</div>'+
+      '<div class="config-menu-item" draggable="true" onclick="openProveedores()">'+
+        '<div class="config-menu-icon"><i class="fas fa-boxes-packing"></i></div>'+
+        '<div class="config-menu-content">'+
+          '<h3>Puntos de recogida (proveedores)</h3>'+
+          '<p>Empresas y talleres donde recoges material — origen/destino de desplazamientos internos</p>'+
+        '</div>'+
+        '<div class="config-menu-arrow"><i class="fas fa-chevron-right"></i></div>'+
+      '</div>'+
+      '<div class="config-menu-item" draggable="true" onclick="openConfigCorreo()">'+
         '<div class="config-menu-icon"><i class="fas fa-envelope"></i></div>'+
         '<div class="config-menu-content">'+
           '<h3>Configuración de Correo</h3>'+
@@ -1685,7 +2091,7 @@ window.render_configuracion = async function(el){
         '</div>'+
         '<div class="config-menu-arrow"><i class="fas fa-chevron-right"></i></div>'+
       '</div>'+
-      '<div class="config-menu-item" onclick="openConfigEmpresa()">'+
+      '<div class="config-menu-item" draggable="true" onclick="openConfigEmpresa()">'+
         '<div class="config-menu-icon"><i class="fas fa-building"></i></div>'+
         '<div class="config-menu-content">'+
           '<h3>Datos de empresa</h3>'+
@@ -1693,7 +2099,15 @@ window.render_configuracion = async function(el){
         '</div>'+
         '<div class="config-menu-arrow"><i class="fas fa-chevron-right"></i></div>'+
       '</div>'+
-      '<div class="config-menu-item" onclick="openConfigSync()">'+
+      '<div class="config-menu-item" draggable="true" onclick="openConfigFactorCarretera()">'+
+        '<div class="config-menu-icon"><i class="fas fa-road"></i></div>'+
+        '<div class="config-menu-content">'+
+          '<h3>Factor carretera</h3>'+
+          '<p>Ajuste de kms reales en partes de trabajo cuando la geolocalización falla</p>'+
+        '</div>'+
+        '<div class="config-menu-arrow"><i class="fas fa-chevron-right"></i></div>'+
+      '</div>'+
+      '<div class="config-menu-item" draggable="true" onclick="openConfigSync()">'+
         '<div class="config-menu-icon"><i class="fas fa-sync"></i></div>'+
         '<div class="config-menu-content">'+
           '<h3>Sincronización de Datos</h3>'+
@@ -1701,7 +2115,7 @@ window.render_configuracion = async function(el){
         '</div>'+
         '<div class="config-menu-arrow"><i class="fas fa-chevron-right"></i></div>'+
       '</div>'+
-      '<div class="config-menu-item" onclick="navigateTo(\'manuales\')">'+
+      '<div class="config-menu-item" draggable="true" onclick="navigateTo(\'manuales\')">'+
         '<div class="config-menu-icon"><i class="fas fa-book"></i></div>'+
         '<div class="config-menu-content">'+
           '<h3>Manuales</h3>'+
@@ -1709,7 +2123,7 @@ window.render_configuracion = async function(el){
         '</div>'+
         '<div class="config-menu-arrow"><i class="fas fa-chevron-right"></i></div>'+
       '</div>'+
-      '<div class="config-menu-item" onclick="openAndroidNavigationHelp()">'+
+      '<div class="config-menu-item" draggable="true" onclick="openAndroidNavigationHelp()">'+
         '<div class="config-menu-icon"><i class="fas fa-bars-staggered"></i></div>'+
         '<div class="config-menu-content">'+
           '<h3>Botones de navegación Android</h3>'+
@@ -1717,7 +2131,7 @@ window.render_configuracion = async function(el){
         '</div>'+
         '<div class="config-menu-arrow"><i class="fas fa-chevron-right"></i></div>'+
       '</div>'+
-      '<div class="config-menu-item" onclick="openConfigAndroid()">'+
+      '<div class="config-menu-item" draggable="true" onclick="openConfigAndroid()">'+
         '<div class="config-menu-icon"><i class="fas fa-mobile"></i></div>'+
         '<div class="config-menu-content">'+
           '<h3>Instalación en Android</h3>'+
@@ -1725,7 +2139,7 @@ window.render_configuracion = async function(el){
         '</div>'+
         '<div class="config-menu-arrow"><i class="fas fa-chevron-right"></i></div>'+
       '</div>'+
-      '<div class="config-menu-item" onclick="openConfigInfo()">'+
+      '<div class="config-menu-item" draggable="true" onclick="openConfigInfo()">'+
         '<div class="config-menu-icon"><i class="fas fa-info-circle"></i></div>'+
         '<div class="config-menu-content">'+
           '<h3>Información</h3>'+
@@ -1734,12 +2148,179 @@ window.render_configuracion = async function(el){
         '<div class="config-menu-arrow"><i class="fas fa-chevron-right"></i></div>'+
       '</div>'+
     '</div>';
+
+  initConfigMenuDrag(el);
 };
 
+/* ── Drag & drop del menú de configuración ───────────────────────── */
+function initConfigMenuDrag(el){
+  const container = el.querySelector('.config-menu');
+  if(!container) return;
+
+  // Aplicar el orden guardado por el usuario (antes de nada visible)
+  applyConfigOrder(container);
+
+  // Asegurar draggable en todos los items (por si acaso)
+  container.querySelectorAll('.config-menu-item').forEach(item => {
+    item.setAttribute('draggable', 'true');
+  });
+
+  // CSS inyectado una sola vez
+  if(!document.getElementById('config-drag-style')){
+    const s = document.createElement('style');
+    s.id = 'config-drag-style';
+    s.textContent =
+      '.config-menu-item.dragging{opacity:.5;box-shadow:0 6px 18px rgba(0,0,0,.18)}'+
+      '.config-menu-item[draggable="true"]{-webkit-user-select:none;user-select:none;touch-action:pan-y}';
+    document.head.appendChild(s);
+  }
+
+  if(container.dataset.dragBound === '1') return;
+  container.dataset.dragBound = '1';
+
+  let draggedItem = null;
+  // Touch: estado del arrastre táctil (long-press)
+  let touchState = null; // { item, startY, startX, moved, timer, startY2, suppressClick }
+
+  const getAfterElement = (y) => {
+    const items = Array.from(container.querySelectorAll('.config-menu-item:not(.dragging)'));
+    return items.find(child => {
+      const box = child.getBoundingClientRect();
+      return y < box.top + box.height / 2;
+    });
+  };
+
+  container.addEventListener('dragstart', e => {
+    const item = e.target.closest('.config-menu-item');
+    if(!item) return;
+    draggedItem = item;
+    item.classList.add('dragging');
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', '');
+  });
+
+  container.addEventListener('dragover', e => {
+    if(!draggedItem) return;
+    e.preventDefault();                        // ← crítico: sin esto → icono prohibido
+    e.dataTransfer.dropEffect = 'move';        // ← cambia cursor a "mover"
+    const after = getAfterElement(e.clientY);
+    if(after == null) container.appendChild(draggedItem);
+    else if(after !== draggedItem) container.insertBefore(draggedItem, after);
+  });
+
+  container.addEventListener('drop', e => {
+    e.preventDefault();
+  });
+
+  container.addEventListener('dragend', () => {
+    if(!draggedItem) return;
+    draggedItem.classList.remove('dragging');
+    saveConfigOrder(container);
+    draggedItem = null;
+  });
+
+  /* ─ Soporte táctil (móvil): mantén pulsado 400 ms y arrastra ─ */
+  if(!container.dataset.touchBound){
+    container.dataset.touchBound = '1';
+
+    const touchCSS = document.createElement('style');
+    touchCSS.textContent = '.config-menu-item.touch-dragging{transform:scale(1.02);box-shadow:0 6px 18px rgba(0,0,0,.25);z-index:50;position:relative}' +
+      '.config-menu.dragging-touch{overflow:visible}';
+    document.head.appendChild(touchCSS);
+
+    const startLongPress = (e) => {
+      const t = e.touches[0];
+      if(!t) return;
+      const item = e.target.closest('.config-menu-item');
+      if(!item) return;
+      touchState = { item, startY: t.clientY, startX: t.clientX, moved: false, timer: null, active: false };
+      touchState.timer = setTimeout(() => {
+        if(!touchState) return;
+        touchState.active = true;
+        touchState.item.classList.add('touch-dragging');
+        if(navigator.vibrate) navigator.vibrate(30);
+        showToast('Arrastra la opción y suéltala donde quieras', 'info');
+      }, 400);
+    };
+
+    const moveTouch = (e) => {
+      if(!touchState) return;
+      const t = e.touches[0];
+      if(!t) return;
+      if(!touchState.active){
+        // Cancelar si mueve el dedo antes de activarse (scroll normal)
+        if(Math.abs(t.clientY - touchState.startY) > 12 || Math.abs(t.clientX - touchState.startX) > 12){
+          clearTimeout(touchState.timer);
+          touchState = null;
+        }
+        return;
+      }
+      e.preventDefault(); // evita el scroll mientras arrastra
+      touchState.moved = true;
+      const after = getAfterElement(t.clientY);
+      if(after == null) container.appendChild(touchState.item);
+      else if(after !== touchState.item) container.insertBefore(touchState.item, after);
+    };
+
+    const endTouch = () => {
+      if(!touchState) return;
+      clearTimeout(touchState.timer);
+      const wasDrag = touchState.active && touchState.moved;
+      if(touchState.active){
+        touchState.item.classList.remove('touch-dragging');
+        if(wasDrag) saveConfigOrder(container);
+      }
+      touchState = null;
+      if(wasDrag){
+        container.__suppressClick = true;
+        setTimeout(() => { container.__suppressClick = false; }, 200);
+      }
+    };
+
+    container.addEventListener('touchstart', startLongPress, { passive: true });
+    container.addEventListener('touchmove', moveTouch, { passive: false });
+    container.addEventListener('touchend', endTouch);
+    container.addEventListener('touchcancel', endTouch);
+
+    // Evita que el click navegue tras un arrastre táctil
+    container.addEventListener('click', (e) => {
+      if(container.__suppressClick){
+        e.preventDefault();
+        e.stopPropagation();
+      }
+    }, true);
+  }
+}
+
+/* ── Persistencia del orden ──────────────────────────────────────── */
+const CONFIG_ORDER_KEY = 'valgom_config_menu_order';
+
+function saveConfigOrder(container){
+  const order = Array.from(container.querySelectorAll('.config-menu-item'))
+    .map(item => item.getAttribute('onclick') || '')
+    .filter(Boolean);
+  localStorage.setItem(CONFIG_ORDER_KEY, JSON.stringify(order));
+}
+
+function applyConfigOrder(container){
+  const raw = localStorage.getItem(CONFIG_ORDER_KEY);
+  if(!raw) return;
+  let order;
+  try { order = JSON.parse(raw); } catch(_) { return; }
+  if(!Array.isArray(order)) return;
+
+  const map = new Map(
+    Array.from(container.querySelectorAll('.config-menu-item'))
+      .map(item => [item.getAttribute('onclick'), item])
+  );
+  order.forEach(key => {
+    const item = map.get(key);
+    if(item){ container.appendChild(item); map.delete(key); }
+  });
+}
+
 const COMPANY_SETTINGS_KEY='valgom_company_settings';
-const COMPANY_SETTINGS_DEFAULTS={
-  trade_name:'Valgom',legal_name:'',tax_id:'',address:'',phone:'',email:'',website:''
-};
+const COMPANY_SETTINGS_DEFAULTS={trade_name:'Valgom',legal_name:'',tax_id:'',address:'',phone:'',email:'',website:'',id:null};
 
 window.getCompanySettings=async function(){
   let cached={};
@@ -1967,6 +2548,255 @@ window.openConfigEmpresa=async function(){
   });
 };
 
+// ---- Configuración: Puntos de recogida (proveedores) ----
+window.openProveedores = async function(){
+  const lista = await dbGetAll('proveedores').catch(() => []);
+  const rows = lista.length ? lista.map(v =>
+    '<div style="display:flex;align-items:center;gap:10px;padding:10px;border:1px solid var(--border);border-radius:10px;margin-bottom:8px;background:var(--surface-alt)">' +
+      '<div style="flex:1;min-width:0"><strong>' + escapeHtml(v.nombre) + '</strong>' +
+        (v.direccion ? '<br><small style="color:var(--text-muted)">' + escapeHtml(v.direccion) + '</small>' : '') +
+        (v.lat ? '<br><small style="color:#16a34a">📍 Con coordenadas — kms automáticos</small>' : '<br><small style="color:#f59e0b">⚠️ Sin coordenadas — kms manuales</small>') +
+      '</div>' +
+      '<button class="btn btn-outline btn-sm btn-icon" title="Editar" onclick="editProveedor(\'' + escapeHtml(v.id) + '\')"><i class="fas fa-pen"></i></button>' +
+      '<button class="btn btn-outline btn-sm btn-icon" title="Eliminar" onclick="confirmDelete(\'Punto ' + escapeHtml(v.nombre) + '\', ()=>deleteProveedor(\'' + escapeHtml(v.id) + '\'))"><i class="fas fa-trash"></i></button>' +
+    '</div>').join('')
+    : '<p style="color:var(--text-muted)">Aún no hay puntos de recogida. Añade proveedores, talleres o delegaciones donde recojas material.</p>';
+
+  openModal('Puntos de recogida (proveedores)',
+    rows + '<button class="btn btn-primary" style="margin-top:10px" onclick="editProveedor()"><i class="fas fa-plus"></i> Añadir punto</button>',
+    '<button class="btn btn-outline" onclick="closeModal()">Cerrar</button>');
+};
+
+window.editProveedor = async function(id){
+  const v = id ? await dbGet('proveedores', id) : {};
+  const form = '<div class="form-grid">' +
+    '<div class="form-group full"><label>Nombre *</label><input id="pv_nom" value="' + escapeHtml(v.nombre || '') + '" placeholder="Ej: Suministros López (material puertas)"></div>' +
+    '<div class="form-group full"><label>Dirección completa</label>' +
+      '<div style="display:flex;gap:6px;align-items:center">' +
+        '<input id="pv_dir" style="flex:1" value="' + escapeHtml(v.direccion || '') + '" placeholder="Calle, número, ciudad">' +
+        '<button type="button" class="btn btn-outline btn-sm" id="pv_geo" title="Buscar coordenadas de la dirección"><i class="fas fa-location-crosshairs"></i> Geolocalizar</button>' +
+      '</div>' +
+      '<small id="pv_geo_hint" style="color:var(--text-muted);display:block;margin-top:4px">Pulsa «Geolocalizar» para rellenar las coordenadas automáticamente desde la dirección.</small>' +
+    '</div>' +
+    '<div class="form-group"><label>Latitud</label><input id="pv_lat" class="only-num-dec" value="' + (v.lat ?? '') + '" placeholder="Auto"></div>' +
+    '<div class="form-group"><label>Longitud</label><input id="pv_lng" class="only-num-dec" value="' + (v.lng ?? '') + '" placeholder="Auto"></div>' +
+    '<div class="form-group full"><label>Notas</label><input id="pv_notas" value="' + escapeHtml(v.notas || '') + '" placeholder="Horario, contacto, acceso..."></div>' +
+  '</div>';
+
+  openModal(id ? 'Editar punto de recogida' : 'Nuevo punto de recogida', form,
+    '<button class="btn btn-outline" onclick="closeModal()">Cancelar</button>' +
+    '<button class="btn btn-primary" id="pv_save"><i class="fas fa-save"></i> Guardar</button>');
+
+  // Geolocalizar: usa la función robusta geocodificar() de utils.js (degradación progresiva)
+  document.getElementById('pv_geo').addEventListener('click', async () => {
+    const dir = document.getElementById('pv_dir').value.trim();
+    const hint = document.getElementById('pv_geo_hint');
+    if (!dir) { showToast('Escribe primero la dirección', 'error'); return; }
+    const btn = document.getElementById('pv_geo');
+    btn.disabled = true;
+    hint.textContent = '⏳ Buscando la dirección…';
+    hint.style.color = '';
+    try {
+      const geo = await geocodificar(dir);
+      if (!geo) {
+        hint.textContent = '⚠️ No se encontró la dirección. Prueba con menos datos (ej: "Calle Mayor, Molina de Segura") o rellena las coordenadas a mano.';
+        hint.style.color = 'var(--warning,#eab308)';
+        return;
+      }
+      document.getElementById('pv_lat').value = geo.lat.toFixed(6);
+      document.getElementById('pv_lng').value = geo.lng.toFixed(6);
+      if (geo.precision === 'municipio') {
+        hint.textContent = '🟡 Aproximado (centro de ' + geo.nombreCompleto.split(',').slice(-3, -2).join('') + '): mueve las coordenadas si el punto exacto importa, o añade más detalle a la dirección y vuelve a geolocalizar.';
+      } else {
+        hint.textContent = '✅ Encontrada: ' + geo.nombreCompleto;
+      }
+    } catch (e) {
+      hint.textContent = '⚠️ No se pudo buscar (¿sin conexión?). Rellena las coordenadas a mano si las tienes.';
+      hint.style.color = 'var(--warning,#eab308)';
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
+  document.getElementById('pv_save').addEventListener('click', async () => {
+    const nombre = document.getElementById('pv_nom').value.trim();
+    if (!nombre) { showToast('El nombre es obligatorio', 'error'); return; }
+    const latRaw = document.getElementById('pv_lat').value.trim();
+    const lngRaw = document.getElementById('pv_lng').value.trim();
+    try {
+      const data = {
+        id: v.id || ('PRV-' + Date.now()),
+        nombre,
+        direccion: document.getElementById('pv_dir').value.trim(),
+        lat: latRaw ? parseFloat(latRaw) : null,
+        lng: lngRaw ? parseFloat(lngRaw) : null,
+        notas: document.getElementById('pv_notas').value.trim()
+      };
+      await dbPut('proveedores', data);
+      closeModal();
+      showToast('Punto de recogida guardado');
+      window.openProveedores();
+    } catch (e) {
+      console.error('[proveedores] guardar:', e);
+      showToast('No se pudo guardar: ' + (e.message || e), 'error');
+    }
+  });
+};
+
+window.deleteProveedor = async function(id){
+  await dbDelete('proveedores', id);
+  showToast('Punto de recogida eliminado');
+  window.openProveedores();
+};
+
+// ---- Configuración: Apariencia (color de la app y de los botones) ----
+window.openConfigApariencia = function(){
+  const settings = (window.getBrandSettings && window.getBrandSettings()) || {};
+  const state = {
+    primary: settings.primary || 'verde',
+    btnText: typeof settings.btnText === 'string' ? settings.btnText : ''
+  };
+  const initial = { ...state };
+
+  const palette = [
+    {name:'Verde',   v:'verde',   css:'#16a34a'},
+    {name:'Naranja', v:'naranja', css:'#f97316'},
+    {name:'Naranja oscuro', v:'naranja-oscuro', css:'#c2410c'},
+    {name:'Azul',    v:'azul',    css:'#2563eb'},
+    {name:'Rojo',    v:'rojo',    css:'#dc2626'},
+    {name:'Violeta', v:'violeta', css:'#8b5cf6'},
+    {name:'Teal',    v:'teal',    css:'#14b8a6'},
+    {name:'Gris',    v:'#64748b', css:'#64748b'},
+    {name:'Rosa',    v:'#ec4899', css:'#ec4899'},
+    {name:'Índigo',  v:'#6366f1', css:'#6366f1'},
+    {name:'Cian',    v:'#06b6d4', css:'#06b6d4'},
+    {name:'Lima',    v:'#84cc16', css:'#84cc16'},
+    {name:'Ámbar',   v:'#f59e0b', css:'#f59e0b'},
+    {name:'Fucsia',  v:'#d946ef', css:'#d946ef'},
+    {name:'Marrón',  v:'#92400e', css:'#92400e'},
+    {name:'Azul oscuro', v:'#1e3a8a', css:'#1e3a8a'}
+  ];
+  const textPalette = [
+    {name:'Por defecto', v:''},
+    {name:'Blanco', v:'#ffffff', css:'#ffffff'},
+    {name:'Negro',  v:'#111111', css:'#111111'},
+    {name:'Gris',   v:'#94a3b8', css:'#94a3b8'},
+    {name:'Naranja',v:'#f97316', css:'#f97316'},
+    {name:'Naranja oscuro', v:'#c2410c', css:'#c2410c'},
+    {name:'Amarillo', v:'#facc15', css:'#facc15'},
+    {name:'Verde',  v:'#22c55e', css:'#22c55e'},
+    {name:'Azul',   v:'#3b82f6', css:'#3b82f6'},
+    {name:'Rojo',   v:'#ef4444', css:'#ef4444'},
+    {name:'Violeta',v:'#a78bfa', css:'#a78bfa'},
+    {name:'Cian',   v:'#22d3ee', css:'#22d3ee'}
+  ];
+
+  const swatchBtn = (p, sel, attr) => {
+    const bg = p.css || 'linear-gradient(135deg,#fff 55%,#e2e8f0 55%)';
+    return '<button type="button" class="ap-swatch" data-' + attr + '="' + p.v + '" title="' + p.name + '"' +
+      ' style="width:36px;height:36px;border-radius:50%;cursor:pointer;background:' + bg + ';' +
+      'border:3px solid ' + (sel ? 'var(--primary-light)' : 'transparent') + ';' +
+      'box-shadow:0 0 0 1px rgba(148,163,184,.45);position:relative;overflow:hidden;flex-shrink:0">' +
+      (sel ? '<i class="fas fa-check" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#fff;text-shadow:0 0 4px rgba(0,0,0,.8);pointer-events:none"></i>' : '') +
+      '</button>';
+  };
+
+  const previewHTML = () =>
+    '<div class="ap-preview" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;background:var(--surface-alt);padding:12px;border-radius:10px;border:1px solid var(--border)">' +
+      '<span style="font-size:13px;color:var(--text-muted)">Vista previa:</span>' +
+      '<button class="btn btn-primary" type="button">Guardar</button>' +
+      '<button class="btn btn-outline" type="button">Cancelar</button>' +
+      '<button class="btn btn-danger" type="button">Eliminar</button>' +
+    '</div>';
+
+  openModal('Apariencia', `
+    <h3 style="margin-bottom:8px;font-size:1rem">Color principal de la aplicación</h3>
+    <p style="font-size:12px;color:var(--text-muted);margin-bottom:10px">Afecta a fondos de botones, menús y acentos.</p>
+    <div class="ap-palette" style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:18px"></div>
+
+    <h3 style="margin-bottom:8px;font-size:1rem">Color del texto de los botones</h3>
+    <p style="font-size:12px;color:var(--text-muted);margin-bottom:10px">"Por defecto" usa el color del tema (blanco en oscuro, oscuro en claro).</p>
+    <div class="ap-textpalette" style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:18px"></div>
+
+    <div class="ap-preview-wrap">${previewHTML()}</div>
+  `,
+  '<button class="btn btn-outline ap-close">Cerrar</button>');
+
+  const body = document.getElementById('modalBody');
+
+  const renderSwatches = () => {
+    body.querySelector('.ap-palette').innerHTML = palette.map(p => swatchBtn(p, p.v === state.primary, 'brand')).join('');
+    body.querySelector('.ap-textpalette').innerHTML = textPalette.map(p => swatchBtn(p, p.v === state.btnText, 'btntext')).join('');
+  };
+  renderSwatches();
+
+  const applyPreview = () => {
+    // Aplica colores a la app en vivo SIN guardar todavía
+    const c = (window.__brandColorsMap && window.__brandColorsMap[state.primary]) || null;
+    const root = document.documentElement;
+    if (c) {
+      root.style.setProperty('--primary', c.primary);
+      root.style.setProperty('--primary-dark', c.dark);
+      root.style.setProperty('--primary-light', c.light);
+    } else {
+      root.style.setProperty('--primary', state.primary);
+      root.style.setProperty('--primary-dark', shadeHex(state.primary, -18));
+      root.style.setProperty('--primary-light', shadeHex(state.primary, 18));
+    }
+    // Color de letra de botones en vivo
+    let st = document.getElementById('brand-btn-text-style');
+    if (!st) { st = document.createElement('style'); st.id = 'brand-btn-text-style'; document.head.appendChild(st); }
+    st.textContent = state.btnText
+      ? ('.btn,.btn-primary,.btn-secondary,.btn-success,.btn-outline,.btn-danger,.btn-sm,.btn-icon,.icon-btn{color:' + state.btnText + '!important}' +
+         '.btn i,.btn svg,.icon-btn i,.icon-btn svg{color:' + state.btnText + '!important}')
+      : '';
+    // Vista previa: refrescar botones del modal footer y preview
+    const footer = document.getElementById('modalFooter');
+    if (footer) footer.querySelectorAll('.btn').forEach(b => { /* el CSS !important se encarga */ });
+  };
+
+  body.addEventListener('click', e => {
+    const brand = e.target.closest('[data-brand]');
+    const txt = e.target.closest('[data-btntext]');
+    if (brand) { state.primary = brand.dataset.brand; renderSwatches(); applyPreview(); }
+    else if (txt) { state.btnText = txt.dataset.btntext; renderSwatches(); applyPreview(); }
+  });
+
+  // Cerrar confirmado: guardar y limpiar el revert para que closeModal no restaure
+  document.querySelector('.ap-close')?.addEventListener('click', () => {
+    window.setBrandColor(state.primary);
+    window.setButtonTextColor(state.btnText);
+    window.__apRevert = null;
+    closeModal();
+    showToast('Apariencia guardada', 'success');
+  });
+
+  // Al cerrar por la X, por clic fuera o por Escape → descartar cambios y restaurar
+  window.__apRevert = () => {
+    applyPreview.restore(initial);
+  };
+  applyPreview.restore = (s) => {
+    const c = (window.__brandColorsMap && window.__brandColorsMap[s.primary]) || null;
+    const root = document.documentElement;
+    if (c) {
+      root.style.setProperty('--primary', c.primary);
+      root.style.setProperty('--primary-dark', c.dark);
+      root.style.setProperty('--primary-light', c.light);
+    } else {
+      root.style.setProperty('--primary', s.primary);
+      root.style.setProperty('--primary-dark', shadeHex(s.primary, -18));
+      root.style.setProperty('--primary-light', shadeHex(s.primary, 18));
+    }
+    let st = document.getElementById('brand-btn-text-style');
+    if (st) st.textContent = s.btnText
+      ? ('.btn{color:' + s.btnText + '!important}.btn i,.btn svg{color:' + s.btnText + '!important}')
+      : '';
+  };
+
+  // Aplicar el estado guardado al abrir
+  applyPreview();
+};
+
 window.openConfigCorreo = function(){
   openModal('Configuración de Correo', `
     <p style="margin-bottom:12px;color:var(--text-muted)">Configura los datos del servidor SMTP para enviar correos electrónicos desde la aplicación.</p>
@@ -1986,6 +2816,28 @@ window.openConfigCorreo = function(){
   cargarConfigCorreo();
 };
 
+// ---- Configuración: Factor carretera configurable ----
+window.openConfigFactorCarretera = function(){
+  const actual = (window.getFactorCarretera && window.getFactorCarretera()) || 1.3;
+  openModal('Factor carretera', `
+    <p style="margin-bottom:12px;color:var(--text-muted)">Multiplicador que se aplica a la distancia en línea recta cuando no hay conexión o falla la geolocalización, para estimar los kilómetros reales por carretera en los partes de trabajo.</p>
+    <div class="form-group">
+      <label>Factor carretera</label>
+      <input id="fc_valor" type="number" class="only-num-dec" step="0.05" min="0.5" max="5" value="${actual}">
+      <small style="color:var(--text-muted);display:block;margin-top:4px">Ejemplo: 1.3 significa que a 10 km en línea recta se le cuentan 13 km reales. Por defecto: 1.3</small>
+    </div>`,
+    '<button class="btn btn-outline" onclick="closeModal()">Cancelar</button>'+
+    '<button class="btn btn-primary" onclick="guardarFactorCarretera()"><i class="fas fa-save"></i> Guardar</button>');
+};
+
+window.guardarFactorCarretera = function(){
+  const v = parseFloat(document.getElementById('fc_valor').value);
+  if(!v || v < 0.5 || v > 5){ showToast('Introduce un factor válido entre 0.5 y 5', 'error'); return; }
+  localStorage.setItem('autopuerta_factor_carretera', String(v));
+  showToast('Factor carretera guardado: ' + v);
+  closeModal();
+};
+
 window.openConfigSync = function(){
   openModal('Sincronización de Datos', `
     <p style="margin-bottom:12px;color:var(--text-muted)">Los datos se sincronizan online con Supabase y se mantienen en caché local para consulta. La exportación e importación JSON están disponibles como respaldo adicional.</p>
@@ -2000,7 +2852,7 @@ window.openConfigSync = function(){
 
 window.openConfigAndroid = function(){
   openModal('Instalación en Android', `
-    <p style="color:var(--text-muted);font-size:14px">Abre esta app en <strong>Chrome para Android</strong> y pulsa el menú <strong>⋮ → "Instalar aplicación"</strong>. Quedará como una app nativa en tu escritorio y funcionará sin conexión.</p>`,
+    <p style="color:var(--text-muted);font-size:14px">Abre esta app en <strong>Chrome para Android</strong> y pulsa el menú <strong>< → "Instalar aplicación"</strong>. Quedará como una app nativa en tu escritorio y funcionará sin conexión.</p>`,
     '<button class="btn btn-outline" onclick="closeModal()">Cerrar</button>');
 };
 
@@ -2225,7 +3077,7 @@ function actualizarMiniaturas(){
   thumbs.innerHTML = (window.__fotosParte.form||[]).map((f,i)=>
     '<div style="position:relative;width:80px;height:80px;border-radius:8px;overflow:hidden;border:2px solid var(--primary)">'+
       '<img class="inc-foto" src="'+f+'" style="width:100%;height:100%;object-fit:cover;cursor:zoom-in">'+
-      '<button type="button" onclick="eliminarFotoParte('+i+')" style="position:absolute;top:2px;right:2px;width:20px;height:20px;border-radius:50%;background:#dc2626;color:#fff;border:none;cursor:pointer;font-size:12px;">×</button>'+
+      '<button type="button" onclick="eliminarFotoParte('+i+')" style="position:absolute;top:2px;right:2px;width:20px;height:20px;border-radius:50%;background:#dc2626;color:#fff;border:none;cursor:pointer;font-size:12px;">-</button>'+
     '</div>'
   ).join('');
 }
@@ -2235,13 +3087,106 @@ window.eliminarFotoParte = function(idx){
   actualizarMiniaturas();
 };
 
-window.guardarFotosParte = async function(){
-  return (window.__fotosParte.form || []).slice();
+// ── Fotos del albarán (solo desplazamientos internos) ──
+window.addFotosAlbaran = async function(input){
+  const files = Array.from(input.files || []);
+  input.value = '';
+  if(!window.__fotosAlbaran) window.__fotosAlbaran = [];
+  for(const file of files){
+    if(window.__fotosAlbaran.length >= MAX_FOTOS_PARTE){ showToast('Máximo ' + MAX_FOTOS_PARTE + ' fotos de albarán','error'); break; }
+    try{ window.__fotosAlbaran.push(await compressDoticsPhoto(file)); }
+    catch(e){ showToast('No se pudo procesar la foto del albarán','error'); }
+  }
+  actualizarMiniaturasAlbaran();
 };
 
-// ═══════════════════════════════════════════════════════════
+function actualizarMiniaturasAlbaran(){
+  const thumbs = document.getElementById('pt_albaran_thumbs');
+  if(!thumbs) return;
+  thumbs.innerHTML = (window.__fotosAlbaran || []).map((f,i)=>
+    '<div style="position:relative;width:90px;height:90px;border-radius:8px;overflow:hidden;border:2px solid var(--primary)">'+
+      '<img class="inc-foto" src="'+f+'" style="width:100%;height:100%;object-fit:cover;cursor:zoom-in">'+
+      '<button type="button" onclick="eliminarFotoAlbaran('+i+')" style="position:absolute;top:2px;right:2px;width:20px;height:20px;border-radius:50%;background:#dc2626;color:#fff;border:none;cursor:pointer;font-size:12px;">×</button>'+
+    '</div>'
+  ).join('');
+}
+
+window.eliminarFotoAlbaran = function(idx){
+  if(!window.__fotosAlbaran) return;
+  window.__fotosAlbaran.splice(idx, 1);
+  actualizarMiniaturasAlbaran();
+};
+
+// Sube una foto (data URL) a Storage y devuelve su URL pública; null si no se pudo
+window.uploadParteFoto = async function(dataUrl){
+  const userId = window.authState?.user?.id;
+  if(!userId || !navigator.onLine || !window.supabaseDB) return null;
+  try{
+    const blob = await (await fetch(dataUrl)).blob();
+    const ext = blob.type === 'image/png' ? 'png' : blob.type === 'image/webp' ? 'webp' : 'jpg';
+    const rand = (crypto.randomUUID ? crypto.randomUUID() : uid() + uid()).replace(/-/g,'');
+    const path = userId + '/' + rand + '.' + ext;
+    const { error } = await window.supabaseDB.storage.from('parte-fotos')
+      .upload(path, blob, { contentType: blob.type, upsert: false });
+    if(error) throw error;
+    return window.supabaseDB.storage.from('parte-fotos').getPublicUrl(path).data.publicUrl;
+  }catch(e){
+    console.warn('[Fotos] No se pudo subir la foto:', e.message || e);
+    return null;
+  }
+};
+
+window.uploadRevisionFoto = async function(dataUrl){
+  const userId = window.authState?.user?.id;
+  if(!userId || !navigator.onLine || !window.supabaseDB) return null;
+  try{
+    const blob = await (await fetch(dataUrl)).blob();
+    const ext = blob.type === 'image/png' ? 'png' : blob.type === 'image/webp' ? 'webp' : 'jpg';
+    const rand = (crypto.randomUUID ? crypto.randomUUID() : uid() + uid()).replace(/-/g,'');
+    const path = userId + '/' + rand + '.' + ext;
+    const { error } = await window.supabaseDB.storage.from('revision-fotos')
+      .upload(path, blob, { contentType: blob.type, upsert: false });
+    if(error) throw error;
+    return window.supabaseDB.storage.from('revision-fotos').getPublicUrl(path).data.publicUrl;
+  }catch(e){
+    console.warn('[Fotos Revisión] No se pudo subir la foto:', e.message || e);
+    return null;
+  }
+};
+
+// Convierte a URL las fotos en base64; si alguna no se puede subir se conserva en base64
+window.guardarFotosParte = async function(){
+  const out = [];
+  for(const f of (window.__fotosParte.form || [])){
+    if(typeof f === 'string' && f.startsWith('data:image/')) out.push(await window.uploadParteFoto(f) || f);
+    else out.push(f);
+  }
+  return out;
+};
+
+// Convierte a URL las fotos de revisión en base64; si alguna no se puede subir se conserva en base64
+window.guardarFotosRevision = async function(){
+  const draft = window.__hiperberReviewDraft;
+  if(!draft || !draft.stores) return;
+
+  for(const store of draft.stores){
+    if(!store.puertas) continue;
+    for(const door of store.puertas){
+      if(!door.hallazgoFotos) continue;
+      const processedFotos = [];
+      for(const foto of door.hallazgoFotos){
+        if(typeof foto === 'string' && foto.startsWith('data:image/')){
+          processedFotos.push(await window.uploadRevisionFoto(foto) || foto);
+        }else{
+          processedFotos.push(foto);
+        }
+      }
+      door.hallazgoFotos = processedFotos;
+    }
+  }
+};
+
 //  EMPLEADOS
-// ═══════════════════════════════════════════════════════════
 window.render_empleados = async function(el){
   el.innerHTML =
     '<div class="page-header"><div><h2>Empleados</h2><p>Gestión del equipo técnico</p></div>'+
@@ -2402,8 +3347,6 @@ window.render_estadisticas = async function(el){
     '<div class="page-header"><div><h2>Estadísticas</h2><p>Análisis de actividad y rendimiento</p></div></div>'+
     '<div class="stats-grid">'+
       '<div class="stat-card"><div class="stat-value" id="stat-total">0</div><div class="stat-label">Total Partes</div></div>'+
-      '<div class="stat-card"><div class="stat-value" id="stat-completados">0</div><div class="stat-label">Completados</div></div>'+
-      '<div class="stat-card"><div class="stat-value" id="stat-abiertos">0</div><div class="stat-label">Abiertos</div></div>'+
       '<div class="stat-card"><div class="stat-value" id="stat-horas">0</div><div class="stat-label">Horas Totales</div></div>'+
     '</div>'+
     '<div class="card" style="margin-top:20px"><h3 style="margin-bottom:15px">Partes por Mes</h3><canvas id="chartMeses"></canvas></div>'+
@@ -2416,40 +3359,41 @@ window.render_estadisticas = async function(el){
 window.pintarEstadisticas = async function(){
   const partes = await dbGetAll('partesTrabajo');
 
-  // ── Contadores generales ──
+  // Contadores generales
   const total = partes.length;
-  const completados = partes.filter(p=>p.estado==='completado').length;
-  const abiertos = partes.filter(p=>p.estado==='abierto').length;
   const horasTotal = partes.reduce((sum,p)=> sum + (parseFloat(p.horas)||0), 0);
 
   document.getElementById('stat-total').textContent = total;
-  document.getElementById('stat-completados').textContent = completados;
-  document.getElementById('stat-abiertos').textContent = abiertos;
   document.getElementById('stat-horas').textContent = horasTotal.toFixed(1);
 
-  // ── Destruir gráficos anteriores si existen ──
+  // Destruir gráficos anteriores si existen
+  await window.ensureChart();
   const charts = ['chartMeses','chartTecnicos','chartTipos'];
   charts.forEach(id=>{
     const existing = Chart.getChart(id);
     if(existing) existing.destroy();
   });
 
-  // ── Partes por Mes ──
+  // Partes por Mes
   const meses = {};
   partes.forEach(p=>{
     const mes = p.fecha ? p.fecha.substring(0,7) : 'Sin fecha';
     meses[mes] = (meses[mes]||0) + 1;
   });
   const mesesOrdenados = Object.keys(meses).sort();
-  new Chart(document.getElementById('chartMeses'), {
+  const chartCv=document.getElementById('chartMeses');
+  const primaryC=getComputedStyle(document.documentElement).getPropertyValue('--primary').trim()||'#16a34a';
+  const g8=chartCv.getContext('2d').createLinearGradient(0,0,0,chartCv.clientHeight||220);
+  g8.addColorStop(0,primaryC+'55');g8.addColorStop(1,primaryC+'00');
+  new Chart(chartCv, {
     type: 'line',
     data: {
       labels: mesesOrdenados,
       datasets: [{
         label: 'Partes',
         data: mesesOrdenados.map(m=>meses[m]),
-        borderColor: '#3b82f6',
-        backgroundColor: 'rgba(59,130,246,0.1)',
+        borderColor: primaryC,
+        backgroundColor: g8,
         fill: true,
         tension: 0.3
       }]
@@ -2457,7 +3401,7 @@ window.pintarEstadisticas = async function(){
     options: { responsive: true, plugins: { legend: { display: false } } }
   });
 
-  // ── Partes por Técnico ──
+  // Partes por Técnico
   const tecnicos = {};
   partes.forEach(p=>{
     const nombre = p.empleadoNombre || 'Sin asignar';
@@ -2477,7 +3421,7 @@ window.pintarEstadisticas = async function(){
     options: { responsive: true, plugins: { legend: { display: false } } }
   });
 
-  // ── Partes por Tipo de Puerta ──
+  // Partes por Tipo de Puerta
   const tipos = {};
   partes.forEach(p=>{
     const tipo = p.tipoPuerta || 'Sin especificar';
@@ -2496,9 +3440,7 @@ window.pintarEstadisticas = async function(){
     options: { responsive: true }
   });
 };
-// ═══════════════════════════════════════════════════
-//  UTILIDADES KMS POR JORNADA   ← van ANTES, a nivel global
-// ═══════════════════════════════════════════════════
+//  UTILIDADES KMS POR JORNADA   ? van ANTES, a nivel global
 // BASE_CEUTI y FACTOR_CARETERA ya están definidas en utils.js — no duplicar
 const OFICINA = BASE_CEUTI;   // alias para no tocar el resto del código de pages.js
 
@@ -2515,9 +3457,14 @@ function kmEntreCoordenadas(lat1, lng1, lat2, lng2){
 async function calcularKmJornada(partesDelDia){
   if (!partesDelDia.length) return null; // null = "no puedo calcular" -> activará fallback
 
-  // Recoger coordenadas ÚNICAS de cliente del día
+  // Los partes internos (recogidas, taller...) no tienen cliente: sus KMs se suman aparte.
+  const normales = partesDelDia.filter(p => !p.interno);
+  const kmsInternos = partesDelDia.filter(p => p.interno).reduce((acc, p) => acc + (Number(p.kms) || 0), 0);
+  if (!normales.length) return kmsInternos || null; // solo internos ese día: suma directa
+
+  // Recoger coordenadas sNICAS de cliente del día
   const coordsMap = {};
-  for (const p of partesDelDia) {
+  for (const p of normales) {
     if (coordsMap[p.clienteId]) continue;
     const cli = await dbGet('clientes', p.clienteId);
     if (!cli?.lat || !cli?.lng) return null;      // falta coord -> señal de fallback
@@ -2526,12 +3473,18 @@ async function calcularKmJornada(partesDelDia){
 
   const puntos = Object.values(coordsMap);
 
-  // Un solo destino: oficina -> cliente -> oficina (ruta real, NO p.kms)
+  // Distancia de ruta real entre dos puntos (OSRM) con fallback haversine × FACTOR_CARETERA
+  const kmRuta = async (a, b) => {
+    const real = await kmRutaReal(a.lat, a.lng, b.lat, b.lng).catch(() => null);
+    if (real != null) return real;
+    return kmEntreCoordenadas(a.lat, a.lng, b.lat, b.lng) * getFactorCarretera();
+  };
+
+  // Un solo destino: oficina -> cliente -> oficina (ida y vuelta)
   if (puntos.length === 1) {
     const c = puntos[0];
-    const ida  = kmEntreCoordenadas(OFICINA.lat, OFICINA.lng, c.lat, c.lng) * FACTOR_CARETERA;
-    const vuel = kmEntreCoordenadas(c.lat, c.lng, OFICINA.lat, OFICINA.lng) * FACTOR_CARETERA;
-    return Math.round(ida + vuel);
+    const ida = await kmRuta(OFICINA, c);
+    return Math.round(ida * 2) + kmsInternos; // ida + vuelta por el mismo camino
   }
 
   // Varios destinos: vecino más cercano desde la oficina y vuelta
@@ -2539,20 +3492,16 @@ async function calcularKmJornada(partesDelDia){
   let actual = OFICINA, total = 0;
   while (pendientes.length) {
     let mejorIdx = 0, mejorDist = Infinity;
-    pendientes.forEach((c, i) => {
-      const d = kmEntreCoordenadas(actual.lat, actual.lng, c.lat, c.lng) * FACTOR_CARETERA;
-      if (d < mejorDist) { mejorDist = d; mejorIdx = i; }
-    });
+    const dists = await Promise.all(pendientes.map(c => kmRuta(actual, c)));
+    dists.forEach((d, i) => { if (d < mejorDist) { mejorDist = d; mejorIdx = i; } });
     total += mejorDist;
     actual = pendientes.splice(mejorIdx, 1)[0];
   }
-  total += kmEntreCoordenadas(actual.lat, actual.lng, OFICINA.lat, OFICINA.lng) * FACTOR_CARETERA;
-  return Math.round(total);
+  total += await kmRuta(actual, OFICINA);
+  return Math.round(total) + kmsInternos;
 }
 
-// ═══════════════════════════════════════════════════
 //  RECALCULO DE KMS DE VEHÍCULOS
-// ═══════════════════════════════════════════════════
 window.normMatricula = m => String(m || '').replace(/\s/g, '').toUpperCase();
 
 /** Partes con la matrícula resuelta a la del vehículo (también los antiguos, que la guardaban vacía). */
@@ -2579,7 +3528,7 @@ window.recalcVehicleKms = async function(matricula, silent) {
     const partes = (await cargarPartesConMatricula(vehiculos))
       .filter(p => p.matricula === vehiculo.matricula);
 
-    // ── Base fija en km_inicial (si no existe, se toma el km actual una sola vez) ──
+    // Base fija en km_inicial (si no existe, se toma el km actual una sola vez)
     let kmIncial = vehiculo.kmInicial ?? vehiculo.km_inicial;
     if (kmIncial == null) {
       kmIncial = Number(vehiculo.km) || 0;
@@ -2587,13 +3536,13 @@ window.recalcVehicleKms = async function(matricula, silent) {
     }
     kmIncial = Number(kmIncial);
 
-    // ── Agrupar partes por fecha (jornadas) ──
+    // Agrupar partes por fecha (jornadas)
     const jornadas = {};
     partes.filter(p => Number(p.kms) > 0).forEach(p => {
       (jornadas[p.fecha] = jornadas[p.fecha] || []).push(p);
     });
 
-    // ── Calcular desplazamientos por jornada ──
+    // Calcular desplazamientos por jornada
     let sumaDesplazamientos = 0;
     let diasSinCoord = 0;
     for (const lista of Object.values(jornadas)) {
@@ -2608,7 +3557,7 @@ window.recalcVehicleKms = async function(matricula, silent) {
       }
     }
 
-    // ── Resultado final ──
+    // Resultado final
     const nuevoKm = kmIncial + sumaDesplazamientos;
 
     const cambioBase = (vehiculo.kmInicial ?? vehiculo.km_inicial) !== kmIncial || Number(vehiculo.km) !== nuevoKm;
@@ -2651,7 +3600,7 @@ window.recalcAllFleetKms = async function(silent) {
 function horaParte(p, tipo) {
   const guardada = tipo === 'entrada' ? (p.horaEntrada ?? p.hora_entrada) : (p.horaSalida ?? p.hora_salida);
   if (guardada) return String(guardada).slice(0, 5);
-  const marca = tipo === 'entrada' ? (p.createdAt ?? p.createdat) : (p.estado === 'completado' ? (p.updatedAt ?? p.updatedat) : null);
+  const marca = tipo === 'entrada' ? (p.createdAt ?? p.createdat) : (p.updatedAt ?? p.updatedat);
   if (!marca) return '';
   const d = new Date(marca);
   return isNaN(d) ? '' : d.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
@@ -2702,7 +3651,7 @@ window.generateDailyReport = async function(dateStr = fechaLocalHoy()) {
         kms_recorridos: kmsRecorridos,
         km_total: Number(v.km) || 0,
         tecnico: partes.map(p => p.empleadoNombre).filter(Boolean)[0] || '—',
-        estado: partes.length ? '✅ Activo' : '⚪ Inactivo'
+        estado: partes.length ? 'o. Activo' : 's Inactivo'
       };
     }));
 
@@ -2742,6 +3691,7 @@ window.render_daily_report = async function(containerId = 'dailyReportContainer'
   if (!container) return;
 
   // Destruir gráfico previo (evita "Canvas is already in use")
+  await window.ensureChart();
   const existingChart = Chart.getChart('chartKmsDia');
   if (existingChart) existingChart.destroy();
 
@@ -2751,7 +3701,7 @@ window.render_daily_report = async function(containerId = 'dailyReportContainer'
   container.innerHTML = `
     <div class="card" style="grid-column: 1/-1;">
       <div class="card-header">
-        <h3>📋 Informe Diario — ${informe.fecha}</h3>
+        <h3>Informe Diario — ${informe.fecha}</h3>
         <small style="color:var(--text-muted);">Generado: ${informe.generado}</small>
       </div>
       <div style="padding:16px 20px;">
@@ -2813,7 +3763,7 @@ window.render_daily_report = async function(containerId = 'dailyReportContainer'
     </div>
   `;
 
-  // ── Gráfico de barras: KMs recorridos por vehículo (Chart.js directo) ──
+  // Gráfico de barras: KMs recorridos por vehículo (Chart.js directo)
   if (datosGrafico.length > 0) {
     setTimeout(() => {
       try {
@@ -2889,7 +3839,7 @@ async function renderCadenasList() {
     return;
   }
 
-  // ✅ Usar la clase .card para que coincida con el resto de la app
+  // o. Usar la clase .card para que coincida con el resto de la app
   list.innerHTML = cadenas.map(c => `
     <div class="card chain-row" data-cadena-id="${c.id}">
       <div class="card-header">
@@ -2918,17 +3868,15 @@ async function renderCadenasList() {
   document.querySelectorAll('#cadenas-list .card').forEach(el => {
     el.addEventListener('click', async () => {
       el.style.boxShadow = 'var(--shadow-lg)';
-      const id = String(el.dataset.cadenaId || '');   // ← dataset siempre devuelve string
+      const id = String(el.dataset.cadenaId || '');   // ? dataset siempre devuelve string
       if (!id) return;
-      await render_rutas(id);                          // ← directo, sin showRutasForCadena
+      await render_rutas(id);                          // ? directo, sin showRutasForCadena
     });
   });
 }
 
 
-// ═══════════════════════════════════════════════════════════
 //  CADENAS — BORRADO EN CASCADA
-// ═══════════════════════════════════════════════════════════
 
 /**
  * deleteCadenaWithDependencies(id)
@@ -3010,7 +3958,7 @@ async function showRutaForm(editId = null, defaultCadenaId = null) {
       <div>
         <label style="display:block;font-size:13px;color:var(--gray);margin-bottom:4px;">Cadena *</label>
         <select id="form-ruta-cadena" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:6px;font-size:15px;">
-          <option value="">— Seleccionar —</option>
+          <option value="">— Seleccionar</option>
           ${cadenasOptions}
         </select>
       </div>
@@ -3025,7 +3973,7 @@ async function showRutaForm(editId = null, defaultCadenaId = null) {
         </div>
       </div>
       <div>
-        <label style="display:block;font-size:13px;color:var(--gray);margin-bottom:4px;">Última revisión</label>
+        <label style="display:block;font-size:13px;color:var(--gray);margin-bottom:4px;">ultima revisión</label>
         <input id="form-ruta-ultima" type="date" value="${rutaUltimaDate}" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:6px;font-size:15px;">
       </div>
     </div>`;
@@ -3055,162 +4003,17 @@ async function showRutaForm(editId = null, defaultCadenaId = null) {
 }
 
 
-// ═══════════════════════════════════════════════════════════
-//  REVISIONES PROGRAMADAS — PASO C
-// ═══════════════════════════════════════════════════════════
+//  REVISIONES — el panel de "Revisiones Programadas" fue eliminado.
+//  Toda la funcionalidad vive en la página única "Revisiones"
+//  (js/informe-revisiones-cliente.js): pestañas Próximas/Historial,
+//  botón Nueva revisión y buscador. Esta redirección mantiene
+//  compatibles los accesos antiguos a 'revisionesProgramadas'.
 
 window.render_revisionesProgramadas = async function(main) {
-  if (!main) main = document.getElementById('mainContent');
+  return window.render_revisionesCliente(main);
+};
 
-  main.innerHTML = `
-    <div class="page-revisiones">
-      <h2 class="page-revisiones-title"><i class="fas fa-calendar-check"></i> Revisiones Programadas</h2>
-      <p class="page-revisiones-subtitle">Puertas agrupadas por cadena y ruta, con estado de última ronda.</p>
-      <div id="revisiones-container" class="revisiones-container"></div>
-    </div>`;
-
-  const container = document.getElementById('revisiones-container');
-  const cadenas = await getAllCadenas();
-
-  if (cadenas.length === 0) {
-    container.innerHTML = '<p style="padding:20px;text-align:center;color:var(--gray);">No hay cadenas. Crea una desde el menú "Cadenas".</p>';
-    return;
-  }
-
-  for (const cadena of cadenas) {
-    const rutas = await getRutasByCadena(cadena.id);
-    const esDotics=cadena.nombre.trim().toLocaleUpperCase()==='DOTICS';
-    const esHiperber=cadena.nombre.trim().toLocaleUpperCase()==='HIPERBER';
-    if (rutas.length === 0 && !esDotics && !esHiperber) continue;
-
-    const grupo = document.createElement('div');
-    grupo.className = 'revision-grupo';
-    grupo.dataset.cadenaId=String(cadena.id);
-
-    grupo.innerHTML = `
-      <div class="revision-cadena-header cadena-header-rev">
-        <div>
-          <strong>${escapeHtml(cadena.nombre)}</strong>
-        </div>
-        <div class="revision-cadena-meta">
-          ${esDotics?'<button type="button" class="btn btn-sm btn-primary btn-dotics-visit">Formulario de revisión</button>':''}
-          ${esHiperber?'<button type="button" class="btn btn-sm btn-primary btn-hiperber-review">Formulario de revisión</button>':''}
-          <span class="badge badge-info">${rutas.length} ruta${rutas.length>1?'s':''}</span>
-        </div>
-      </div>`;
-
-    const revContent = document.createElement('div');
-    revContent.className = 'revision-content';
-    revContent.id = `rev-content-${cadena.id}`;
-
-    for (const ruta of rutas) {
-      const puertas = await getPuertasPorRuta(ruta.id);
-      const puertasHtml = puertas.map(p => {
-        const estado = getEstadoPuerta(p);
-        const revisionCercana=p.proximaRevision&&((new Date(p.proximaRevision)-new Date())/86400000)<=30;
-        return `
-          <div class="revision-puerta-item">
-            <div>
-              <strong>${escapeHtml(p.clienteNombre)}</strong>
-              <span class="revision-puerta-tipo">${escapeHtml(p.puertaTipo || '—')}</span>
-              ${p.proximaRevision ? `<div class="revision-puerta-fecha">Próxima: ${formatDate(p.proximaRevision)}</div>` : ''}
-            </div>
-            <span class="badge ${estado.clase} badge-sm">${estado.texto}</span>
-            ${window.isTechnician?.()?'<button type="button" class="btn btn-sm btn-primary btn-tech-review" data-puerta-id="'+escapeHtml(p.id)+'">Registrar revisión</button>':''}
-            ${esDotics&&revisionCercana?'<button type="button" class="btn btn-sm btn-outline btn-dotics-door" data-puerta-id="'+escapeHtml(p.id)+'">Abrir ficha</button>':''}
-          </div>`;
-      }).join('');
-
-      if (!puertasHtml) continue;
-
-      const rutaGroup = document.createElement('div');
-      rutaGroup.className = 'ruta-rev-group';
-
-      const rutaHeader = document.createElement('div');
-      rutaHeader.className = 'revision-ruta-header';
-      rutaHeader.innerHTML = `
-        <span>${escapeHtml(ruta.nombre)}
-          ${ruta.frecuenciaMeses ? `<span class="revision-ruta-frecuencia">cada ${ruta.frecuenciaMeses} mes${ruta.frecuenciaMeses>1?'es':''}</span>` : ''}
-        </span>
-        <span class="badge ${ruta.proximaRevision ? (new Date(ruta.proximaRevision) < new Date() ? 'badge-red' : 'badge-green') : 'badge-yellow'} badge-sm">
-          ${ruta.proximaRevision ? formatDate(ruta.proximaRevision) : 'Sin programar'}
-        </span>
-      `;
-      if (!window.isTechnician?.()) rutaHeader.addEventListener('click', () => showRutasForCadena(cadena.id));
-      rutaGroup.appendChild(rutaHeader);
-
-      const rutaBody = document.createElement('div');
-      rutaBody.className = 'revision-ruta-body';
-      rutaBody.innerHTML = puertasHtml;
-      rutaGroup.appendChild(rutaBody);
-      revContent.appendChild(rutaGroup);
-    }
-
-    if(rutas.length===0){
-      revContent.innerHTML='<p class="revision-empty-route">Aún no hay rutas para '+escapeHtml(cadena.nombre)+'.</p>';
-    }
-
-    grupo.appendChild(revContent);
-
-    const cadenaHeader = grupo.querySelector('.cadena-header-rev');
-    const verCadenaBtn = grupo.querySelector('.btn-ver-cadena');
-    const doticsVisitBtn=grupo.querySelector('.btn-dotics-visit');
-    const hiperberReviewBtn=grupo.querySelector('.btn-hiperber-review');
-    doticsVisitBtn?.addEventListener('click',event=>{
-      event.stopPropagation();
-      window.openDoticsMaintenanceForm(cadena.id);
-    });
-    hiperberReviewBtn?.addEventListener('click',event=>{
-      event.stopPropagation();
-      window.openHiperberReviewForm(cadena.id);
-    });
-    grupo.querySelectorAll('.btn-dotics-door').forEach(button=>button.addEventListener('click',event=>{
-      event.stopPropagation();
-      window.openDoticsMaintenanceForm(cadena.id,button.dataset.puertaId);
-    }));
-    grupo.querySelectorAll('.btn-tech-review').forEach(button=>button.addEventListener('click',event=>{
-      event.stopPropagation();
-      abrirRevision(button.dataset.puertaId);
-    }));
-    cadenaHeader.addEventListener('click', (e) => {
-      if (e.target.closest('.btn-dotics-visit,.btn-hiperber-review')) return;
-      // Abrir vista de rutas en tarjetas
-      window.render_revisiones_rutas(cadena.id, cadena.nombre);
-    });
-
-    container.appendChild(grupo);
-  }
-
-  if (container.children.length === 0) {
-    container.innerHTML = '<p style="padding:20px;text-align:center;color:var(--gray);">No hay rutas asignadas a ninguna cadena.</p>';
-  }
-
-  const clientesHistorial=await dbGetAll('clientes');
-  const historialMount=document.createElement('section');
-  historialMount.className='revision-history';
-  historialMount.innerHTML=
-    '<div class="revision-history-header"><div><h3>Historial de revisiones</h3><p>Consulta revisiones finalizadas y descarga su informe.</p></div></div>'+ 
-    '<div class="revision-history-filters">'+
-      '<div class="form-group"><label for="hist-rev-desde">Desde</label><input type="date" id="hist-rev-desde"></div>'+ 
-      '<div class="form-group"><label for="hist-rev-hasta">Hasta</label><input type="date" id="hist-rev-hasta"></div>'+ 
-      '<div class="form-group"><label for="hist-rev-cadena">Cadena</label><select id="hist-rev-cadena"><option value="">Todas</option>'+cadenas.map(c=>'<option value="'+escapeHtml(c.id)+'">'+escapeHtml(c.nombre)+'</option>').join('')+'</select></div>'+ 
-      '<div class="form-group"><label for="hist-rev-cliente">Cliente / supermercado</label><select id="hist-rev-cliente"><option value="">Todos</option>'+clientesHistorial.map(c=>'<option value="'+escapeHtml(c.id)+'">'+escapeHtml(c.nombre)+'</option>').join('')+'</select></div>'+ 
-      '<div class="form-group revision-history-search"><label for="hist-rev-buscar">Texto</label><input type="search" id="hist-rev-buscar" placeholder="Técnico, intervención o texto"></div>'+ 
-      '<div class="revision-history-actions"><button type="button" class="btn btn-primary" id="hist-rev-aplicar"><i class="fas fa-search"></i> Buscar</button><button type="button" class="btn btn-outline" id="hist-rev-limpiar">Limpiar</button></div>'+ 
-    '</div><div class="table-wrapper revision-history-table"><table><thead><tr><th>Fecha</th><th>Cadena</th><th>Cliente / supermercado</th><th>Técnico</th><th>Equipos</th><th>Resultado</th><th></th></tr></thead><tbody id="hist-rev-resultados"></tbody></table></div>';
-  main.querySelector('.page-revisiones').appendChild(historialMount);
-  document.getElementById('hist-rev-aplicar').addEventListener('click',()=>window.buscarHistorialRevisiones());
-  document.getElementById('hist-rev-limpiar').addEventListener('click',()=>{
-    ['hist-rev-desde','hist-rev-hasta','hist-rev-cadena','hist-rev-cliente','hist-rev-buscar'].forEach(id=>document.getElementById(id).value='');
-    window.buscarHistorialRevisiones();
-  });
-  document.getElementById('hist-rev-buscar').addEventListener('keydown',event=>{if(event.key==='Enter')window.buscarHistorialRevisiones();});
-  await window.buscarHistorialRevisiones();
-}
-
-// ═══════════════════════════════════════════════════════════
 //  REVISIONES PROGRAMADAS - VISTA DE RUTAS (NIVEL 2)
-// ═══════════════════════════════════════════════════════════
 window.render_revisiones_rutas = async function(cadenaId, cadenaNombre) {
   const main = document.getElementById('mainContent');
   if (!main) return;
@@ -3243,7 +4046,7 @@ window.render_revisiones_rutas = async function(cadenaId, cadenaNombre) {
     for (const ruta of rutas) {
       let puertas = [];
       try {
-        puertas = await getPuertasPorRuta(ruta.id);
+        puertas = await window.getPuertasDeRuta(ruta.id, cadenaId);
       } catch(e) {
         console.error('Error cargando puertas de ruta:', e);
         puertas = [];
@@ -3261,8 +4064,8 @@ window.render_revisiones_rutas = async function(cadenaId, cadenaNombre) {
           const diffTime = proxima - hoy;
           diasHastaRevision = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
           
-          // Rojo si faltan 15 días o menos, verde si más
-          if (diasHastaRevision <= 15) {
+          // Rojo si faltan 30 días o menos (coherente con getEstadoPuerta), verde si más
+          if (diasHastaRevision <= 30) {
             bordeColor = '#ef4444'; // rojo
           }
         } catch(e) {
@@ -3292,9 +4095,7 @@ window.render_revisiones_rutas = async function(cadenaId, cadenaNombre) {
   }
 };
 
-// ═══════════════════════════════════════════════════════════
 //  REVISIONES PROGRAMADAS - VISTA DE TIENDAS (NIVEL 3)
-// ═══════════════════════════════════════════════════════════
 const ordenarTiendasRuta = lista => [...lista].sort((a, b) => {
   const oa = a.ordenRuta ?? Infinity, ob = b.ordenRuta ?? Infinity;
   return oa !== ob ? oa - ob : String(a.nombre || '').localeCompare(String(b.nombre || ''), 'es');
@@ -3304,7 +4105,7 @@ const ordenarTiendasRuta = lista => [...lista].sort((a, b) => {
 function calcularOrdenOptimo(pts) {
   const n = pts.length;
   const nodos = [OFICINA, ...pts];
-  const d = nodos.map(a => nodos.map(b => kmEntreCoordenadas(a.lat, a.lng, b.lat, b.lng) * FACTOR_CARETERA));
+  const d = nodos.map(a => nodos.map(b => kmEntreCoordenadas(a.lat, a.lng, b.lat, b.lng) * getFactorCarretera()));
   const largo = t => {
     let s = d[0][t[0]];
     for (let i = 1; i < t.length; i++) s += d[t[i - 1]][t[i]];
@@ -3353,7 +4154,7 @@ window.optimizarRutaTiendas = async function(rutaId, cadenaId, rutaNombre, caden
     const todos = await dbGetAll('clientes');
     const tiendas = ordenarTiendasRuta(todos.filter(c => String(c.rutaId ?? c.rutaid ?? '') === String(rutaId)));
     if (tiendas.length < 2) return showToast('La ruta necesita al menos 2 tiendas para optimizarla', 'warning');
-    showToast('Calculando el recorrido más corto…');
+    showToast('Calculando el recorrido más corto?');
 
     const sinCoord = [];
     for (const t of tiendas) {
@@ -3391,7 +4192,7 @@ window.optimizarRutaTiendas = async function(rutaId, cadenaId, rutaNombre, caden
 function kmCircuitoOrden(pts) {
   const nodos = [OFICINA, ...pts, OFICINA];
   let s = 0;
-  for (let i = 1; i < nodos.length; i++) s += kmEntreCoordenadas(nodos[i - 1].lat, nodos[i - 1].lng, nodos[i].lat, nodos[i].lng) * FACTOR_CARETERA;
+  for (let i = 1; i < nodos.length; i++) s += kmEntreCoordenadas(nodos[i - 1].lat, nodos[i - 1].lng, nodos[i].lat, nodos[i].lng) * getFactorCarretera();
   return s;
 }
 
@@ -3399,29 +4200,28 @@ window.render_revisiones_tiendas = async function(rutaId, rutaNombre, cadenaId, 
   const main = document.getElementById('mainContent');
   if (!main) return;
 
-  const clientes = await dbGetAll('clientes');
-  const tiendas = ordenarTiendasRuta(clientes.filter(c => String(c.rutaId ?? c.rutaid ?? '') === String(rutaId)));
+  const tiendas = await window.getTiendasDeRuta(rutaId, cadenaId);
   
   main.innerHTML = `
     <div class="page-revisiones">
       <div class="page-header">
         <div>
-          <button class="btn btn-primary btn-sm" onclick="window.render_revisiones_rutas('${cadenaId}', '${escapeHtml(cadenaNombre)}')"><i class="fas fa-arrow-left"></i> Volver a rutas</button>
+          <button class="btn btn-back btn-sm" onclick="window.render_revisiones_rutas('${escapeAttr(cadenaId)}', '${escapeAttr(cadenaNombre)}')"><i class="fas fa-arrow-left"></i> Volver a rutas</button>
         </div>
         <div>
           <h2 class="page-revisiones-title"><i class="fas fa-store"></i> Tiendas · ${escapeHtml(rutaNombre)}</h2>
           <p class="page-revisiones-subtitle">${tiendas.length} tienda${tiendas.length>1?'s':''} en esta ruta</p>
         </div>
         <div class="header-actions">
-          <button class="btn btn-primary btn-sm" onclick="window.optimizarRutaTiendas('${rutaId}', '${cadenaId}', '${escapeHtml(rutaNombre)}', '${escapeHtml(cadenaNombre)}')"><i class="fas fa-route"></i> Optimizar ruta</button>
-          <button class="btn btn-primary btn-sm" onclick="window.generarPDFRutaCompleta('${rutaId}', '${escapeHtml(rutaNombre)}', '${cadenaId}', '${escapeHtml(cadenaNombre)}')"><i class="fas fa-file-pdf"></i> PDF de ruta</button>
+          <button class="btn btn-primary btn-sm" onclick="window.optimizarRutaTiendas('${escapeAttr(rutaId)}', '${escapeAttr(cadenaId)}', '${escapeAttr(rutaNombre)}', '${escapeAttr(cadenaNombre)}')"><i class="fas fa-route"></i> Optimizar ruta</button>
+          <button class="btn btn-primary btn-sm" onclick="window.abrirFormularioRevisionRuta('${escapeAttr(rutaId)}', '${escapeAttr(rutaNombre)}', '${escapeAttr(cadenaId)}', '${escapeAttr(cadenaNombre)}')"><i class="fas fa-clipboard-check"></i> Formulario de revisión</button>
         </div>
       </div>
       <div id="tiendas-container" class="stats-grid"></div>
     </div>`;
 
   const container = document.getElementById('tiendas-container');
-  
+
   if (tiendas.length === 0) {
     container.innerHTML = '<p style="padding:20px;text-align:center;color:var(--gray);grid-column:1/-1;">No hay tiendas asignadas a esta ruta.</p>';
     return;
@@ -3438,16 +4238,69 @@ window.render_revisiones_tiendas = async function(rutaId, rutaNombre, cadenaId, 
       <div class="stat-info">
         <h3>${index + 1}. ${escapeHtml(tienda.nombre)}</h3>
         <p>${escapeHtml(tienda.direccion || 'Sin dirección')}</p>
-        ${esUltimaTienda ? '<small style="color:var(--warning)">Última tienda de la ruta</small>' : ''}
+        ${esUltimaTienda ? '<small style="color:var(--warning)">ultima tienda de la ruta</small>' : ''}
       </div>
       <div class="stat-actions">
-        <button class="btn btn-sm btn-outline" onclick="event.stopPropagation(); abrirGoogleMaps('${escapeHtml(tienda.direccion)}')"><i class="fas fa-map-marker-alt"></i> Maps</button>
-        <button class="btn btn-sm btn-primary" onclick="event.stopPropagation(); abrirInformeRevisionRuta('${rutaId}', '${escapeHtml(rutaNombre)}', '${cadenaId}', '${escapeHtml(cadenaNombre)}', '${tienda.id}', '${escapeHtml(tienda.nombre)}', ${esUltimaTienda})"><i class="fas fa-clipboard-check"></i> Informe</button>
+        <button class="btn btn-sm btn-outline" onclick="event.stopPropagation(); abrirGoogleMaps('${escapeAttr(tienda.direccion)}')"><i class="fas fa-map-marker-alt"></i> Maps</button>
+        <button class="btn btn-sm btn-primary" onclick="event.stopPropagation(); abrirInformeRevisionRuta('${escapeAttr(rutaId)}', '${escapeAttr(rutaNombre)}', '${escapeAttr(cadenaId)}', '${escapeAttr(cadenaNombre)}', '${escapeAttr(tienda.id)}', '${escapeAttr(tienda.nombre)}', ${esUltimaTienda})"><i class="fas fa-clipboard-check"></i> Informe</button>
       </div>
     `;
     card.addEventListener('click', () => abrirInformeRevisionRuta(rutaId, rutaNombre, cadenaId, cadenaNombre, tienda.id, tienda.nombre, esUltimaTienda));
     container.appendChild(card);
   });
+};
+
+// Abre el formulario de revisión de TODA la ruta, con el checklist por puerta
+// (Hallazgo / Correctivo / Resultado + fotos). Reutiliza el formulario HIPERBER
+// con todas las tiendas de la ruta, sin duplicar lógica ni botones.
+window.abrirFormularioRevisionRuta = async function(rutaId, rutaNombre, cadenaId, cadenaNombre) {
+  try {
+    const tiendas = await window.getTiendasDeRuta(rutaId, cadenaId);
+    if (!tiendas.length) return showToast('Esta ruta no tiene tiendas asignadas', 'warning');
+
+    const stores = [];
+    for (const tienda of tiendas) {
+      const doors = await dbGetByIndex('puertas', 'clienteId', tienda.id);
+      stores.push({
+        clienteId: tienda.id,
+        nombre: tienda.nombre,
+        direccion: tienda.direccion || '',
+        rutaId: String(rutaId),
+        rutaNombre: rutaNombre,
+        puertas: doors.length ? doors.map(door => ({
+          id: door.id,
+          nombre: door.nombre || door.tipoPuerta || door.tipo || 'Puerta',
+          tipo: door.tipoPuerta || door.tipo || '',
+          hallazgo: null, hallazgoTexto: '', hallazgoFotos: [],
+          correctivo: null, correctivoTexto: '', resultado: null
+        })) : [{
+          id: null, nombre: '', tipo: '',
+          hallazgo: null, hallazgoTexto: '', hallazgoFotos: [],
+          correctivo: null, correctivoTexto: '', resultado: null, nueva: true
+        }]
+      });
+    }
+
+    window.__hiperberReviewDraft = {
+      id: window.db.nextId('REV'),
+      chainId: String(rutaId),
+      chainName: cadenaNombre ? cadenaNombre + ' · ' + rutaNombre : rutaNombre,
+      stores
+    };
+
+    const form = '<div class="hiperber-form">' +
+      '<div class="form-group hiperber-date"><label for="hiperber-review-date">Fecha de revisión</label><input id="hiperber-review-date" type="date" value="' + new Date().toISOString().slice(0, 10) + '"></div>' +
+      '<div id="hiperber-stores" class="hiperber-stores"></div>' +
+      '</div>';
+    const footer = '<button type="button" class="btn btn-outline" onclick="cerrarFormularioRevision()">Cerrar</button>' +
+      '<button type="button" class="btn btn-primary" onclick="saveHiperberReviewForm()"><i class="fas fa-save"></i> Guardar revisión</button>';
+
+    openModal('Formulario de revisión · ' + rutaNombre, form, footer);
+    renderHiperberStores();
+  } catch (e) {
+    console.error('abrirFormularioRevisionRuta falló:', e);
+    showToast('No se pudo abrir el formulario: ' + e.message, 'error');
+  }
 };
 
 // Función para abrir Google Maps con la dirección
@@ -3491,19 +4344,16 @@ window.generarPDFRutaCompleta = async function(rutaId, rutaNombre, cadenaId, cad
 };
 
 // Función para abrir el informe de revisión de la ruta (usando formulario HIPERBER)
-window.abrirInformeRevisionRuta = function(rutaId, rutaNombre, cadenaId, cadenaNombre, tiendaId, tiendaNombre, esUltimaTienda = false) {
-  // Si es la última tienda, mostrar confirmación
-  if (esUltimaTienda) {
-    if (!confirm('Esta es la última tienda de la ruta. ¿Deseas completar la revisión de toda la ruta?')) {
-      return;
-    }
-  }
+window.abrirInformeRevisionRuta = async function(rutaId, rutaNombre, cadenaId, cadenaNombre, tiendaId, tiendaNombre, esUltimaTienda = false) {
+  // Buscar la tienda real para tener su dirección correcta
+  let tiendaReal = null;
+  try { tiendaReal = await dbGet('clientes', tiendaId); } catch (e) { console.warn('No se pudo cargar la tienda:', e); }
 
   // Crear un draft temporal para HIPERBER con solo esta tienda
   const tienda = {
     clienteId: tiendaId,
     nombre: tiendaNombre,
-    direccion: tiendaNombre,
+    direccion: tiendaReal?.direccion || '',
     rutaId: rutaId,
     rutaNombre: rutaNombre,
     puertas: [] // Se cargarán las puertas de esta tienda
@@ -3532,8 +4382,7 @@ window.abrirInformeRevisionRuta = function(rutaId, rutaNombre, cadenaId, cadenaN
       '<div id="hiperber-stores" class="hiperber-stores"></div>' +
       '</div>';
     
-    const footer = '<button type="button" class="btn btn-outline" onclick="closeModal()">Cancelar</button>' +
-      '<button type="button" class="btn btn-primary" onclick="closeModal();window.render_revisiones_tiendas(\'' + rutaId + '\', \'' + escapeHtml(rutaNombre) + '\', \'' + cadenaId + '\', \'' + escapeHtml(cadenaNombre) + '\')"><i class="fas fa-arrow-left"></i> Volver</button>' +
+    const footer = '<button type="button" class="btn btn-outline" onclick="cerrarFormularioRevision()">Cerrar</button>' +
       '<button type="button" class="btn btn-primary" onclick="saveHiperberReviewForm()"><i class="fas fa-save"></i> Guardar revisión</button>';
 
     openModal('Revisión · ' + tiendaNombre, form, footer);
@@ -3591,25 +4440,12 @@ window.buscarHistorialRevisiones=async function(){
   body.querySelectorAll('.btn-hist-rev-pdf').forEach(button=>button.addEventListener('click',()=>window.generatePDF_revision(button.dataset.revisionId)));
 };
 
-// ═══════════════════════════════════════════════════════════
 //  HELPERS PARA REVISIONES PROGRAMADAS
-// ═══════════════════════════════════════════════════════════
 
 async function getPuertasPorRuta(rutaId) {
-  const clientes = await dbGetByIndex('clientes', 'rutaId', rutaId);
-  const puertasFiltradas = [];
-
-  for (const cli of clientes) {
-    const cliPuertas = await dbGetByIndex('puertas', 'clienteId', cli.id);
-    for (const p of cliPuertas) {
-      puertasFiltradas.push({
-        ...p,
-        clienteNombre: cli.nombre
-      });
-    }
-  }
-
-  return puertasFiltradas.sort((a, b) => (a.clienteNombre || '').localeCompare(b.clienteNombre || ''));
+  // Delegado en el helper único (utils.js) para que panel, vistas y formulario
+  // usen exactamente el mismo criterio de tiendas/puertas.
+  return window.getPuertasDeRuta ? window.getPuertasDeRuta(rutaId) : [];
 }
 
 function getEstadoPuerta(puerta) {
@@ -3623,6 +4459,8 @@ function getEstadoPuerta(puerta) {
 
   if (diffDias < 0) {
     return { texto: `Vencida ${Math.abs(diffDias)}d`, clase: 'badge-red' };
+  } else if (diffDias === 0) {
+    return { texto: 'Vence hoy', clase: 'badge-red' };
   } else if (diffDias <= 30) {
     return { texto: `En ${diffDias}d`, clase: 'badge-yellow' };
   } else {
@@ -3630,7 +4468,7 @@ function getEstadoPuerta(puerta) {
   }
 }
 
-async function openHiperberReviewForm(chainId) {
+async function openHiperberReviewForm(chainId, fechaPreseleccionada, opciones={}) {
   const chain = await getCadenaById(chainId);
   if (!chain) return showToast('No se encontró la cadena HIPERBER', 'error');
 
@@ -3639,16 +4477,23 @@ async function openHiperberReviewForm(chainId) {
     getRutasByCadena(chain.id)
   ]);
 
-  const routeIds = new Set(routes.map(r => String(r.id)));
-  const supermarkets = ordenarTiendasRuta(clients.filter(client =>
-    String(client.cadenaId ?? client.cadenaid ?? '') === String(chain.id) ||
-    String(client.padreId ?? client.padreid ?? '') === String(chain.id) ||
-    routeIds.has(String(client.rutaId ?? client.rutaid ?? ''))
-  ));
+  // Si el usuario pidió revisar una ruta concreta, SOLO sus tiendas (por rutaId)
+  const rutaFiltro=opciones&&opciones.rutaId?String(opciones.rutaId):null;
+  const rutasVisibles=rutaFiltro?routes.filter(r=>String(r.id)===rutaFiltro):routes;
+  const routeIds = new Set(rutasVisibles.map(r => String(r.id)));
+  // Clientes: si hay filtro de ruta, exclusivamente los vinculados a esa ruta;
+  // si no, los de toda la cadena (cadenaId/padreId o pertenecientes a sus rutas).
+  const supermarkets = rutaFiltro
+    ? ordenarTiendasRuta(clients.filter(c=>String(c.rutaId??c.rutaid??'')===rutaFiltro))
+    : ordenarTiendasRuta(clients.filter(client =>
+      String(client.cadenaId ?? client.cadenaid ?? '') === String(chain.id) ||
+      String(client.padreId ?? client.padreid ?? '') === String(chain.id) ||
+      routeIds.has(String(client.rutaId ?? client.rutaid ?? ''))
+    ));
 
   // Mapa rutaId → nombre de ruta
   const routeNameById = {};
-  routes.forEach(r => { routeNameById[String(r.id)] = r.nombre; });
+  rutasVisibles.forEach(r => { routeNameById[String(r.id)] = r.nombre; });
 
   const stores = [];
   for (const client of supermarkets) {
@@ -3659,7 +4504,7 @@ async function openHiperberReviewForm(chainId) {
       nombre: client.nombre,
       direccion: client.direccion || '',
       rutaId: rid,
-      rutaNombre: routeNameById[rid] || '⚠️ Sin ruta asignada',
+      rutaNombre: routeNameById[rid] || '📍 Sin ruta asignada',
       puertas: doors.length ? doors.map(door => ({
         id: door.id,
         nombre: door.nombre || door.tipoPuerta || door.tipo || 'Puerta',
@@ -3678,19 +4523,79 @@ async function openHiperberReviewForm(chainId) {
     id: window.db.nextId('REV'),
     chainId: String(chain.id),
     chainName: chain.nombre,
+    rutaId: rutaFiltro,
     stores
   };
 
   const form = '<div class="hiperber-form">' +
-    '<div class="form-group hiperber-date"><label for="hiperber-review-date">Fecha de revisión</label><input id="hiperber-review-date" type="date" value="' + new Date().toISOString().slice(0, 10) + '"></div>' +
+    '<div class="form-group hiperber-date"><label for="hiperber-review-date">Fecha de revisión</label><input id="hiperber-review-date" type="date" value="' + (fechaPreseleccionada || new Date().toISOString().slice(0, 10)) + '"></div>' +
     '<div id="hiperber-stores" class="hiperber-stores"></div>' +
     '</div>';
-  const footer = '<button type="button" class="btn btn-primary" onclick="closeModal()">Cancelar</button>' +
+  const footer = '<button type="button" class="btn btn-outline" onclick="cerrarFormularioRevision()">Cerrar</button>' +
     '<button type="button" class="btn btn-primary" onclick="saveHiperberReviewForm()"><i class="fas fa-save"></i> Guardar revisión</button>';
 
-  openModal('Revisión · ' + chain.nombre, form, footer);
+  openModal('Revisión · ' + chain.nombre + (rutaFiltro?' · '+(routeNameById[rutaFiltro]||'Ruta'):''), form, footer);
   renderHiperberStores();
 }
+window.openHiperberReviewForm = openHiperberReviewForm;
+// snico punto de cierre: lo usan el botón Cerrar, la o. de la cabecera y Escape.
+window.cerrarFormularioRevision = function() {
+  window.__hiperberReviewDraft = null;
+  window.__doticsVisitDraft = null;
+  // Cierra el modal estándar y, por si acaso, cualquier overlay de revisión que quede abierto
+  closeModal();
+  document.getElementById('overlayRevision')?.remove();
+  document.getElementById('modal-revision-overlay')?.remove();
+  if (typeof revisionPuertaActual !== 'undefined') revisionPuertaActual = null;
+};
+
+// Formulario de revisión para un CLIENTE sNICO """"""
+// Reutiliza el motor del formulario Hiperber (checklist por puerta:
+// Hallazgo / Correctivo / Resultado + fotos) con las puertas del cliente.
+window.abrirFormularioRevisionCliente = async function(clienteId, fechaPreseleccionada) {
+  try {
+    const cliente = await dbGet('clientes', clienteId);
+    if (!cliente) return showToast('No se encontró el cliente', 'error');
+    const puertas = await dbGetByIndex('puertas', 'clienteId', clienteId);
+    if (!puertas.length) return showToast('Este cliente no tiene puertas registradas', 'warning');
+
+    const store = {
+      clienteId: String(clienteId),
+      nombre: cliente.nombre,
+      direccion: cliente.direccion || '',
+      rutaId: null,
+      rutaNombre: '',
+      puertas: puertas.map(door => ({
+        id: door.id,
+        nombre: door.nombre || door.tipoPuerta || door.tipo || 'Puerta',
+        tipo: door.tipoPuerta || door.tipo || '',
+        hallazgo: null, hallazgoTexto: '', hallazgoFotos: [],
+        correctivo: null, correctivoTexto: '', resultado: null
+      }))
+    };
+
+    window.__hiperberReviewDraft = {
+      id: window.db.nextId('REV'),
+      chainId: String(clienteId),
+      chainName: cliente.nombre,
+      esClienteUnico: true,
+      stores: [store]
+    };
+
+    const form = '<div class="hiperber-form">' +
+      '<div class="form-group hiperber-date"><label for="hiperber-review-date">Fecha de revisión</label><input id="hiperber-review-date" type="date" value="' + (fechaPreseleccionada || new Date().toISOString().slice(0, 10)) + '"></div>' +
+      '<div id="hiperber-stores" class="hiperber-stores"></div>' +
+      '</div>';
+    const footer = '<button type="button" class="btn btn-outline" onclick="cerrarFormularioRevision()">Cerrar</button>' +
+      '<button type="button" class="btn btn-primary" onclick="saveHiperberReviewForm()"><i class="fas fa-save"></i> Guardar revisión</button>';
+
+    openModal('Revisión · ' + cliente.nombre, form, footer);
+    renderHiperberStores();
+  } catch (e) {
+    console.error('abrirFormularioRevisionCliente falló:', e);
+    showToast('No se pudo abrir el formulario: ' + e.message, 'error');
+  }
+};
 function renderHiperberStores() {
   const draft = window.__hiperberReviewDraft;
   const container = document.getElementById('hiperber-stores');
@@ -3718,13 +4623,13 @@ function renderHiperberStores() {
       (store.direccion ? '<span class="hiperber-store-addr"><i class="fas fa-location-dot"></i> ' + escapeHtml(store.direccion) + '</span>' : '') + '</div>' +
       '<div class="table-wrapper hiperber-table-wrapper"><table class="hiperber-checklist"><thead><tr><th>Puerta</th><th>HALLAZGO</th><th>CORRECTIVO</th><th>RESULTADO</th></tr></thead><tbody>' +
         store.puertas.map((door, doorIndex) =>
-          '<tr><td data-label="Puerta"><input class="hiperber-door-name" type="text" aria-label="Puerta de ' + escapeHtml(store.nombre) + '" placeholder="' + (door.nueva ? 'Añade una puerta' : 'Nombre de la puerta') + '" value="' + escapeHtml(door.nombre) + '" oninput="updateHiperberDoor(' + storeIndex + ',' + doorIndex + ',\'nombre\',this.value)"><small>' + escapeHtml(door.tipo || '') + '</small></td>' +
+          '<tr><td data-label="Puerta"><input class="hiperber-door-name" type="text" readonly' + (door.nombre ? '' : ' data-empty="1"') + ' aria-label="Puerta de ' + escapeHtml(store.nombre) + '" value="' + escapeHtml(door.nombre) + '" placeholder="Sin nombre"' + '>' + '<small>' + escapeHtml(door.tipo || '') + '</small></td>' +
             hiperberDecisionCell(storeIndex, doorIndex, door, 'hallazgo', [['ok','OK'],['x','X']]) +
             hiperberDecisionCell(storeIndex, doorIndex, door, 'correctivo', [['ok','OK'],['hecho','✔'],['x','X']]) +
             hiperberDecisionCell(storeIndex, doorIndex, door, 'resultado', [['ok','OK'],['x','X']]) + '</tr>'
         ).join('') +
       '</tbody></table></div>' +
-      '<button type="button" class="btn btn-primary btn-sm hiperber-add-door" onclick="addHiperberDoor(' + storeIndex + ')"><i class="fas fa-plus"></i> Añadir puerta</button>' +
+      '' +
     '</section>';
 
   container.innerHTML = groups.map(g =>
@@ -3740,7 +4645,7 @@ function hiperberDecisionCell(storeIndex,doorIndex,door,field,options){
   const state=door[field]||'';
   let detail='';
   if(field==='hallazgo'){
-    const photos=(door.hallazgoFotos||[]).map((photo,index)=>'<span class="hiperber-photo-name">Foto '+(index+1)+' <button type="button" aria-label="Quitar foto" onclick="removeHiperberFindingPhoto('+storeIndex+','+doorIndex+','+index+')">×</button></span>').join('');
+    const photos=(door.hallazgoFotos||[]).map((photo,index)=>'<span class="hiperber-photo-name">Foto '+(index+1)+' <button type="button" aria-label="Quitar foto" onclick="removeHiperberFindingPhoto('+storeIndex+','+doorIndex+','+index+')">-</button></span>').join('');
     detail='<div class="hiperber-decision-detail" data-detail-for="hallazgo" '+(state==='x'?'':'hidden')+'><textarea rows="2" aria-label="Describir hallazgo" placeholder="Describe el desperfecto" oninput="updateHiperberDoor('+storeIndex+','+doorIndex+',\'hallazgoTexto\',this.value)">'+escapeHtml(door.hallazgoTexto)+'</textarea><button type="button" class="btn btn-primary btn-sm" onclick="openHiperberFindingCamera('+storeIndex+','+doorIndex+')"><i class="fas fa-camera"></i> Hacer foto</button><div class="hiperber-photo-list">'+photos+'</div></div>';
   }else if(field==='correctivo'){
     const detailLabel=state==='hecho'?'Trabajo realizado':'Acción pendiente';
@@ -3765,10 +4670,12 @@ window.updateHiperberDoorDecision=function(storeIndex,doorIndex,field,value,inpu
     if(value==='ok'){
       door.hallazgoTexto='';door.hallazgoFotos=[];door.correctivo='ok';door.correctivoTexto='';door.resultado='ok';
     }else{
-      door.correctivo=null;door.correctivoTexto='';door.resultado=null;
+      // X en hallazgo arrastra X a correctivo y resultado automáticamente
+      door.correctivo='x';door.correctivoTexto='';door.resultado='x';
     }
-  }else if(field==='correctivo'&&value==='hecho'){
-    door.resultado='ok';
+  }else if(field==='correctivo'){
+    if(value==='hecho') door.resultado='ok';
+    else if(value==='x') door.resultado='x';
   }
   row.querySelectorAll('.hiperber-choice-group').forEach(group=>{
     const groupField=group.querySelector('input')?.name.split('-').pop();
@@ -3828,7 +4735,7 @@ window.addHiperberDoor=function(storeIndex){
 async function downloadRevisionPDFAfterSave(revisionId){
   let pdf;
   try{
-    pdf=await window.generatePDF_revision(revisionId);
+    pdf=await window.generatePDF_revision(revisionId,{download:true});
   }catch(error){
     console.error('No se pudo generar el PDF de la revisión guardada:',error);
     showToast('Revisión guardada, pero no se pudo generar el PDF','error');
@@ -3864,19 +4771,81 @@ async function downloadRevisionPDFAfterSave(revisionId){
   }
 }
 
+/**
+ * Reprograma las puertas y rutas que cubre una revisión HIPERBER guardada.
+ * Para cada puerta revisada: ultimaRevision = fecha, proximaRevision = fecha + frecuencia de su ruta.
+ * Para cada ruta con todas sus tiendas revisadas: ultimaRevision/proximaRevision de la ruta.
+ */
+// Reprogramación de puertas para revisión de CLIENTE sNICO (sin cadena/ruta):
+// actualiza últimaRevision y calcula la próxima según la frecuencia de cada puerta.
+async function reprogramarPuertasClientes(stores, fecha){
+  for(const store of stores){
+    for(const door of store.puertas){
+      try{
+        const puerta=await dbGet('puertas',door.id);
+        if(!puerta) continue;
+        const frecuencia=puerta.frecuenciaMeses||puerta.frecuencia||12;
+        const proxima=new Date(fecha);
+        proxima.setMonth(proxima.getMonth()+Number(frecuencia)||12);
+        await dbPut('puertas',{
+          ...puerta,
+          ultimaRevision:fecha,
+          fechaRevision:fecha,
+          proximaRevision:proxima.toISOString().slice(0,10)
+        });
+      }catch(e){ console.warn('No se pudo reprogramar puerta',door.id,e); }
+    }
+  }
+}
+
+async function reprogramarTrasRevisionHIPERBER(draft, fecha){
+  try{
+    const fechaBase=String(fecha||'').slice(0,10);
+    if(!fechaBase) return;
+    const clientes=await dbGetAll('clientes');
+    const rutas=await dbGetAll('rutas');
+    const clienteById=new Map(clientes.map(c=>[String(c.id),c]));
+    const rutaById=new Map(rutas.map(r=>[String(r.id),r]));
+    const rutaIds=new Set();
+    // 1) Puertas: marcar la última revisión y calcular la próxima según la frecuencia de la ruta
+    for(const store of draft.stores||[]){
+      const cliente=clienteById.get(String(store.clienteId));
+      const rutaId=String(cliente?.rutaId??cliente?.rutaid??'');
+      const ruta=rutaId?rutaById.get(rutaId):null;
+      const frecuencia=Number(ruta?.frecuenciaMeses??ruta?.frecuenciameses)||6;
+      const puertas=await dbGetByIndex('puertas','clienteId',store.clienteId);
+      for(const puerta of puertas){
+        await dbPut('puertas',{...puerta,ultimaRevision:fechaBase,proximaRevision:calcularProximaRevision(fechaBase,frecuencia)});
+      }
+      if(rutaId) rutaIds.add(rutaId);
+    }
+    // 2) Rutas: si todas las tiendas de la ruta fueron revisadas, avanzar la programación de la ruta
+    for(const rutaId of rutaIds){
+      const ruta=rutaById.get(rutaId);
+      if(!ruta) continue;
+      const tiendasRuta=clientes.filter(c=>String(c.rutaId??c.rutaid??'')===String(rutaId));
+      const revisadas=new Set((draft.stores||[]).map(store=>String(store.clienteId)));
+      const todasRevisadas=tiendasRuta.every(t=>revisadas.has(String(t.id)));
+      if(!todasRevisadas) continue;
+      const frecuencia=Number(ruta.frecuenciaMeses??ruta.frecuenciameses)||6;
+      await dbPut('rutas',{...ruta,ultimaRevision:fechaBase,proximaRevision:calcularProximaRevision(fechaBase,frecuencia)});
+    }
+  }catch(error){
+    console.error('reprogramarTrasRevisionHIPERBER falló:',error);
+    showToast('Revisión guardada, pero no se pudo reprogramar puertas/rutas: '+error.message,'warning');
+  }
+}
+
 window.saveHiperberReviewForm=async function(){
   const draft=window.__hiperberReviewDraft;
   if(!draft) return;
   const fecha=document.getElementById('hiperber-review-date').value;
   if(!fecha) return showToast('Selecciona la fecha de revisión','error');
-  const stores=draft.stores.map(store=>({...store,puertas:store.puertas.filter(door=>door.id||door.nombre.trim())}));
-  if(stores.some(store=>store.puertas.some(door=>door.nueva&&!door.nombre.trim()))){
-    showToast('Escribe el nombre de cada puerta nueva','error');
-    return;
-  }
+  // El nombre de la puerta es de solo lectura: solo se consideran puertas existentes en BD
+  const stores=draft.stores.map(store=>({...store,puertas:store.puertas.filter(door=>door.id)}));
   const doors=stores.flatMap(store=>store.puertas.map(door=>({...door,clienteId:store.clienteId,clienteNombre:store.nombre})));
   if(!doors.length){
-    showToast('Añade al menos una puerta para revisar','error');
+    showToast('No hay puertas registradas en estas tiendas todavía','error');
     return;
   }
   if(doors.some(door=>!door.hallazgo||!door.correctivo||!door.resultado)){
@@ -3891,25 +4860,38 @@ window.saveHiperberReviewForm=async function(){
     showToast('Describe el correctivo realizado','error');
     return;
   }
+  // Subir fotos a storage antes de guardar
+  await guardarFotosRevision();
   const items=doors.map(door=>({
     concepto:door.clienteNombre+' · '+door.nombre,clienteId:door.clienteId,clienteNombre:door.clienteNombre,puertaId:door.id,tipoPuerta:door.tipo,
     hallazgo:door.hallazgo==='ok'?'OK':'X',hallazgoEstado:door.hallazgo,hallazgoTexto:door.hallazgoTexto,hallazgoFotos:door.hallazgoFotos||[],
     correctivo:door.correctivo==='hecho'?door.correctivoTexto:door.correctivo==='x'?'X':'OK',correctivoEstado:door.correctivo,correctivoTexto:door.correctivoTexto,
     resultado:door.resultado==='ok'?'OK':'X',resultadoEstado:door.resultado
   }));
-  const notas=JSON.stringify({form:'HIPERBER_REVISION_V1',cadenaId:draft.chainId,cadena:draft.chainName,supermercados:stores.map(store=>({id:store.clienteId,nombre:store.nombre})),rutaId:draft.chainId,rutaNombre:draft.chainName});
+  const notas=JSON.stringify({form:'HIPERBER_REVISION_V1',cadenaId:draft.chainId,cadena:draft.chainName,supermercados:stores.map(store=>({id:store.clienteId,nombre:store.nombre,rutaId:store.rutaId||null})),rutaId:draft.chainId,rutaNombre:draft.chainName,tecnicos:window.authState?.employee?.nombre||''});
   try{
     await dbAdd('revisiones',{
-      id:draft.id,puertaId:null,clienteId:null,fecha,tecnicoId:window.authState?.employee?.id||null,items,
+      id:draft.id,puertaId:null,clienteId:null,fecha,tecnicoId:window.authState?.employee?.id||null,tecnicoNombre:window.authState?.employee?.nombre||null,items,
       hallazgos:doors.filter(door=>door.hallazgo==='x').map(door=>door.clienteNombre+' · '+door.nombre+': '+door.hallazgoTexto).join(' | '),
       correctivo:doors.filter(door=>door.correctivo==='hecho').map(door=>door.clienteNombre+' · '+door.nombre+': '+door.correctivoTexto).join(' | '),
       estadoTrasRevision:doors.some(door=>door.resultado==='x')?'fuera_servicio':'operativa',notas,createdAt:new Date().toISOString()
     });
     window.__hiperberReviewDraft=null;
     closeModal();
-    showToast('Revisión HIPERBER guardada');
-    await downloadRevisionPDFAfterSave(draft.id);
-    
+    showToast('Revisión guardada');
+    if(window.__revRefrescar){
+      try{ await window.__revRefrescar(); }catch(e){}
+    }
+  // Si es una revisión de cliente único (sin cadena), se reprograma solo la puerta del cliente.
+  if(draft.esClienteUnico){
+    try{
+      await reprogramarPuertasClientes(draft.stores, fecha);
+    }catch(e){ console.warn('Reprogramación cliente único falló:', e); }
+  }
+  // Reprogramar puertas y rutas afectadas por la revisión completada
+  else await reprogramarTrasRevisionHIPERBER(draft, fecha);
+  await downloadRevisionPDFAfterSave(draft.id);
+
     // Si es la última tienda, generar PDF consolidado de la ruta
     if(draft.esUltimaTienda && draft.chainId) {
       try {
@@ -3924,7 +4906,7 @@ window.saveHiperberReviewForm=async function(){
   }
 };
 
-window.openDoticsMaintenanceForm = async function(chainId, doorId=null){
+window.openDoticsMaintenanceForm = async function(chainId, doorId=null, fechaPreseleccionada=null){
   let chain=await getCadenaById(chainId);
   if(!chain){
     const client=await dbGet('clientes',chainId);
@@ -3949,19 +4931,19 @@ window.openDoticsMaintenanceForm = async function(chainId, doorId=null){
     }]
   };
   const today=new Date().toISOString().slice(0,10);
-  const form='<div class="dotics-form">'+
-    '<div class="dotics-form-intro"><strong>'+escapeHtml(chain.nombre)+'</strong><span>Informe visita de mantenimiento</span></div>'+
-    '<div class="dotics-form-grid">'+
-      '<div class="form-group"><label for="dotics-contract">N.º contrato mantenimiento</label><input id="dotics-contract" type="text" autocomplete="off"></div>'+
-      '<div class="form-group"><label for="dotics-intervention">N.º intervención</label><input id="dotics-intervention" type="text" autocomplete="off" placeholder="Escribe el número de intervención"></div>'+
-      '<div class="form-group"><label for="dotics-technicians">Técnico/s</label><input id="dotics-technicians" type="text" list="dotics-employees" placeholder="Nombre/s del técnico" '+(window.isTechnician?.()?'value="'+escapeHtml(window.authState.employee?.nombre||'')+'" readonly':'')+'><datalist id="dotics-employees">'+employees.map(e=>'<option value="'+escapeHtml(e.nombre)+'">').join('')+'</datalist></div>'+
-      '<div class="form-group"><label for="dotics-date">Fecha</label><input id="dotics-date" type="date" value="'+today+'"></div>'+
+  const form='<div class="dotics-form revision-form">'+
+    '<div class="form-header"><div class="form-header-icon"><i class="fas fa-clipboard-check"></i></div><div class="form-header-text"><strong>'+escapeHtml(chain.nombre)+'</strong><span>Informe visita de mantenimiento</span></div></div>'+
+    '<div class="form-grid">'+
+      '<div class="form-group"><label for="dotics-contract">N.º contrato mantenimiento</label><input id="dotics-contract" type="text" class="input" autocomplete="off" placeholder="Opcional"></div>'+
+      '<div class="form-group"><label for="dotics-intervention">N.º intervención</label><input id="dotics-intervention" type="text" class="input" autocomplete="off" placeholder="Escribe el número de intervención"></div>'+
+      '<div class="form-group"><label for="dotics-technicians">Técnico/s</label><input id="dotics-technicians" type="text" class="input" list="dotics-employees" placeholder="Nombre/s del técnico" '+(window.isTechnician?.()?'value="'+escapeHtml(window.authState.employee?.nombre||'')+'" readonly':'')+'><datalist id="dotics-employees">'+employees.map(e=>'<option value="'+escapeHtml(e.nombre)+'">').join('')+'</datalist></div>'+
+      '<div class="form-group"><label for="dotics-date">Fecha</label><input id="dotics-date" type="date" class="input" value="'+(fechaPreseleccionada||today)+'"></div>'+
     '</div>'+
-    '<div class="dotics-lines-heading"><div><h3>Equipos revisados</h3><p>Indica un estado por equipo; añade foto si está operativo o no se debe usar.</p></div><button type="button" class="btn btn-outline" onclick="addDoticsVisitLine()"><i class="fas fa-plus"></i> Añadir equipo</button></div>'+
+    '<div class="section-header"><div><h3>Equipos revisados</h3><p>Indica un estado por equipo; añade foto si está operativo o no se debe usar.</p></div><button type="button" class="btn btn-outline btn-sm" onclick="addDoticsVisitLine()"><i class="fas fa-plus"></i> Añadir equipo</button></div>'+
     '<div id="dotics-visit-lines" class="dotics-line-list"></div>'+
-    '<div class="form-group dotics-general-notes"><label for="dotics-notes">Observaciones generales</label><textarea id="dotics-notes" rows="3" placeholder="Observaciones de la visita"></textarea></div>'+
+    '<div class="form-group"><label for="dotics-notes">Observaciones generales</label><textarea id="dotics-notes" rows="3" class="input" placeholder="Observaciones de la visita"></textarea></div>'+
   '</div>';
-  const footer='<button type="button" class="btn btn-primary" onclick="closeModal()">Cancelar</button>'+ 
+  const footer='<button type="button" class="btn btn-outline" onclick="cerrarFormularioRevision()">Cerrar</button>'+
     '<button type="button" class="btn btn-primary" onclick="saveDoticsMaintenanceForm()"><i class="fas fa-save"></i> Guardar informe</button>';
   openModal('Informe visita de mantenimiento',form,footer);
   renderDoticsVisitLines();
@@ -3977,15 +4959,15 @@ function renderDoticsVisitLines(){
     ).join('');
     const photoField=line.estado==='operativo'||line.estado==='no_usar'
       ? '<div class="dotics-photo-field"><label>Fotos del equipo</label><div class="dotics-photo-actions">'+
-          '<button type="button" class="btn btn-primary btn-sm" onclick="openDoticsCamera('+index+')"><i class="fas fa-camera"></i> Hacer foto</button>'+ 
-          '<button type="button" class="btn btn-primary btn-sm" onclick="selectDoticsPhotoFile('+index+')"><i class="fas fa-image"></i> Seleccionar archivo</button>'+ 
+          '<button type="button" class="btn btn-primary btn-sm" onclick="openDoticsCamera('+index+')"><i class="fas fa-camera"></i> Hacer foto</button>'+
+          '<button type="button" class="btn btn-primary btn-sm" onclick="selectDoticsPhotoFile('+index+')"><i class="fas fa-image"></i> Seleccionar archivo</button>'+
           '<input id="dotics-camera-'+index+'" class="dotics-file-input" type="file" accept="image/*" capture="environment" onchange="addDoticsVisitPhoto('+index+',this)">'+
           '<input id="dotics-file-'+index+'" class="dotics-file-input" type="file" accept="image/*" onchange="addDoticsVisitPhoto('+index+',this)">'+
         '</div><div class="dotics-photo-previews">'+photos+'</div></div>'
       : '';
     return '<section class="dotics-line-card"><div class="dotics-line-title"><h4>Equipo '+(index+1)+'</h4>'+(draft.lines.length>1?'<button type="button" class="btn btn-outline btn-icon" aria-label="Eliminar equipo '+(index+1)+'" onclick="removeDoticsVisitLine('+index+')"><i class="fas fa-trash"></i></button>':'')+'</div>'+
       '<div class="dotics-line-fields">'+
-        '<div class="form-group"><label for="dotics-type-'+index+'">Tipo producto</label><select id="dotics-type-'+index+'" onchange="updateDoticsVisitLine('+index+',\'tipoProducto\',this.value)"><option value="">— Seleccionar —</option>'+draft.productTypes.map(type=>'<option value="'+type+'" '+(line.tipoProducto===type?'selected':'')+'>'+type+'</option>').join('')+'</select></div>'+
+        '<div class="form-group"><label for="dotics-type-'+index+'">Tipo producto</label><select id="dotics-type-'+index+'" onchange="updateDoticsVisitLine('+index+',\'tipoProducto\',this.value)"><option value="">— Seleccionar</option>'+draft.productTypes.map(type=>'<option value="'+type+'" '+(line.tipoProducto===type?'selected':'')+'>'+type+'</option>').join('')+'</select></div>'+
         '<div class="form-group"><label for="dotics-name-'+index+'">Denominación cliente</label><input id="dotics-name-'+index+'" type="text" value="'+escapeHtml(line.denominacionCliente)+'" oninput="updateDoticsVisitLine('+index+',\'denominacionCliente\',this.value)"></div>'+
         '<div class="form-group"><label for="dotics-serial-'+index+'">N.º de serie</label><input id="dotics-serial-'+index+'" type="text" value="'+escapeHtml(line.numeroSerie)+'" oninput="updateDoticsVisitLine('+index+',\'numeroSerie\',this.value)"></div>'+
         '<fieldset class="dotics-state-field"><legend>Estado del equipo</legend><div class="dotics-state-options">'+
@@ -4060,7 +5042,12 @@ window.addDoticsVisitPhoto=async function(index,input){
   const line=window.__doticsVisitDraft?.lines[index];
   if(!file||!line) return;
   try{
-    line.fotos=[await compressDoticsPhoto(file)];
+    line.fotos=line.fotos||[];
+    if(line.fotos.length>=10){
+      showToast('Máximo 10 fotos por equipo','error');
+      return;
+    }
+    line.fotos.push(await compressDoticsPhoto(file));
     renderDoticsVisitLines();
   }catch(error){
     showToast(error.message||'No se pudo procesar la foto','error');
@@ -4134,7 +5121,7 @@ window.saveDoticsMaintenanceForm=async function(){
     showToast('No se pudo guardar el informe: '+error.message,'error');
   }
 };
-// ── Bloque final de pages.js ──
+// Bloque final de pages.js
 // IMPORTANTE: Object.assign para fusionar (no sobreescribir) lo que db.js ya expuso
 // (render_informesKms, verMensual, verDetalleVehiculo, generarPDF expuestos desde pages_informesKms.js)
 
@@ -4173,7 +5160,7 @@ async function showCadenaForm(editId = null) {
         <textarea id="form-cadena-descripcion" class="input" rows="3" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:6px;font-size:15px;">${escapeHtml(cadena.descripcion || cadena.nota || '')}</textarea>
       </div>
     </div>`;
-  
+
   footer.innerHTML = `
     <button class="btn btn-outline" onclick="closeModal()">Cancelar</button>
     <button class="btn btn-primary" id="btn-save-cadena">${editId ? 'Actualizar' : 'Crear'}</button>`;
@@ -4273,16 +5260,23 @@ async function getRutaById(id) {
  */
 function normalizarRuta(r) {
   if (!r) return null;
+  const ultimaRevision = r.ultimaRevision ?? r.ultimorevision ?? null;
+  const frecuencia = r.frecuenciaMeses ?? r.frecuenciameses ?? 6;
+  const proxima = r.proximaRevision ?? r.proximarevision ?? calcularProximaRevision(ultimaRevision, frecuencia);
   return {
     id: r.id,
     nombre: r.nombre || '',
-    cadenaid: r.cadenaid || null,
-    frecuenciameses: r.frecuenciameses || 6,
+    cadenaid: r.cadenaid ?? r.cadenaId ?? null,
+    cadenaId: r.cadenaId ?? r.cadenaid ?? null,
+    frecuenciaMeses: frecuencia,
+    frecuenciameses: frecuencia,
     orden: r.orden ?? 0,
-    ultimorevision: r.ultimorevision || null,
-    proximarevision: r.proximarevision || calcularProximaRevision(r.ultimorevision, r.frecuenciameses),
-    createdat: r.createdat || new Date().toISOString(),
-    updatedat: r.updatedat || new Date().toISOString()
+    ultimaRevision,
+    ultimorevision: ultimaRevision,
+    proximaRevision: proxima,
+    proximarevision: proxima,
+    createdat: r.createdat || r.created_at || new Date().toISOString(),
+    updatedat: r.updatedat || r.updated_at || new Date().toISOString()
   };
 }
 
@@ -4338,7 +5332,7 @@ async function render_rutas(mainOrChainId, requestedChainId) {
   } else {
     cadenaId = window.getCurrentCadenId() || localStorage.getItem('cadenaId') || null;
   }
-  
+
   if (!cadenaId) {
     main.innerHTML = '<p style="text-align:center;color:var(--gray);margin-top:40px;">Selecciona una cadena primero.</p>';
     return;
@@ -4364,7 +5358,7 @@ async function render_rutas(mainOrChainId, requestedChainId) {
           <i class="fas fa-chevron-right" aria-hidden="true"></i>
           <span aria-current="page">Rutas</span>
         </nav>
-        <h2>🛣️ Rutas</h2>
+        <h2>🚗 Rutas</h2>
       </div>
       <div class="header-actions">
         ${esDotics?'<button class="btn btn-outline" id="btn-dotics-visit"><i class="fas fa-clipboard-check"></i> Formulario de revisión</button>':''}
@@ -4429,15 +5423,15 @@ async function render_rutas(mainOrChainId, requestedChainId) {
         </div>
         <div class="card-body" style="padding:12px 20px;">
           <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;font-size:13px;color:var(--text-muted);">
-            <div><strong>Última revisión:</strong> ${ultima}</div>
+            <div><strong>ultima revisión:</strong> ${ultima}</div>
             <div><strong>Próxima:</strong> ${proxima}</div>
             <div><strong>Frecuencia:</strong> ${rutaNormalizada.frecuenciaMeses} meses</div>
           </div>
         </div>
         <div style="padding:12px 20px;border-top:1px solid var(--border);display:flex;gap:8px;">
-          <button class="btn btn-sm btn-outline" onclick="showRutaForm('${ruta.id}')">✏️ Editar</button>
-          <button class="btn btn-sm btn-outline" onclick="render_clientes_ruta('${ruta.id}')">👥 Clientes</button>
-          <button class="btn btn-sm btn-primary" onclick="optimizarRutaTiendas('${escapeHtml(ruta.id)}','${escapeHtml(cadenaId)}','${escapeHtml(ruta.nombre)}','')"><i class="fas fa-route"></i> Optimizar</button>
+          <button type="button" class="btn btn-sm btn-outline" onclick="showRutaForm('${escapeHtml(ruta.id)}')">✏️ Editar</button>
+          <button class="btn btn-sm btn-outline" onclick="render_clientes_ruta('${escapeHtml(ruta.id)}')">Clientes</button>
+          <button type="button" class="btn btn-sm btn-primary" onclick="optimizarRutaTiendas('${escapeHtml(ruta.id)}','${escapeHtml(cadenaId)}','${escapeAttr(ruta.nombre)}','')"><i class="fas fa-route"></i> Optimizar</button>
           <button type="button" class="btn btn-sm btn-danger" onclick="deleteRuta('${escapeHtml(ruta.id)}','${escapeHtml(cadenaId)}')"><i class="fas fa-trash"></i> Borrar</button>
         </div>
       </div>`;
@@ -4445,7 +5439,7 @@ async function render_rutas(mainOrChainId, requestedChainId) {
 
   document.getElementById('rutas-lista').innerHTML = html;
 
-  // ✅ Botón Nueva Ruta
+  // o. Botón Nueva Ruta
   document.getElementById('btn-nueva-ruta').onclick = () => showRutaForm(null, cadenaId);
 }
 
@@ -4484,10 +5478,10 @@ async function render_clientes_ruta(rutaid) {
           <i class="fas fa-chevron-right" aria-hidden="true"></i>
           <span aria-current="page">Clientes</span>
         </nav>
-        <h2>👥 Clientes de ${escapeHtml(ruta?.nombre || 'esta ruta')}</h2>
+        <h2>Clientes de ${escapeHtml(ruta?.nombre || 'esta ruta')}</h2>
       </div>
       <div class="header-actions">
-        <button type="button" class="btn btn-primary btn-sm" onclick="optimizarRutaTiendas('${escapeHtml(String(rutaid))}','${escapeHtml(cadenaId)}','${escapeHtml(ruta?.nombre || '')}','${escapeHtml(cadena?.nombre || '')}')"><i class="fas fa-route"></i> Optimizar ruta</button>
+        <button type="button" class="btn btn-primary btn-sm" onclick="optimizarRutaTiendas('${escapeHtml(String(rutaid))}','${escapeHtml(cadenaId)}','${escapeAttr(ruta?.nombre || '')}','${escapeAttr(cadena?.nombre || '')}')"><i class="fas fa-route"></i> Optimizar ruta</button>
       </div>
     </div>
     <div id="clientes-ruta-lista">
@@ -4502,9 +5496,9 @@ async function render_clientes_ruta(rutaid) {
               </button>
             </div>
             <div style="font-size:13px;color:var(--text-muted);margin-top:4px;line-height:1.5;">
-              ${c.direccion ? '<div>📍 ' + escapeHtml(c.direccion) + '</div>' : ''}
+              ${c.direccion ? '<div>📸 ' + escapeHtml(c.direccion) + '</div>' : ''}
               <div>
-                📞 ${escapeHtml(c.telefono || 'Sin teléfono')}
+                ${escapeHtml(c.telefono || 'Sin teléfono')}
                 &nbsp;·&nbsp; ✉️ ${escapeHtml(c.email || 'Sin email')}
                 ${c.dni ? '&nbsp;·&nbsp; CIF ' + escapeHtml(c.dni) : ''}
               </div>
@@ -4546,7 +5540,7 @@ window.deleteCadena = async function(cadenaId) {
     alert('Error al eliminar: ' + err.message);
   }
 };
-// ✅ Puente con el router: navigateTo('cadenas') → render_cadenas
+// o. Puente con el router: navigateTo('cadenas') → render_cadenas
 
 /**
  * render_cadenas() → Promise<void>
@@ -4566,7 +5560,7 @@ async function render_cadenas(main) {
   document.getElementById('btn-new-cadena').addEventListener('click', () => showCadenaForm());
   await renderCadenasList();
 }
-// ── Importador de folio OCR ──────────────────────────────────
+// Importador de folio OCR """""""""""""""""
 let _importData = null;
 let _importLoaded = false;
 
@@ -4575,18 +5569,19 @@ window.showImportFolioModal = async function() {
   if (!main) return;
 
   if (!_importLoaded) {
-    main.innerHTML = '<div style="padding:24px;text-align:center;color:var(--text-muted);">⏳ Cargando motor OCR... (~2 MB, solo la primera vez)</div>';
+    main.innerHTML = '<div style="padding:24px;text-align:center;color:var(--text-muted);">⚙️ Cargando motor OCR... (~2 MB, solo la primera vez)</div>';
     try {
+      await window.ensureTesseract();
       await Tesseract.createWorker('spa', 1, {
         logger: m => {
           if (m.status === 'recognizing text') {
-            main.innerHTML = `<div style="padding:24px;text-align:center;color:var(--text-muted);">🔍 Reconociendo texto... ${Math.round(m.progress * 100)}%</div>`;
+            main.innerHTML = `<div style="padding:24px;text-align:center;color:var(--text-muted);">Reconociendo texto... ${Math.round(m.progress * 100)}%</div>`;
           }
         }
       });
       _importLoaded = true;
     } catch (e) {
-      main.innerHTML = `<div style="padding:24px;text-align:center;color:red;">❌ Error cargando OCR: ${e.message}</div>`;
+      main.innerHTML = `<div style="padding:24px;text-align:center;color:red;">O Error cargando OCR: ${e.message}</div>`;
       return;
     }
   }
@@ -4598,7 +5593,7 @@ window.showImportFolioModal = async function() {
   main.innerHTML = `
     <div id="import-modal" style="position:fixed;inset:0;background:rgba(0,0,0,.65);display:flex;align-items:center;justify-content:center;z-index:9999;">
       <div style="background:var(--surface);color:var(--text);border:1px solid var(--border);box-shadow:0 20px 50px rgba(0,0,0,.45);border-radius:14px;padding:24px;max-width:700px;width:90%;max-height:90vh;overflow-y:auto;">
-        <h2 style="margin:0 0 16px;color:var(--text);">📄 Importar folio de clientes</h2>
+        <h2 style="margin:0 0 16px;color:var(--text);">Y"" Importar folio de clientes</h2>
         <p style="color:var(--text-muted);margin:0 0 16px;">Haz una foto o elige un folio con rutas y tiendas. Tesseract leerá el texto y te mostrará una vista previa editable antes de guardar.</p>
         
         <div style="margin-bottom:16px;">
@@ -4611,7 +5606,7 @@ window.showImportFolioModal = async function() {
         <div id="import-upload-area" style="border:2px dashed var(--border);border-radius:10px;padding:32px;text-align:center;cursor:pointer;margin-bottom:16px;background:var(--surface-alt);color:var(--text);">
           <input type="file" id="import-file" accept="image/*" capture="environment" style="display:none;">
           <div id="import-preview-container" style="margin-bottom:16px;"></div>
-          <p id="import-upload-hint">📷 Clic o arrastra una imagen aquí</p>
+          <p id="import-upload-hint">Clic o arrastra una imagen aquí</p>
         </div>
 
         <div id="import-status" style="margin-bottom:16px;display:none;"></div>
@@ -4636,14 +5631,14 @@ window.showImportFolioModal = async function() {
   const cancelBtn = document.getElementById('import-cancel');
   const importBtn = document.getElementById('import-import-btn');
 
-  // ══ CERRAR MODAL CON CLIC FUERA ══
+  //  CERRAR MODAL CON CLIC FUERA 
   modal.addEventListener('click', (e) => {
     if (e.target === modal) {
       cancelBtn.click();
     }
   });
 
-  // ══ CERRAR CON ESCAPE ══
+  //  CERRAR CON ESCAPE 
   const escHandler = (e) => {
     if (e.key === 'Escape') {
       cancelBtn.click();
@@ -4677,13 +5672,13 @@ window.showImportFolioModal = async function() {
     };
     img.src = URL.createObjectURL(file);
     status.style.display = 'block';
-    status.innerHTML = '⏳ Procesando imagen...';
+    status.innerHTML = '⚙️ Procesando imagen...';
     status.style.color = 'var(--text-muted)';
 
     Tesseract.recognize(img.src, 'spa', {
       logger: m => {
         if (m.status === 'recognizing text') {
-          status.innerHTML = `🔍 Reconociendo texto... ${Math.round(m.progress * 100)}%`;
+          status.innerHTML = `Reconociendo texto... ${Math.round(m.progress * 100)}%`;
         }
       }
     }).then(({ data: { text } }) => {
@@ -4692,14 +5687,14 @@ window.showImportFolioModal = async function() {
       renderImportResults();
     }).catch(e => {
       status.style.color = 'red';
-      status.innerHTML = `❌ Error: ${e.message}`;
+      status.innerHTML = `O Error: ${e.message}`;
     });
   }
 
   function renderImportResults() {
     if (!_importData || !_importData.rutas.length) {
       results.style.display = 'block';
-      results.innerHTML = '<p style="color:#e67e22;">⚠️ No se detectaron rutas. Revisa la imagen y prueba de nuevo.</p>';
+      results.innerHTML = '<p style="color:#e67e22;">📍 No se detectaron rutas. Revisa la imagen y prueba de nuevo.</p>';
       document.getElementById('import-actions').style.display = 'block';
       return;
     }
@@ -4708,7 +5703,7 @@ window.showImportFolioModal = async function() {
 
     _importData.rutas.forEach((ruta, ri) => {
       html += `<details open style="margin-bottom:10px;border:1px solid var(--border);border-radius:10px;padding:10px;background:var(--surface-alt);">
-        <summary style="font-weight:600;cursor:pointer;">🛤️ RUTA
+        <summary style="font-weight:600;cursor:pointer;">🚗 RUTA
           <input type="number" data-ruta-num="${ri}" value="${ruta.numero}" min="1"
             style="width:60px;margin:0 6px;padding:4px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);">
           (${ruta.clientes.length} tiendas)
@@ -4745,10 +5740,10 @@ window.showImportFolioModal = async function() {
 
   importBtn.addEventListener('click', async () => {
     importBtn.disabled = true;
-    importBtn.textContent = '⏳ Guardando...';
+    importBtn.textContent = '⚙️ Guardando...';
     status.style.display = 'block';
     status.style.color = '#2563eb';
-    status.innerHTML = '💾 Guardando clientes y rutas en Supabase...';
+    status.innerHTML = '⚙️ Guardando clientes y rutas en Supabase...';
 
     try {
       // Obtener cadena seleccionada
@@ -4842,7 +5837,7 @@ window.showImportFolioModal = async function() {
       }
 
       status.style.color = '#16a34a';
-      let mensaje = `✅ ¡Importación completada!<br>`;
+      let mensaje = `o. ¡Importación completada!<br>`;
       mensaje += `${totalRutasCreadas} ruta${totalRutasCreadas !== 1 ? 's creadas' : ' creada'}: ${rutasCreadasNombres.join(', ') || 'ninguna (ya existían)'}<br>`;
       mensaje += `${totalCreados} cliente${totalCreados !== 1 ? 's creados' : ' creado'} · ${totalExistente} actualizados`;
       status.innerHTML = mensaje;
@@ -4863,7 +5858,7 @@ window.showImportFolioModal = async function() {
 
     } catch (e) {
       status.style.color = 'red';
-      status.innerHTML = `❌ Error: ${e.message}`;
+      status.innerHTML = `O Error: ${e.message}`;
       importBtn.disabled = false;
       importBtn.textContent = 'Importar todo';
     }
@@ -4873,9 +5868,7 @@ window.render_importFolio = function(main) {
   showImportFolioModal();
 };
 
-// ═══════════════════════════════════════════════════════════
 //  MANUALES
-// ═══════════════════════════════════════════════════════════
 window.getTiposManuales = async function(){
   const tipos = await dbGetAll('tiposPuerta');
   const norm = s => String(s||'').toLowerCase().replace(/^puerta\s+/,'').trim();
@@ -5002,4 +5995,257 @@ window.eliminarManual = async function(id){
   await dbDelete('manuales', id);
   showToast('Manual eliminado');
   renderManualesList();
+};
+
+/* ========================================
+   IMPORTACIÓN DE CLIENTES DESDE EXCEL / CSV
+   ======================================== */
+window.__importClientesFilas = null;
+
+// Cabeceras admitidas (norm: minúsculas, sin acentos). "oblig" = obligatoria.
+const IMPORT_CLIENTES_CAMPOS = [
+  { norm: 'nombre',                 alias: ['nombre','razon social','razonsocial','nombre cliente','nombrecomercial','nombre comercial','empresa'], oblig: true,  campo: 'nombre' },
+  { norm: 'contacto',               alias: ['contacto','persona contacto','persona de contacto','personacontacto'],                                 oblig: false, campo: 'contacto' },
+  { norm: 'telefono',               alias: ['telefono','teléfono','tel','telefono1','telefono contacto'],                                            oblig: false, campo: 'telefono' },
+  { norm: 'email',                  alias: ['email','correo','correo electronico','correo electrónico','e-mail'],                                    oblig: false, campo: 'email' },
+  { norm: 'direccion',              alias: ['direccion','dirección','dir','direccion completa'],                                                     oblig: false, campo: 'direccion' },
+  { norm: 'tipo',                   alias: ['tipo','tipocliente','tipo cliente'],                                                                    oblig: false, campo: 'tipo' },
+  { norm: 'dni',                    alias: ['dni','nif','cif','dni/cif','dninif'],                                                                   oblig: false, campo: 'dni' },
+  { norm: 'nota',                   alias: ['nota','notas','observaciones','comentarios'],                                                           oblig: false, campo: 'nota' }
+];
+
+function importNormHeader(s){
+  return String(s||'').trim().toLowerCase()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g,'')
+    .replace(/[_\-.]+/g,' ').replace(/\s+/g,' ');
+}
+
+window.showImportClientesModal = function(){
+  window.__importClientesFilas = null;
+  openModal('Importar clientes (Excel / CSV)',
+    '<p style="color:var(--text-muted);margin-bottom:12px">Sube un archivo <strong>.xlsx/.xls</strong> o <strong>.csv</strong>. La primera fila deben ser los nombres de los campos: <strong>Nombre</strong> (obligatorio) y, opcionales, Contacto, Teléfono, Email, Dirección, Tipo (empresa/particular), DNI y Notas.</p>'+
+    '<div id="ic_drop" style="border:2px dashed var(--border);border-radius:10px;padding:26px;text-align:center;cursor:pointer;background:var(--surface-alt)">'+
+      '<input type="file" id="ic_file" accept=".xlsx,.xls,.csv" style="display:none">'+
+      '<i class="fas fa-file-excel" style="font-size:28px;color:#16a34a"></i>'+
+      '<p style="margin:8px 0 0">Clic o arrastra aquí el archivo</p>'+
+    '</div>'+
+    '<div id="ic_status" style="margin-top:12px;font-size:13px"></div>'+
+    '<div id="ic_preview" style="margin-top:12px"></div>',
+    '<button class="btn btn-outline" onclick="closeModal()">Cancelar</button>'+
+    '<button class="btn btn-primary" id="ic_import" disabled><i class="fas fa-download"></i> Importar a clientes</button>');
+
+  const drop = document.getElementById('ic_drop');
+  const fileInput = document.getElementById('ic_file');
+  drop.addEventListener('click', () => fileInput.click());
+  drop.addEventListener('dragover', e => { e.preventDefault(); drop.style.borderColor = 'var(--primary)'; });
+  drop.addEventListener('dragleave', () => { drop.style.borderColor = 'var(--border)'; });
+  drop.addEventListener('drop', e => {
+    e.preventDefault();
+    drop.style.borderColor = 'var(--border)';
+    if(e.dataTransfer.files.length) window.__procesarArchivoClientes(e.dataTransfer.files[0]);
+  });
+  fileInput.addEventListener('change', () => {
+    if(fileInput.files.length) window.__procesarArchivoClientes(fileInput.files[0]);
+  });
+
+  document.getElementById('ic_import').addEventListener('click', window.__guardarClientesImportados);
+};
+
+window.__procesarArchivoClientes = async function(file){
+  const status = document.getElementById('ic_status');
+  const preview = document.getElementById('ic_preview');
+  const btnImport = document.getElementById('ic_import');
+  status.innerHTML = '⚙️ Leyendo archivo...';
+  preview.innerHTML = '';
+
+  try{
+    const lower = file.name.toLowerCase();
+    let rows;
+    if(lower.endsWith('.csv')){
+      rows = await window.__leerCSVClientes(file);
+    } else if(lower.endsWith('.xlsx') || lower.endsWith('.xls')){
+      rows = await window.__leerExcelClientes(file);
+    } else {
+      throw new Error('Formato no admitido. Usa .xlsx, .xls o .csv');
+    }
+    if(!rows || !rows.length) throw new Error('El archivo está vacío.');
+
+    // ── Validación de cabeceras ──
+    const headers = rows[0].map(importNormHeader);
+    const mapeados = IMPORT_CLIENTES_CAMPOS.map(cfg => {
+      const idx = headers.findIndex(h => cfg.alias.includes(h));
+      return { ...cfg, idx };
+    });
+    const faltanObligatorias = mapeados.filter(m => m.oblig && m.idx < 0).map(m => m.alias[0]);
+    if(faltanObligatorias.length){
+      throw new Error('Faltan columnas obligatorias: ' + faltanObligatorias.join(', ') +
+        '. Cabeceras encontradas: ' + (rows[0].join(', ') || '(ninguna)'));
+    }
+    const desconocidas = headers.filter((h,i) => h && !mapeados.some(m => m.idx === i));
+    if(desconocidas.length){
+      showToast('Columnas ignoradas (no reconocidas): ' + desconocidas.join(', '), 'warning');
+    }
+
+    // ── Parsear filas ──
+    const filas = [];
+    const errores = [];
+    rows.slice(1).forEach((r, i) => {
+      const numFila = i + 2;
+      const fila = {};
+      mapeados.forEach(m => {
+        if(m.idx >= 0) fila[m.campo] = String(r[m.idx] ?? '').trim();
+      });
+      if(!fila.nombre && !Object.values(fila).some(Boolean)) return; // fila vacía
+      if(!fila.nombre){ errores.push('Fila ' + numFila + ': sin nombre'); return; }
+      const tipo = importNormHeader(fila.tipo);
+      fila.tipo = tipo === 'particular' ? 'particular' : 'empresa';
+      filas.push(fila);
+    });
+
+    if(!filas.length) throw new Error('No se encontró ninguna fila con datos válidos (¿falta la columna Nombre?).');
+
+    window.__importClientesFilas = filas;
+
+    status.innerHTML = '<span style="color:#16a34a">✅ ' + filas.length + ' fila(s) válidas' +
+      (errores.length ? ' · ' + errores.length + ' ignorada(s)' : '') + '</span>';
+    if(errores.length){
+      status.innerHTML += '<br><small style="color:#f59e0b">' + escapeHtml(errores.slice(0,5).join(' · ')) +
+        (errores.length>5 ? ' y ' + (errores.length-5) + ' más' : '') + '</small>';
+    }
+
+    // Vista previa
+    const vista = filas.slice(0, 10);
+    preview.innerHTML =
+      '<div class="table-wrapper"><table><thead><tr><th>#</th><th>Nombre</th><th>Contacto</th><th>Teléfono</th><th>Email</th><th>Dirección</th><th>Tipo</th></tr></thead><tbody>' +
+      vista.map((f,i) => '<tr><td>'+(i+1)+'</td><td>'+escapeHtml(f.nombre)+'</td><td>'+escapeHtml(f.contacto||'—')+'</td><td>'+escapeHtml(f.telefono||'—')+'</td><td>'+escapeHtml(f.email||'—')+'</td><td>'+escapeHtml(f.direccion||'—')+'</td><td>'+escapeHtml(f.tipo)+'</td></tr>').join('') +
+      '</tbody></table></div>' +
+      (filas.length > 10 ? '<small style="color:var(--text-muted)">y ' + (filas.length-10) + ' más...</small>' : '');
+
+    btnImport.disabled = false;
+  }catch(err){
+    status.innerHTML = '<span style="color:#dc2626">❌ ' + escapeHtml(err.message) + '</span>';
+    btnImport.disabled = true;
+  }
+};
+
+/** Lee un CSV (separador , o ;) devolviendo array de arrays de strings */
+window.__leerCSVClientes = function(file){
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error('No se pudo leer el archivo'));
+    reader.onload = () => {
+      try{
+        let text = String(reader.result || '');
+        if(text.charCodeAt(0) === 0xFEFF) text = text.slice(1); // BOM
+        const delim = (text.split('\n')[0].match(/;/g)||[]).length > (text.split('\n')[0].match(/,/g)||[]).length ? ';' : ',';
+        const rows = [];
+        let row = [], cell = '', inQuotes = false;
+        for(let i = 0; i < text.length; i++){
+          const ch = text[i];
+          if(inQuotes){
+            if(ch === '"'){
+              if(text[i+1] === '"'){ cell += '"'; i++; }
+              else inQuotes = false;
+            } else cell += ch;
+          } else if(ch === '"'){ inQuotes = true; }
+          else if(ch === delim){ row.push(cell); cell = ''; }
+          else if(ch === '\n' || ch === '\r'){
+            if(ch === '\r' && text[i+1] === '\n') i++;
+            row.push(cell); cell = '';
+            if(row.some(c => c !== '')) rows.push(row);
+            row = [];
+          } else cell += ch;
+        }
+        if(cell !== '' || row.length){ row.push(cell); if(row.some(c => c !== '')) rows.push(row); }
+        resolve(rows);
+      }catch(err){ reject(err); }
+    };
+    reader.readAsText(file, 'utf-8');
+  });
+};
+
+/** Lee un Excel con SheetJS (cargado desde CDN bajo demanda) */
+window.__ensureSheetJS = async function(){
+  if(window.XLSX) return;
+  await new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = 'https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js';
+    s.onload = resolve;
+    s.onerror = () => reject(new Error('No se pudo cargar la librería de Excel (¿sin conexión?)'));
+    document.head.appendChild(s);
+  });
+};
+
+window.__leerExcelClientes = async function(file){
+  await window.__ensureSheetJS();
+  const buf = await file.arrayBuffer();
+  const wb = XLSX.read(buf, { type: 'array' });
+  const sheet = wb.Sheets[wb.SheetNames[0]];
+  return XLSX.utils.sheet_to_json(sheet, { header: 1, raw: false, defval: '' });
+};
+
+window.__guardarClientesImportados = async function(){
+  const filas = window.__importClientesFilas;
+  if(!filas || !filas.length){ showToast('No hay datos para importar','error'); return; }
+  const btn = document.getElementById('ic_import');
+  btn.disabled = true;
+
+  try{
+    const existentes = await dbGetAll('clientes');
+    const norm = s => String(s||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').trim();
+    let creados = 0, actualizados = 0, saltados = 0;
+    const errores = [];
+
+    for(const fila of filas){
+      try{
+        // Validación de email si viene
+        if(fila.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(fila.email)){
+          errores.push('Email no válido para ' + fila.nombre + ' (se importa sin email)');
+          delete fila.email;
+        }
+        const dup = existentes.find(c => norm(c.nombre) === norm(fila.nombre));
+        if(dup){
+          // Actualizar datos de la ficha existente sin perder los que ya tenía
+          await dbPut('clientes', {
+            ...dup,
+            contacto: fila.contacto || dup.contacto,
+            telefono: fila.telefono || dup.telefono,
+            email: fila.email || dup.email,
+            direccion: fila.direccion || dup.direccion,
+            tipo: fila.tipo || dup.tipo,
+            nota: fila.nota || dup.nota,
+            updatedAt: new Date().toISOString()
+          });
+          actualizados++;
+        } else {
+          await dbCreate('clientes', {
+            id: window.db.nextId('CLI'),
+            nombre: fila.nombre,
+            contacto: fila.contacto || '',
+            telefono: fila.telefono || '',
+            email: fila.email || '',
+            direccion: fila.direccion || '',
+            tipo: fila.tipo,
+            nota: fila.nota || '',
+            esCadena: false,
+            updatedAt: new Date().toISOString()
+          });
+          creados++;
+        }
+      }catch(err){
+        saltados++;
+        errores.push(fila.nombre + ': ' + err.message);
+      }
+    }
+
+    window.__importClientesFilas = null;
+    closeModal();
+    showToast('Importación completada: ' + creados + ' creados · ' + actualizados + ' actualizados' +
+      (saltados ? ' · ' + saltados + ' con error' : ''), saltados ? 'warning' : 'success');
+    if(window.currentPage === 'clientes') renderClientes();
+  }catch(err){
+    console.error('[import clientes]', err);
+    showToast('Error al importar: ' + err.message, 'error');
+    btn.disabled = false;
+  }
 };

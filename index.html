@@ -15,12 +15,9 @@
   <link rel="icon" type="image/png" href="icons/favicon-64.png?v=2">
   <link rel="apple-touch-icon" href="icons/apple-touch-icon.png?v=2">
   <link rel="manifest" href="manifest.json">
-  <link rel="stylesheet" href="css/styles.css?v=82">
+  <link rel="stylesheet" href="css/styles.css?v=87">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+  <!-- Chart.js, jsPDF y Tesseract se cargan bajo demanda (ver utils.js) -->
 </head>
 <body>
   <div class="app-container">
@@ -38,7 +35,8 @@
         <li class="nav-item" data-page="incidencias"><i class="fas fa-triangle-exclamation"></i><span>Incidencias</span></li>
         <li class="nav-item" data-page="presupuestos"><i class="fas fa-file-invoice-dollar"></i><span>Presupuestos</span></li>
         <li class="nav-item" data-page="informesKms"><i class="fas fa-chart-pie"></i><span>Informes KMs</span></li>
-        <li class="nav-item" data-page="revisionesProgramadas"><i class="fas fa-calendar-check"></i><span>Revisiones Programadas</span></li>
+        <li class="nav-item" data-page="mapaVehiculos"><i class="fas fa-map-location-dot"></i><span>Mapa de flota</span></li>
+        <li class="nav-item" data-page="revisionesCliente"><i class="fas fa-clipboard-list"></i><span>Revisiones</span></li>
         <li class="nav-item" data-page="ayuda"><i class="fas fa-circle-question"></i><span>Ayuda</span></li>
         <li class="nav-item" data-page="configuracion"><i class="fas fa-cog"></i><span>Configuración</span></li>
       </ul>
@@ -86,17 +84,28 @@
   <!-- ═══════════════════════════════════════════════════════════ -->
   <!-- Scripts de la app (orden: db primero porque expone global) -->
   <!-- ═══════════════════════════════════════════════════════════ -->
-  <script src="js/db.js?v=35"></script>
+  <!-- Scripts que se cargan bajo demanda (ver registerLazyScripts en utils.js).  -->
+  <!-- Al modificar alguno, sube aquí su versión (?v=) para evitar la caché.      -->
+  <script>
+    window.LAZY_SCRIPTS = {
+      pdf: 'js/pdf-generator.js?v=36',
+      informeRevisionesCliente: 'js/informe-revisiones-cliente.js?v=7',
+      tableros: 'js/pages_tableros.js?v=4',
+      informesKms: 'js/pages_informesKms.js?v=20'
+    };
+  </script>
+  <script src="js/db.js?v=43"></script>
   <script src="js/realtime.js?v=3"></script>
-  <script src="js/utils.js?v=35"></script>
-  <script src="js/pages.js?v=128"></script>
-  <script src="js/pages_tableros.js?v=3"></script>
-  
+  <script src="js/utils.js?v=45"></script>
+  <script src="js/revision-forms.js?v=3"></script>
+  <script src="js/pages.js?v=156"></script>
+  <script src="js/hoja-medidas.js?v=4"></script>
+  <script src="js/repostajes.js?v=1"></script>
+
   <script src="js/push.js?v=8"></script>
+  <script src="js/mapa_vehiculos.js?v=1"></script>
   <script src="js/incidencias.js?v=4"></script>
-  <script src="js/app.js?v=58"></script>
-  <script src="js/pdf-generator.js?v=20"></script>
-  <script src="js/pages_informesKms.js?v=14"></script>
-  <script src="js/auth.js?v=29"></script>
+  <script src="js/app.js?v=67"></script>
+  <script src="js/auth.js?v=34"></script>
 </body>
 </html>

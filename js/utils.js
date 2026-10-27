@@ -1,6 +1,73 @@
 // ═══════════════════════════════════════════════════════════
 //  Helpers globales
 // ═══════════════════════════════════════════════════════════
+
+// Carga de librerías externas pesadas solo cuando se necesitan
+const _scriptLoads = {};
+function loadScriptOnce(src){
+  if(_scriptLoads[src]) return _scriptLoads[src];
+  _scriptLoads[src] = new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = src;
+    s.onload = () => resolve();
+    s.onerror = () => { delete _scriptLoads[src]; s.remove(); reject(new Error('No se pudo cargar ' + src + '. Revisa tu conexión.')); };
+    document.head.appendChild(s);
+  });
+  return _scriptLoads[src];
+}
+window.loadScriptOnce = loadScriptOnce;
+window.ensureChart = async function(){
+  if(window.Chart) return;
+  await loadScriptOnce('https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js');
+};
+window.ensureTesseract = async function(){
+  if(window.Tesseract) return;
+  await loadScriptOnce('https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js');
+};
+window.ensurePdfLibs = async function(){
+  if(!window.jspdf) await loadScriptOnce('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js');
+  // autotable debe cargarse después de jsPDF
+  if(!window.jspdf.jsPDF.API.autoTable) await loadScriptOnce('https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js');
+};
+
+// ── Scripts propios de pantallas/funciones no iniciales (URLs y versiones en index.html) ──
+// Cada función global se registra como "stub": la primera llamada carga el script,
+// que sobrescribe el stub con la función real, y entonces se reenvía la llamada.
+(function registerLazyScripts(){
+  const urls = window.LAZY_SCRIPTS || {};
+  const groups = [
+    ['tableros', ['render_tableros']],
+    ['informesKms', ['render_informesKms']],
+    ['pdf', ['generatePDF_clientes','generatePDF_presupuesto','generatePDF_partes','generatePDF_revision',
+             'generatePDF_almacen','generatePDF_presupuestos','generatePDF_ruta','seedDemoPDFData','generateDemoPDFPack'],
+    ['informeRevisionesCliente', ['render_revisionesCliente','generatePDF_informeCliente']]]
+  ];
+  groups.forEach(([key, names]) => {
+    if(!urls[key]) return;
+    names.forEach(name => {
+      const stub = async function(...args){
+        await loadScriptOnce(urls[key]);
+        const real = window[name];
+        if(typeof real !== 'function' || real === stub) throw new Error('No se pudo cargar el módulo de ' + key);
+        return real.apply(this, args);
+      };
+      window[name] = stub;
+    });
+  });
+
+  // Precarga en segundo plano tras el arranque (y para que funcione sin conexión después)
+  const preload = () => {
+    Object.values(urls).forEach(url => loadScriptOnce(url).catch(() => {}));
+    window.ensureChart().catch(() => {});
+    window.ensurePdfLibs().catch(() => {});
+  };
+  const schedule = () => setTimeout(() => {
+    if('requestIdleCallback' in window) requestIdleCallback(preload, { timeout: 5000 });
+    else preload();
+  }, 3000);
+  if(document.readyState === 'complete') schedule();
+  else window.addEventListener('load', schedule, { once: true });
+})();
 function uid(){
   return Date.now().toString(36) + Math.random().toString(36).slice(2,8);
 }
@@ -27,6 +94,19 @@ function escapeHtml(text) {
   div.textContent = text;
   return div.innerHTML;
 }
+
+// Escapa un valor para usarlo dentro de un atributo HTML delimitado por comillas simples
+// (ej.: onclick="fn('${escapeAttr(valor)}')"). Escapa comillas simples, dobles,
+// angulares y ampersands para evitar romper el atributo o inyectar HTML.
+function escapeAttr(text) {
+  return String(text ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/'/g, '&#39;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+window.escapeAttr = escapeAttr;
 
 function debounce(fn,ms=300){
   let t;
@@ -133,20 +213,67 @@ document.addEventListener('click', function(e){
 const BASE_CEUTI = { lat: 38.0858, lng: -1.2741 };
 const FACTOR_CARETERA = 1.3;
 
+/** Factor carretera configurable (Configuración → Factor carretera). Ajusta los kms estimados
+ *  cuando la geolocalización/ruta real falla. Multiplica la distancia en línea recta. */
+function getFactorCarretera(){
+  const v = parseFloat(localStorage.getItem('autopuerta_factor_carretera'));
+  return (v && v > 0 && v < 10) ? v : FACTOR_CARETERA;
+}
+window.getFactorCarretera = getFactorCarretera;
+
 /** Geocodificar dirección → coordenadas (Nominatim, gratis) */
+/**
+ * Geocodificación robusta con degradación progresiva:
+ *  1. La dirección tal cual (con número de portal).
+ *  2. Sin número de portal (si Nominatim no tiene ese portal, busca la vía entera).
+ *  3. Sin acentos ni signos (los usuarios escriben "Avda", sin tildes, etc.).
+ *  4. Solo la parte municipal ("... Petrer, Alicante") → centro del pueblo.
+ * Devuelve {lat, lng, nombreCompleto, precisión} o null si nada funcionó.
+ */
 async function geocodificar(direccion){
-  const url = 'https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=es&q='
-    + encodeURIComponent(direccion);
-  try {
-    const res = await fetch(url, { headers: { 'Accept-Language': 'es' } });
-    const data = await res.json();
-    if (!data.length) return null;
-    return { lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon),
-             nombreCompleto: data[0].display_name };
-  } catch (e) {
-    console.error('Error geocodificar:', e);
-    return null;
+  const base = String(direccion || '').trim();
+  if (!base) return null;
+  const norm = s => s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^\p{L}\p{N}\s,]/gu, ' ').replace(/\s+/g, ' ').trim();
+
+  // Candidatos en orden de precisión
+  const candidatos = [];
+  const sinNumero = base.replace(/\s+\d+[a-zA-Zºª°.]?(\s|,|$)/, '').replace(/,\s*,/g, ',').trim();
+  if (sinNumero && sinNumero !== base) candidatos.push(sinNumero);
+  const sinAcentos = norm(base);
+  if (sinAcentos && !candidatos.includes(sinAcentos)) candidatos.push(sinAcentos);
+  const sinAcentosSinNum = norm(sinNumero);
+  if (sinAcentosSinNum && !candidatos.includes(sinAcentosSinNum)) candidatos.push(sinAcentosSinNum);
+  // Sin el tipo de vía ("Calle/Avenida/Paseo/Plaza de..."): Nominatim falla si en OSM
+  // la vía tiene otro tipo (p. ej. "Carrer La Constitució" vs "Avenida de la Constitución")
+  const sinTipoVia = norm(sinNumero).replace(/\b(calle|c\/|avda?|avenida|paseo|plaza|pl|camino|ctra|carretera|poligono|polígono|carrer|carrer)\b\s*(de\s+(la|el|los|las)?\s*)?/gi, '').replace(/\s+/g, ' ').trim();
+  if (sinTipoVia && sinTipoVia.length >= 4 && !candidatos.includes(sinTipoVia)) candidatos.push(sinTipoVia);
+  // Municipios: cada tramo de la dirección (de más específico a menos), excluyendo CP
+  const trozos = base.split(',').map(t => t.trim()).filter(Boolean)
+    .filter(t => t.length >= 4 && !/^\d{4,5}$/.test(t));
+  [...trozos].reverse().forEach(t => candidatos.push(t + ', España'));
+  candidatos.push(base); // el original como primer intento real
+
+  const orden = [candidatos[candidatos.length - 1], ...candidatos.slice(0, -1)]; // original primero
+  for (let i = 0; i < orden.length; i++) {
+    const q = orden[i];
+    if (!q) continue;
+    const url = 'https://nominatim.openstreetmap.org/search?format=json&limit=5&addressdetails=1&countrycodes=es&q=' + encodeURIComponent(q);
+    try {
+      const res = await fetch(url, { headers: { 'Accept-Language': 'es' } });
+      const data = await res.json();
+      if (data && data.length) {
+        // Preferir resultados con calle/portal sobre "solo pueblo"
+        const mejor = data.find(d => d.address && (d.address.road || d.address.house_number)) || data[0];
+        return { lat: parseFloat(mejor.lat), lng: parseFloat(mejor.lon),
+                 nombreCompleto: mejor.display_name,
+                 precision: i === 0 ? 'exacta' : (mejor.address && mejor.address.road ? 'calle' : 'municipio') };
+      }
+    } catch (e) {
+      console.error('Error geocodificar:', e);
+      return null; // fallo de red: no insistir, dejará escribir a mano
+    }
   }
+  return null;
 }
 
 /** Coordenadas → dirección (Nominatim) */
@@ -180,17 +307,43 @@ function calcularKmLineal(origen, destino){
   return 2 * R * Math.asin(Math.sqrt(a));
 }
 
-/** Distancia por carretera: OSRM online → fallback Haversine × 1.3 */
-/** Distancia por carretera: Haversine × 1.3 (siempre consistente) */
+/** Distancia por carretera: OSRM online → fallback Haversine × FACTOR_CARETERA */
 async function calcularKm(origen, destino){
-  const lineal = calcularKmLineal(origen, destino);
-  return Math.round(lineal * FACTOR_CARETERA);
+  const ruta = await kmRutaReal(origen.lat, origen.lng, destino.lat, destino.lng).catch(() => null);
+  if (ruta != null) return Math.round(ruta);
+  return Math.round(calcularKmLineal(origen, destino) * getFactorCarretera());
 }
+
+/**
+ * Distancia REAL por carretera entre dos coordenadas usando OSRM (OpenStreetMap).
+ * Gratuita y sin API key. Devuelve km (ida) o null si no hay conexión/queda fuera de servicio,
+ * en cuyo caso el llamador debe usar el fallback haversine × FACTOR_CARETERA.
+ */
+let __osrmDown = 0; // timestamp hasta el que no reintentamos tras un fallo
+async function kmRutaReal(lat1, lng1, lat2, lng2){
+  if (Date.now() < __osrmDown) return null; // tras un fallo no insistimos durante 5 min
+  try {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 6000); // no bloquear el formulario más de 6 s
+    const res = await fetch(`https://router.project-osrm.org/route/v1/driving/${lng1},${lat1};${lng2},${lat2}?overview=false`,
+      { signal: ctrl.signal });
+    clearTimeout(t);
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    if (data.code !== 'Ok' || !data.routes?.length) throw new Error('sin ruta');
+    return data.routes[0].distance / 1000; // metros -> km
+  } catch (e) {
+    __osrmDown = Date.now() + 5 * 60 * 1000; // 5 min sin reintentar
+    console.warn('[kms] OSRM no disponible, usando estimación haversine:', e.message);
+    return null;
+  }
+}
+window.kmRutaReal = kmRutaReal;
 
 /** Km ida + vuelta desde Ceuti, redondeado SIEMPRE arriba a múltiplo de 10 */
 async function kmIdaVuelta(destino){
   const lineal = calcularKmLineal(BASE_CEUTI, destino);   // línea recta
-  const idaVuelta = Math.round(lineal * FACTOR_CARETERA * 2);  // ida + vuelta carretera
+  const idaVuelta = Math.round(lineal * getFactorCarretera() * 2);  // ida + vuelta carretera
   return Math.ceil(idaVuelta / 10) * 10;                  // 58 -> 60
 }
 // Dictado por voz — versión robusta con MutationObserver
@@ -619,7 +772,7 @@ window.confirmDelete = function(itemName, callback){
     '<button class="btn btn-outline" onclick="closeModal()">Cancelar</button>' +
     '<button class="btn btn-danger" id="confirmDeleteBtn">Eliminar</button>';
 
-  overlay.classList.add('open');
+  overlay.classList.add('open', 'confirm-mode');
 
   document.getElementById('confirmDeleteBtn').onclick = function(){
     closeModal();
@@ -865,6 +1018,16 @@ async function getPendientesRevision() {
   const treintaDias = new Date(hoy);
   treintaDias.setDate(treintaDias.getDate() + 30);
 
+  // Días hasta una fecha YYYY-MM-DD parseada en HORA LOCAL (new Date('YYYY-MM-DD')
+  // se interpreta en UTC y con Math.ceil la fecha de HOY salía como +1 día)
+  const diasHastaLocal = (f) => {
+    const m = String(f || '').slice(0, 10).match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (!m) return null;
+    const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+    d.setHours(0, 0, 0, 0);
+    return Math.round((d - hoy) / (1000 * 60 * 60 * 24));
+  };
+
   const pendientes = [];
 
   try {
@@ -878,18 +1041,20 @@ async function getPendientesRevision() {
         ultimaRevision: r.ultimaRevision ?? r.ultimorevision ?? null,
       };
       if (!ruta.proximaRevision) continue;
-      const proxima = new Date(ruta.proximaRevision);
-      if (proxima <= treintaDias) {
+      const dias = diasHastaLocal(ruta.proximaRevision);
+      if (dias === null) continue;
+      if (dias <= 30) {
         pendientes.push({
           id: ruta.id,
           tipo: 'ruta',
+          cadenaId: String(ruta.cadenaId || ''),
           nombre: cadenasMap.has(String(ruta.cadenaId)) ? `${cadenasMap.get(String(ruta.cadenaId))} · ${ruta.nombre}` : ruta.nombre,
           cadenaNombre: cadenasMap.get(String(ruta.cadenaId)) || '',
           rutaNombre: ruta.nombre,
           detalle: `Ruta ${ruta.nombre} (Cadena ${cadenasMap.get(String(ruta.cadenaId)) || ruta.cadenaId})`,
           proxima: ruta.proximaRevision,
-          dias: Math.ceil((proxima - hoy) / (1000*60*60*24)),
-          clase: proxima < hoy ? 'badge-red' : 'badge-yellow'
+          dias,
+          clase: dias < 0 ? 'badge-red' : dias === 0 ? 'badge-red' : 'badge-yellow'
         });
       }
     }
@@ -900,16 +1065,17 @@ async function getPendientesRevision() {
     const todosClientes = await dbGetAll('clientes');
     for (const c of todosClientes) {
       if (c.esCadena || !c.proximaRevision) continue;
-      const proxima = new Date(c.proximaRevision);
-      if (proxima <= treintaDias) {
+      const dias = diasHastaLocal(c.proximaRevision);
+      if (dias === null) continue;
+      if (dias <= 30) {
         pendientes.push({
           id: c.id,
           tipo: 'cliente',
           nombre: c.nombre,
           detalle: `Cliente: ${c.nombre}`,
           proxima: c.proximaRevision,
-          dias: Math.ceil((proxima - hoy) / (1000*60*60*24)),
-          clase: proxima < hoy ? 'badge-red' : 'badge-yellow'
+          dias,
+          clase: dias <= 0 ? 'badge-red' : 'badge-yellow'
         });
       }
     }
@@ -925,16 +1091,18 @@ async function getPendientesRevision() {
       if (!p.proximaRevision) continue;
       // Evitar doble aviso: si su cliente ya tiene ruta, la ruta lo cubre
       if (clientesConRuta.has(p.clienteId)) continue;
-      const proxima = new Date(p.proximaRevision);
-      if (proxima > treintaDias) continue;   // no avisar con meses de antelación
+      const dias = diasHastaLocal(p.proximaRevision);
+      if (dias === null) continue;
+      if (dias > 30) continue;   // no avisar con meses de antelación
       pendientes.push({
         id: p.id,
         tipo: 'puerta',
+        clienteId: p.clienteId || null,
         nombre: `${p.marca || ''} ${p.modelo || ''}`.trim() + (p.matricula ? ` (${p.matricula})` : ''),
         detalle: `Puerta${p.tipo ? ' ' + p.tipo : ''}${p.clienteId ? ' · Cliente ' + p.clienteId : ''}`,
         proxima: p.proximaRevision,
-        dias: Math.ceil((proxima - hoy) / (1000*60*60*24)),
-        clase: proxima < hoy ? 'badge-red' : 'badge-yellow'
+        dias,
+        clase: dias <= 0 ? 'badge-red' : 'badge-yellow'
       });
     }
   } catch(e) { console.warn('Error obteniendo puertas:', e); }
@@ -1070,4 +1238,35 @@ window.textoCuentaAtrasITV = function(days){
   }
   if(days===0) return '<strong>CADUCA HOY</strong>';
   return `Caduca en <strong>${days}</strong> día${days===1?'':'s'}`;
+};
+
+// ── Tiendas de una ruta (fuente única de verdad) ────────────
+// Mismo criterio que el formulario HIPERBER: el cliente pertenece a la ruta
+// (rutaId/rutaid) o a la cadena (cadenaId/padreId). Así el panel, las vistas
+// de rutas y el formulario ven exactamente las mismas tiendas.
+window.getTiendasDeRuta = async function(rutaId, cadenaId){
+  if(!rutaId) return [];
+  const clientes=await dbGetAll('clientes');
+  const enCadena=c=>cadenaId && (String(c.cadenaId??c.cadenaid??'')===String(cadenaId) || String(c.padreId??c.padreid??'')===String(cadenaId));
+  const orden=(a,b)=>(a.ordenRuta??a.ordenruta??Infinity)-(b.ordenRuta??b.ordenruta??Infinity) || String(a.nombre||'').localeCompare(String(b.nombre||''),'es');
+  let tiendas=clientes.filter(c=>String(c.rutaId??c.rutaid??'')===String(rutaId) || (enCadena(c) && String(c.rutaId??c.rutaid??'')===String(rutaId)));
+  // Respaldo: si la ruta no tiene clientes vinculados por rutaId pero la cadena
+  // sí tiene tiendas (solo enlazadas por cadena/padre), se muestran igualmente.
+  if(!tiendas.length && cadenaId){
+    tiendas=clientes.filter(enCadena);
+  }
+  return tiendas.slice().sort(orden);
+};
+
+// Puertas de una ruta: recorre sus tiendas y adjunta el nombre de cada cliente.
+// Mismo criterio que usa el formulario HIPERBER, así el panel y el formulario
+// ven exactamente las mismas rutas y tiendas.
+window.getPuertasDeRuta = async function(rutaId, cadenaId){
+  const tiendas=await window.getTiendasDeRuta(rutaId, cadenaId);
+  const puertas=[];
+  for(const tienda of tiendas){
+    const lista=await dbGetByIndex('puertas','clienteId',tienda.id);
+    for(const p of lista) puertas.push({...p, clienteNombre:tienda.nombre});
+  }
+  return puertas;
 };

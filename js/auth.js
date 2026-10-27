@@ -1,4 +1,4 @@
-const TECH_PAGES = new Set(['dashboard', 'incidencias', 'partesTrabajo', 'presupuestos', 'informesKms', 'revisionesProgramadas', 'almacen', 'vehiculos', 'ayuda']);
+const TECH_PAGES = new Set(['dashboard', 'incidencias', 'partesTrabajo', 'presupuestos', 'informesKms', 'revisionesProgramadas', 'revisionesCliente', 'almacen', 'vehiculos', 'ayuda']);
 const HELP_GUIDES = [
   { page: 'dashboard', title: 'Panel de control', roles: ['admin', 'technician'], text: 'Consulta el resumen general. Los técnicos ven sus partes recientes y avisos operativos; administración ve los indicadores de toda la empresa.' },
   { page: 'partesTrabajo', title: 'Partes de trabajo', roles: ['admin', 'technician'], text: 'Crea un parte, elige cliente, ubicación, puerta y vehículo, completa el trabajo y guarda. Los técnicos pueden ver todos los partes, pero editar o eliminar solo los propios. DNI, firmas y fotos se muestran solo en los propios.' },
@@ -391,7 +391,6 @@ window.renderTechnicianDashboard = async function(container) {
     return { vehicle, date: String(date || '').slice(0, 10), days: date ? window.diasHastaFechaITV(date) : null };
   }).filter(item => item.days !== null && item.days <= 30).sort((a, b) => a.days - b.days);
   const ownParts = parts.filter(part => String(part.createdBy) === String(window.authState.user.id));
-  const pendingParts = ownParts.filter(part => part.estado !== 'completado');
   const recent = ownParts.slice().sort((a, b) => String(b.fecha || '').localeCompare(String(a.fecha || ''))).slice(0, 6);
   const due = revisions.filter(door => door.proximaRevision && door.proximaRevision <= new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10));
   container.innerHTML = `
@@ -401,8 +400,8 @@ window.renderTechnicianDashboard = async function(container) {
       <div class="stat-card"><div class="stat-icon"><i class="fas fa-calendar-check"></i></div><div class="stat-info"><h3>${due.length}</h3><p>Revisiones próximas</p></div></div>
     </div>
     <div class="card"><div class="card-header"><h3>Mis partes recientes</h3><button class="btn btn-outline btn-sm" onclick="navigateTo('partesTrabajo')">Ver todos</button></div>
-      <div class="table-wrapper"><table><thead><tr><th>Parte</th><th>Cliente</th><th>Trabajo</th>      <th>Estado</th><th>Fecha</th><th></th></tr></thead><tbody>
-        ${recent.map(part => `<tr><td>${authEscape(part.id)}</td><td>${authEscape(part.clienteNombre)}</td><td>${authEscape(part.tipoPuerta)}</td><td>${authEscape(getStatusLabel(part.estado))}</td><td>${authEscape(formatDate(part.fecha))}</td><td><button type="button" class="btn btn-outline btn-sm" data-action="edit-parte" data-id="${authEscape(part.id)}" title="Editar mi parte"><i class="fas fa-pen"></i></button></td></tr>`).join('') || '<tr><td colspan="6">Todavía no tienes partes.</td></tr>'}
+      <div class="table-wrapper"><table><thead><tr><th>Parte</th><th>Cliente</th><th>Trabajo</th><th>Fecha</th><th></th></tr></thead><tbody>
+        ${recent.map(part => `<tr><td>${authEscape(part.id)}</td><td>${authEscape(part.clienteNombre)}</td><td>${authEscape(part.tipoPuerta)}</td><td>${authEscape(formatDate(part.fecha))}</td><td><button type="button" class="btn btn-outline btn-sm" data-action="edit-parte" data-id="${authEscape(part.id)}" title="Editar mi parte"><i class="fas fa-pen"></i></button></td></tr>`).join('') || '<tr><td colspan="5">Todavía no tienes partes.</td></tr>'}
       </tbody></table></div>
     </div>
     <div class="card"><div class="card-header"><h3>Avisos de revisiones</h3><button class="btn btn-outline btn-sm" onclick="navigateTo('revisionesProgramadas')">Ver revisiones</button></div>
@@ -566,7 +565,7 @@ window.convertMaterialRequest = async function(id) {
     createdBudgetId = budgetId;
     const budget = {
       id: budgetId, clienteId: request.clienteId, clienteNombre: request.clienteNombre,
-      fecha: getToday(), validoHasta: '', estado: 'borrador',
+      fecha: getToday(), validoHasta: null, estado: 'borrador',
       notas: `Creado desde solicitud de material ${request.id}. Completar precios antes de enviar al cliente.`,
       lineItems, subtotal: 0, iva: 0, total: 0
     };
@@ -863,10 +862,13 @@ window.viewTechnicianPart = function(part) {
   const row = (label, value) => `<div class="form-group"><label>${label}</label><div>${authEscape(value || '—')}</div></div>`;
   const body = `<div class="form-grid">
     ${row('Parte', part.id)}${row('Cliente', part.clienteNombre)}${row('Ubicación', part.ubicacionNombre)}
-    ${row('Técnico', part.empleadoNombre)}${row('Tipo de puerta', part.tipoPuerta)}${row('Estado', getStatusLabel(part.estado))}
+    ${row('Técnico', part.empleadoNombre)}${row('Tipo de puerta', part.tipoPuerta)}
     ${row('Fecha', formatDate(part.fecha))}${row('Kms', (part.kms || 0) + ' km')}${row('Horas', part.horas)}
     <div class="form-group full"><label>Descripción del trabajo</label><div style="white-space:pre-wrap">${authEscape(part.descripcion || '—')}</div></div>
     <div class="form-group full"><label>Notas</label><div style="white-space:pre-wrap">${authEscape(part.notas || '—')}</div></div>
+    <div class="form-group full"><label>🔧 Material utilizado</label>${(Array.isArray(part.materiales) && part.materiales.length)
+      ? `<ul style="margin:0;padding-left:18px">${part.materiales.map(m => `<li>${authEscape(m.descripcion)} — ${authEscape(m.cantidad)} ${authEscape(m.unidad || 'ud')}</li>`).join('')}</ul>`
+      : '<div class="muted">Sin material</div>'}</div>
     <div class="form-group full"><label>📷 Fotos</label>${fotos.length
       ? `<div style="display:flex;gap:8px;flex-wrap:wrap">${fotos.map(f => `<img class="inc-foto" src="${authEscape(f)}" style="width:96px;height:96px;object-fit:cover;border-radius:8px;border:1px solid var(--border);cursor:zoom-in">`).join('')}</div>`
       : '<div class="muted">Sin fotos</div>'}</div>
@@ -879,12 +881,12 @@ window.renderTechnicianParts = async function(container) {
   container.innerHTML = `
     <div class="page-header"><div><h2>Partes de trabajo</h2><p>Consulta los partes del equipo y gestiona los tuyos.</p></div><button class="btn btn-primary" id="newTechnicianPart"><i class="fas fa-plus"></i> Nuevo parte</button></div>
     <div class="search-bar"><input type="search" id="technicianPartSearch" placeholder="Buscar parte, cliente o trabajo"></div>
-    <div class="card"><div class="table-wrapper"><table><thead><tr><th>Parte</th><th>Cliente</th><th>Ubicación</th><th>Técnico</th><th>Trabajo</th><th>Kms</th><th>Estado</th><th>Fecha</th><th>Acciones</th></tr></thead><tbody id="technicianPartRows"></tbody></table></div></div>`;
+    <div class="card"><div class="table-wrapper"><table><thead><tr><th>Parte</th><th>Cliente</th><th>Ubicación</th><th>Técnico</th><th>Trabajo</th><th>Kms</th><th>Fecha</th><th>Acciones</th></tr></thead><tbody id="technicianPartRows"></tbody></table></div></div>`;
   const paint = () => {
     const query = container.querySelector('#technicianPartSearch').value.toLocaleLowerCase('es').trim();
     const filtered = parts.filter(part => [
       part.id, part.clienteNombre, part.ubicacionNombre, part.empleadoNombre,
-      part.tipoPuerta, part.descripcion, part.estado, part.fecha
+      part.tipoPuerta, part.descripcion, part.fecha
     ].join(' ').toLocaleLowerCase('es').includes(query));
     renderPaginatedRows(container.querySelector('#technicianPartRows'), filtered, part => {
       const own = String(part.createdBy) === String(window.authState.user.id);
@@ -893,13 +895,16 @@ window.renderTechnicianParts = async function(container) {
            <button type="button" class="btn btn-outline btn-sm" onclick="generatePDF_partes('${authEscape(part.id)}')" title="Descargar PDF"><i class="fas fa-file-pdf"></i></button>
            <button type="button" class="btn btn-outline btn-sm" onclick="confirmDelete('Parte ${authEscape(part.id)}',()=>deleteParte('${authEscape(part.id)}'))" title="Eliminar mi parte"><i class="fas fa-trash"></i></button>`
         : `<button type="button" class="btn btn-outline btn-sm" data-view-part="${authEscape(part.id)}" title="Ver parte"><i class="fas fa-eye"></i> Ver</button>`;
-      return `<tr><td><strong>${authEscape(part.id)}</strong></td><td>${authEscape(part.clienteNombre)}</td><td>${authEscape(part.ubicacionNombre || '—')}</td><td>${authEscape(part.empleadoNombre || '—')}</td><td>${authEscape(part.tipoPuerta || part.descripcion || '—')}</td><td>${authEscape(part.kms || 0)} km</td><td><span class="badge ${authEscape(getBadgeClass(part.estado))}">${authEscape(getStatusLabel(part.estado))}</span></td><td>${authEscape(formatDate(part.fecha))}</td><td class="actions-cell">${actions}</td></tr>`;
-    }, { colspan: 9, empty: '<tr><td colspan="9">No hay partes que coincidan.</td></tr>' });
+      return `<tr><td><strong>${authEscape(part.id)}</strong></td><td>${authEscape(part.clienteNombre)}</td><td>${authEscape(part.ubicacionNombre || '—')}</td><td>${authEscape(part.empleadoNombre || '—')}</td><td>${authEscape(part.tipoPuerta || part.descripcion || '—')}</td><td>${authEscape(part.kms || 0)} km</td><td>${authEscape(formatDate(part.fecha))}</td><td class="actions-cell">${actions}</td></tr>`;
+    }, { colspan: 8, empty: '<tr><td colspan="8">No hay partes que coincidan.</td></tr>' });
   };
-  container.querySelector('#technicianPartRows').addEventListener('click', e => {
+  container.querySelector('#technicianPartRows').addEventListener('click', async e => {
     const btn = e.target.closest('[data-view-part]');
     if (!btn) return;
-    const part = parts.find(p => String(p.id) === btn.dataset.viewPart);
+    // El listado es ligero (sin fotos antiguas): se pide el parte completo
+    let part = null;
+    try { part = await dbGet('partesTrabajo', btn.dataset.viewPart); } catch (_) {}
+    part = part || parts.find(p => String(p.id) === btn.dataset.viewPart);
     if (part) window.viewTechnicianPart(part);
   });
   container.querySelector('#newTechnicianPart').addEventListener('click', () => window.showParteForm());

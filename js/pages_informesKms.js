@@ -7,6 +7,9 @@ async function render_informesKms(container) {
   container.innerHTML = `
     <div class="page-header">
       <h2><i class="fas fa-chart-pie"></i> Informes de Kilometraje</h2>
+      <button class="btn" id="btnRepostaje" style="background:#16a34a;color:#fff;border:none;padding:10px 18px;border-radius:10px;font-weight:700;box-shadow:0 4px 14px rgba(22,163,74,.35);font-size:15px">
+        <i class="fas fa-gas-pump"></i> Registrar repostaje
+      </button>
     </div>
 
     <!-- Buscador -->
@@ -24,14 +27,6 @@ async function render_informesKms(container) {
       <div class="filter-group">
         <label>Hasta:</label>
         <input type="date" id="filterHasta">
-      </div>
-      <div class="filter-group">
-        <label>Estado:</label>
-        <select id="filterEstado">
-          <option value="todos">Todos</option>
-          <option value="completado">Completados</option>
-          <option value="pendiente">Pendientes</option>
-        </select>
       </div>
       <button class="btn btn-primary btn-sm" id="btnFiltrar">
         <i class="fas fa-filter"></i> Filtrar
@@ -120,7 +115,6 @@ async function render_informesKms(container) {
                 <th>Cliente</th>
                 <th>Descripción</th>
                 <th>KMs</th>
-                <th>Estado</th>
               </tr>
             </thead>
             <tbody id="tbodyDetalle"></tbody>
@@ -128,10 +122,32 @@ async function render_informesKms(container) {
         </div>
       </div>
     </div>
+    <!-- Estadísticas de consumo (combustible) -->
+    <div class="card" id="cardConsumo" style="display:none; margin-top:20px;">
+      <div class="card-header">
+        <h3 id="consumoTitulo">⛽ Consumo de combustible</h3>
+        <button class="btn btn-outline btn-sm" id="btnCerrarConsumo">
+          <i class="fas fa-times"></i> Cerrar
+        </button>
+      </div>
+      <div class="card-body">
+        <div style="height:280px; margin-bottom:16px;">
+          <canvas id="graficoConsumo"></canvas>
+        </div>
+        <div class="table-responsive">
+          <table class="table table-sm" id="tablaConsumo">
+            <thead>
+              <tr>
+                <th>Matrícula</th><th>Mes</th><th>Repostajes</th><th>Litros</th><th>Importe</th><th>€/litro</th><th>L/100km</th><th>Km recorridos</th>
+              </tr>
+            </thead>
+            <tbody id="tbodyConsumo"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
   `;
-
-  // ── Asignar eventos ──
-  document.getElementById('btnFiltrar').addEventListener('click', () => cargarTablaKms());
+  document.getElementById('btnFiltrar').addEventListener('click', () => { cargarTablaKms(); cargarConsumo(document.getElementById('filterDesde').value, document.getElementById('filterHasta').value); });
   document.getElementById('btnLimpiar').addEventListener('click', limpiarFiltros);
   document.getElementById('btnPDF').addEventListener('click', generarPDF);
   document.getElementById('btnCerrarDetalle').addEventListener('click', () => {
@@ -143,6 +159,11 @@ async function render_informesKms(container) {
 
   // Buscador instantáneo
   document.getElementById('searchVehiculo').addEventListener('input', () => cargarTablaKms());
+
+  document.getElementById('btnRepostaje')?.addEventListener('click', () => window.openRepostajeModal?.());
+  document.getElementById('btnCerrarConsumo')?.addEventListener('click', () => {
+    document.getElementById('cardConsumo').style.display = 'none';
+  });
 
   // Doble clic en fila para ver detalle
   document.getElementById('tbodyKms')?.addEventListener('dblclick', async (e) => {
@@ -157,21 +178,105 @@ async function render_informesKms(container) {
   document.getElementById('filterDesde').value = hoy;
   document.getElementById('filterHasta').value = hoy;
   cargarTablaKms();
+  cargarConsumo(hoy, hoy);
 }
+
+// ── Estadísticas de consumo de combustible (repostajes) ──
+let graficoConsumoInstance = null;
+
+async function cargarConsumo(desde, hasta) {
+  const card = document.getElementById('cardConsumo');
+  if (!card) return;
+  try {
+    let repostajes = [];
+    if (window.REPOSTAJES?.resumenConsumo && navigator.onLine) {
+      repostajes = await window.REPOSTAJES.resumenConsumo(desde, hasta);
+    }
+    if (!repostajes.length) { card.style.display = 'none'; return; }
+    card.style.display = 'block';
+
+    // Agrupar por matrícula + mes
+    const grupos = {};
+    for (const r of repostajes) {
+      const mes = String(r.fecha).slice(0, 7);
+      const key = r.matricula + '|' + mes;
+      if (!grupos[key]) grupos[key] = { matricula: r.matricula, mes, n: 0, litros: 0, importe: 0 };
+      grupos[key].n++;
+      grupos[key].litros += Number(r.litros) || 0;
+      grupos[key].importe += Number(r.importe) || 0;
+    }
+    const filas = Object.values(grupos).sort((a, b) => (a.mes + a.matricula).localeCompare(b.mes + b.matricula));
+
+    // Km recorridos por matrícula en el periodo (diferencia entre 1er y último km conocido en repostajes)
+    const kmsPorMatricula = {};
+    const kmsOrdenados = {};
+    for (const r of repostajes) {
+      if (r.kms == null) continue;
+      (kmsOrdenados[r.matricula] = kmsOrdenados[r.matricula] || []).push({ fecha: r.fecha, kms: Number(r.kms) });
+    }
+    for (const [mat, lista] of Object.entries(kmsOrdenados)) {
+      lista.sort((a, b) => a.fecha.localeCompare(b.fecha));
+      if (lista.length >= 2) kmsPorMatricula[mat] = lista[lista.length - 1].kms - lista[0].kms;
+    }
+
+    const tbody = document.getElementById('tbodyConsumo');
+    tbody.innerHTML = filas.map(f => {
+      const km = kmsPorMatricula[f.matricula] || null;
+      const l100 = (km && f.litros > 0) ? (f.litros / km * 100) : null;
+      return `<tr>
+        <td><strong>${escapeHtml(f.matricula)}</strong></td>
+        <td>${escapeHtml(f.mes)}</td>
+        <td>${f.n}</td>
+        <td>${f.litros ? f.litros.toLocaleString('es-ES', { maximumFractionDigits: 2 }) : '—'}</td>
+        <td>${f.importe ? f.importe.toLocaleString('es-ES', { minimumFractionDigits: 2 }) + ' €' : '—'}</td>
+        <td>${(f.litros && f.importe) ? (f.importe / f.litros).toFixed(3) + ' €' : '—'}</td>
+        <td>${l100 != null ? l100.toFixed(1) : '—'}</td>
+        <td>${km != null ? km.toLocaleString('es-ES') + ' km' : '—'}</td>
+      </tr>`;
+    }).join('');
+
+    // Gráfico: importe mensual total
+    const porMes = {};
+    for (const f of filas) porMes[f.mes] = (porMes[f.mes] || 0) + f.importe;
+    const labels = Object.keys(porMes).sort();
+    const datos = labels.map(m => +porMes[m].toFixed(2));
+
+    await window.ensureChart();
+    const ctx = document.getElementById('graficoConsumo').getContext('2d');
+    if (graficoConsumoInstance) graficoConsumoInstance.destroy();
+    graficoConsumoInstance = new Chart(ctx, {
+      type: 'bar',
+      data: { labels, datasets: [{ label: '€ gastados en combustible', data: datos, backgroundColor: 'rgba(22,163,74,.7)', borderColor: 'rgba(22,163,74,1)', borderWidth: 1 }] },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => c.parsed.y.toFixed(2) + ' €' } } },
+        scales: { y: { beginAtZero: true, title: { display: true, text: '€' } } }
+      }
+    });
+  } catch (e) {
+    console.warn('[Consumo] no se pudo cargar:', e);
+    card.style.display = 'none';
+  }
+}
+
+// Recargar el bloque de consumo cuando se guarda un repostaje
+window.refrescarConsumo = function(){
+  const desde = document.getElementById('filterDesde')?.value;
+  const hasta = document.getElementById('filterHasta')?.value;
+  if (desde && hasta) cargarConsumo(desde, hasta);
+};
 
 // ── Cargar tabla resumen de KMs ──
 async function cargarTablaKms() {
   const desde = document.getElementById('filterDesde')?.value || window.utils?.todayStr?.() || new Date().toISOString().slice(0,10);
   const hasta = document.getElementById('filterHasta')?.value || window.utils?.todayStr?.() || new Date().toISOString().slice(0,10);
-  const estado = document.getElementById('filterEstado')?.value || 'todos';
   const busqueda = document.getElementById('searchVehiculo')?.value?.toLowerCase().trim() || '';
 
   // Obtener partes filtrados
   const todas = await window.dbGetAll('partesTrabajo');
 let partes = todas.filter(p => p.kms && Number(p.kms) > 0);
   partes = partes.filter(p => {
-    return p.fecha >= desde && p.fecha <= hasta &&
-           (estado === 'todos' || p.estado === estado);
+    return p.fecha >= desde && p.fecha <= hasta;
   });
 
   // Obtener vehículos
@@ -199,6 +304,8 @@ let partes = todas.filter(p => p.kms && Number(p.kms) > 0);
   // Construir filas
   const tbody = document.getElementById('tbodyKms');
   const vacio = document.getElementById('kmsVacio');
+  // El usuario pudo cambiar de pantalla mientras se cargaban los datos
+  if (!tbody || !vacio) return;
   tbody.innerHTML = '';
 
   const vehiculosConDatos = listaVeh.filter(v => totales[v.matricula] !== undefined);
@@ -286,6 +393,7 @@ async function verMensual(matricula) {
     `KMs Diarios — <span>${escapeHtml(veh.marca)} ${escapeHtml(veh.modelo)} (${escapeHtml(veh.matricula)})</span>`;
 
   // ── Gráfico de barras ──
+  await window.ensureChart();
   const canvas = document.getElementById('graficoKms');
   const ctx = canvas.getContext('2d');
 
@@ -389,17 +497,15 @@ async function verDetalleVehiculo(matricula) {
   tbody.innerHTML = '';
 
   if (partes.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="5" class="text-center">Sin partes en este periodo</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="4" class="text-center">Sin partes en este periodo</td></tr>';
   } else {
     for (const p of partes) {
       const tr = document.createElement('tr');
-      const estadoClass = p.estado === 'completado' ? 'text-success' : 'text-warning';
       tr.innerHTML = `
         <td>${p.fecha}</td>
         <td>${escapeHtml(p.clienteNombre || '—')}</td>
         <td>${escapeHtml(p.descripcion || '—')}</td>
         <td>${Number(p.kms).toLocaleString('es-ES')}</td>
-        <td class="${estadoClass}">${p.estado}</td>
       `;
       tbody.appendChild(tr);
     }
@@ -414,7 +520,6 @@ function limpiarFiltros() {
   const hoy = window.utils?.todayStr?.() || new Date().toISOString().slice(0,10);
   document.getElementById('filterDesde').value = hoy;
   document.getElementById('filterHasta').value = hoy;
-  document.getElementById('filterEstado').value = 'todos';
   document.getElementById('searchVehiculo').value = '';
   cargarTablaKms();
 }
@@ -423,11 +528,9 @@ function limpiarFiltros() {
 async function generarPDF() {
   const desde = document.getElementById('filterDesde').value;
   const hasta = document.getElementById('filterHasta').value;
-  const estado = document.getElementById('filterEstado').value;
 
   const partes = (await window.cargarPartesConMatricula())
-    .filter(p => p.fecha >= desde && p.fecha <= hasta &&
-                 (estado === 'todos' || p.estado === estado));
+    .filter(p => p.fecha >= desde && p.fecha <= hasta);
 
   const vehiculos = await window.db.dbGetAll('vehiculos');
 
@@ -469,7 +572,6 @@ async function generarPDF() {
       <h1>📊 Informe de Kilometraje</h1>
       <p class="subtitle">
         Período: <strong>${desde}</strong> a <strong>${hasta}</strong>
-        ${estado !== 'todos' ? ' — Estado: ' + estado : ''}
         — Generado: ${new Date().toLocaleString('es-ES')}
       </p>
 
@@ -525,7 +627,7 @@ async function generarPDF() {
     const partesVeh = partes.filter(p => p.matricula === v.matricula);
     html += `<h3 style="font-size:14px; margin:10px 0 5px;">${escapeHtml(v.matricula)} — ${escapeHtml(v.marca)} ${escapeHtml(v.modelo)}</h3>`;
     html += `<table style="margin-bottom:15px;">
-      <thead><tr><th>Fecha</th><th>Cliente</th><th>Descripción</th><th>KMs</th><th>Estado</th></tr></thead><tbody>`;
+      <thead><tr><th>Fecha</th><th>Cliente</th><th>Descripción</th><th>KMs</th></tr></thead><tbody>`;
 
     for (const p of partesVeh) {
       html += `<tr>
@@ -533,7 +635,6 @@ async function generarPDF() {
         <td>${escapeHtml(p.clienteNombre || '—')}</td>
         <td>${escapeHtml(p.descripcion || '—')}</td>
         <td>${Number(p.kms).toLocaleString('es-ES')}</td>
-        <td>${p.estado}</td>
       </tr>`;
     }
 
@@ -558,3 +659,7 @@ window.render_informesKms = render_informesKms;
 window.verMensual = verMensual;
 window.verDetalleVehiculo = verDetalleVehiculo;
 window.generarPDF = generarPDF;
+window.openRepostajeModal = function(){
+  if (!window.REPOSTAJES) { showToast('Módulo de repostajes no disponible', 'error'); return; }
+  window.REPOSTAJES.abrir();
+};

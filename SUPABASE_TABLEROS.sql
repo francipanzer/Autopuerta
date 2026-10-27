@@ -23,6 +23,7 @@ create table if not exists public.tarjetas_tablero (
   clienteid text,
   asignadoid text,
   fechalimite date,
+  fotos jsonb not null default '[]'::jsonb,
   createdat timestamptz not null default now(),
   updatedat timestamptz not null default now()
 );
@@ -59,3 +60,10 @@ begin
     alter publication supabase_realtime add table public.tarjetas_tablero;
   end if;
 end $$;
+
+-- ============================================================
+-- MIGRACIÓN: añadir columna "fotos" a tarjetas_tablero
+-- (fotos adjuntas a las tarjetas del tablero, máx. 6 por tarjeta)
+-- Ejecutar UNA VEZ en Supabase > SQL Editor si la tabla ya existía:
+-- ============================================================
+alter table public.tarjetas_tablero add column if not exists fotos jsonb not null default '[]'::jsonb;

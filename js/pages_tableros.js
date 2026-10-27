@@ -103,6 +103,12 @@ async function renderTableros(container) {
   }
 }
 
+// Helper global: avatar con iniciales de un nombre (mejora visual 7)
+window.avatarIniciales = function(nombre, size = '') {
+  const initials = String(nombre || '?').trim().split(/\s+/).slice(0,2).map(w => w[0]?.toUpperCase() || '').join('') || '?';
+  return '<span class="avatar-iniciales ' + (size ? 'avatar-' + size : '') + '" title="' + escapeTablero(nombre || '') + '">' + initials + '</span>';
+};
+
 function renderTableroCard(card, clientes, empleados) {
   const client = clientes.find(item => String(item.id) === String(card.clienteId));
   const employee = empleados.find(item => String(item.id) === String(card.assigneeId));
@@ -112,13 +118,14 @@ function renderTableroCard(card, clientes, empleados) {
     <article class="board-card" draggable="true" data-card-id="${escapeTablero(card.id)}">
       <h4>${escapeTablero(card.titulo || 'Sin título')}</h4>
       ${card.descripcion ? `<p class="board-card-description">${escapeTablero(card.descripcion)}</p>` : ''}
+      ${(card.fotos && card.fotos.length) ? `<div class="board-card-fotos" style="display:flex;gap:4px;flex-wrap:wrap;margin:6px 0">${card.fotos.slice(0,4).map(f => `<img src="${escapeTablero(f)}" style="width:44px;height:44px;object-fit:cover;border-radius:6px;border:1px solid var(--border)">`).join('')}${card.fotos.length > 4 ? `<span class="badge badge-gray" style="align-self:center">+${card.fotos.length - 4}</span>` : ''}</div>` : ''}
       <div class="board-card-meta">
         ${card.prioridad ? `<span class="badge ${getTableroPriorityClass(card.prioridad)}">${priorityLabels[card.prioridad] || escapeTablero(card.prioridad)}</span>` : ''}
         ${client ? `<span class="badge badge-gray"><i class="fas fa-building"></i> ${escapeTablero(client.nombre)}</span>` : ''}
         ${dueDate ? `<span class="badge badge-gray"><i class="fas fa-calendar"></i> ${dueDate}</span>` : ''}
       </div>
       <div class="board-card-footer">
-        <small>${employee ? `<i class="fas fa-user"></i> ${escapeTablero(employee.nombre)}` : ''}</small>
+        <small>${employee ? window.avatarIniciales(employee.nombre, 'sm') + `<i class="fas fa-user"></i> ${escapeTablero(employee.nombre)}` : ''}</small>
         <div class="board-card-actions">
           <button class="btn btn-outline" type="button" title="Editar tarjeta" aria-label="Editar tarjeta" data-card-action="edit" data-id="${escapeTablero(card.id)}"><i class="fas fa-pen"></i></button>
           <button class="btn btn-outline" type="button" title="Eliminar tarjeta" aria-label="Eliminar tarjeta" data-card-action="delete" data-id="${escapeTablero(card.id)}"><i class="fas fa-trash"></i></button>
@@ -159,7 +166,8 @@ function bindTableroEvents(container) {
       event.dataTransfer.effectAllowed = 'move';
       card.classList.add('is-dragging');
     });
-    card.addEventListener('dragend', () => card.classList.remove('is-dragging'));
+    card.addEventListener('drag', () => card.classList.add('drag-start'));
+    card.addEventListener('dragend', () => card.classList.remove('is-dragging','drag-start'));
     card.addEventListener('dragover', event => {
       event.preventDefault();
       event.stopPropagation();
@@ -273,8 +281,54 @@ window.showTableroCardForm = async function(cardId = '') {
       <div class="form-group"><label for="tarjetaCliente">Cliente</label><select id="tarjetaCliente"><option value="">Sin cliente</option>${clientOptions}</select></div>
       <div class="form-group"><label for="tarjetaResponsable">Responsable</label><select id="tarjetaResponsable"><option value="">Sin asignar</option>${employeeOptions}</select></div>
       <div class="form-group"><label for="tarjetaFecha">Fecha límite</label><input id="tarjetaFecha" type="date" value="${escapeTablero(existing?.dueDate || '')}"></div>
+      <div class="form-group full"><label>Fotos</label>
+        <div id="tarjetaFotosThumbs" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px">${(existing?.fotos || []).map((f, i) => `<img src="${escapeTablero(f)}" data-foto-idx="${i}" title="Clic para quitar" style="width:56px;height:56px;object-fit:cover;border-radius:8px;border:1px solid var(--border);cursor:pointer">`).join('')}</div>
+        <div style="display:flex;gap:8px">
+          <button type="button" class="btn btn-outline btn-sm" onclick="document.getElementById('tarjetaFotosInput').click()"><i class=\"fas fa-image\"></i> Añadir foto</button>
+          <input id="tarjetaFotosInput" type="file" accept="image/*" multiple style="display:none">
+          <button type="button" class="btn btn-outline btn-sm" onclick="document.getElementById('tarjetaFotosCam').click()"><i class=\"fas fa-camera\"></i> Hacer foto</button>
+          <input id="tarjetaFotosCam" type="file" accept="image/*" capture="environment" style="display:none">
+        </div>
+        <small id="tarjetaFotosAviso" style="color:var(--text-muted);display:block;margin-top:4px">Máx. 6 fotos · se guardan con la tarjeta</small>
+      </div>
     </form>`,
     `<button class="btn btn-outline" type="button" onclick="closeModal()">Cancelar</button><button class="btn btn-primary" type="submit" form="tableroCardForm">Guardar</button>`);
+
+  // --- Gestión de fotos de la tarjeta ---
+  const MAX_TARJETA_FOTOS = 6;
+  window.__tarjetaFotos = Array.isArray(existing?.fotos) ? [...existing.fotos] : [];
+  const thumbs = document.getElementById('tarjetaFotosThumbs');
+  const aviso = document.getElementById('tarjetaFotosAviso');
+  const renderThumbs = () => {
+    thumbs.innerHTML = window.__tarjetaFotos.map((f, i) =>
+      `<img src="${f}" data-foto-idx="${i}" title="Clic para quitar" style="width:56px;height:56px;object-fit:cover;border-radius:8px;border:1px solid var(--border);cursor:pointer">`).join('');
+    aviso.textContent = window.__tarjetaFotos.length >= MAX_TARJETA_FOTOS
+      ? 'Máximo alcanzado (6 fotos)'
+      : `Máx. ${MAX_TARJETA_FOTOS} fotos · ${window.__tarjetaFotos.length} añadida(s)`;
+  };
+  thumbs.addEventListener('click', e => {
+    const idx = e.target?.dataset?.fotoIdx;
+    if (idx !== undefined) {
+      window.__tarjetaFotos.splice(Number(idx), 1);
+      renderThumbs();
+    }
+  });
+  const addFiles = async files => {
+    for (const file of Array.from(files || [])) {
+      if (window.__tarjetaFotos.length >= MAX_TARJETA_FOTOS) { showToast('Máximo 6 fotos por tarjeta', 'error'); break; }
+      try {
+        const dataUrl = await compressDoticsPhoto(file);
+        window.__tarjetaFotos.push(dataUrl);
+      } catch (err) {
+        console.error('[Tableros] Error procesando foto:', err);
+        showToast('No se pudo procesar la foto', 'error');
+      }
+    }
+    renderThumbs();
+  };
+  document.getElementById('tarjetaFotosInput').addEventListener('change', e => { addFiles(e.target.files); e.target.value = ''; });
+  document.getElementById('tarjetaFotosCam').addEventListener('change', e => { addFiles(e.target.files); e.target.value = ''; });
+
   document.getElementById('tableroCardForm').addEventListener('submit', async event => {
     event.preventDefault();
     try {
@@ -291,6 +345,7 @@ window.showTableroCardForm = async function(cardId = '') {
         clienteId: getTableroFormValue('tarjetaCliente') || null,
         assigneeId: getTableroFormValue('tarjetaResponsable') || null,
         dueDate: getTableroFormValue('tarjetaFecha') || null,
+        fotos: window.__tarjetaFotos || [],
         order: existing?.estado === state ? (Number(existing.order) || 0) : Math.max(-1, ...statusCards.filter(card => String(card.id) !== String(existing?.id)).map(card => Number(card.order) || 0)) + 1
       };
       if (isEditing) await dbPut('tarjetasTablero', record);

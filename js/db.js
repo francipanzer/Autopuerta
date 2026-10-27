@@ -46,7 +46,9 @@ const TABLA = {
   tarjetasTablero: 'tarjetas_tablero',
   solicitudesMaterial: 'solicitudes_material',
   incidencias: 'incidencias',
-  manuales:      'manuales'
+  manuales:      'manuales',
+  plantillasRevisiones: 'plantillas_revisiones',
+  proveedores:   'proveedores'
 };
 
 // ── Renombrado camelCase ↔ snake_case ──────────────────────
@@ -68,12 +70,14 @@ const REN_OUT = {
   precioVenta:'precioventa',
   stockMinimo:'stockminimo',
   puertaIds:'puertaids',
+  cliente_id:'cliente_Id',
   clienteId:'clienteid',
   tecnicoId:'tecnicoid',
   clienteNombre:'clientenombre',
   tipoPuerta:'tipopuerta',
   kmInicial:'km_inicial',
   puertaId:'puertaid',
+  numeroSerie:'numeroserie',
   boardId:'boardid',
   dueDate:'fechalimite',
   assigneeId:'asignadoid',
@@ -99,9 +103,14 @@ const REN_OUT = {
   createdBy:'createdby',
   articuloId:'articuloid',
   presupuestoId:'presupuestoid',
+  parteId:'parteid',
+  medidasPlanta:'medidasplanta',
   employeeId:'employee_id',
   notaTecnico:'notatecnico',
-  resueltaAt:'resueltaat'
+  resueltaAt:'resueltaat',
+  validoHasta:'validohasta',
+  fotosAlbaran:'fotosalbaran',
+  lineItems:'lineitems'
 };
 const REN_IN = {
   updatedat:'updatedAt',
@@ -117,15 +126,17 @@ const REN_IN = {
   vehiculoid:'vehiculoId',
   ubicacionnombre:'ubicacionNombre',
   ubicaciondireccion:'ubicacionDireccion',
-  precocompra:'precioCompra',
+  preciocompra:'precioCompra',
   precioventa:'precioVenta',
   stockminimo:'stockMinimo',
   puertaids:'puertaIds',
+  cliente_Id:'cliente_id',
   clienteid:'clienteId',
   clientenombre:'clienteNombre',
   tipopuerta:'tipoPuerta',
   km_inicial:'kmInicial',
   puertaid:'puertaId',
+  numeroserie:'numeroSerie',
   boardid:'boardId',
   fechalimite:'dueDate',
   asignadoid:'assigneeId',
@@ -150,9 +161,14 @@ const REN_IN = {
   createdby:'createdBy',
   articuloid:'articuloId',
   presupuestoid:'presupuestoId',
+  parteid:'parteId',
+  medidasplanta:'medidasPlanta',
   employee_id:'employeeId',
   notatecnico:'notaTecnico',
-  resueltaat:'resueltaAt'
+  resueltaat:'resueltaAt',
+  validohasta:'validoHasta',
+  fotosalbaran:'fotosAlbaran',
+  lineitems:'lineItems'
 };
 
 function toDB(obj){
@@ -184,7 +200,7 @@ function nextId(prefix){
 }
 
 // ── Caché IndexedDB (lectura offline) ──────────────────────
-const CACHE_DB='autopuerta_cache', CACHE_STORE='cache', TTL=5*60_000;
+const CACHE_DB='autopuerta_cache', CACHE_STORE='cache', TTL=5*60_000, BG_REFRESH_AFTER=60_000;
 let _cdb=null;
 
 function openCache(){
@@ -225,6 +241,7 @@ async function cacheWrite(store,data,complete=data!==null){
 }
 
 async function cacheInvalidate(store){
+  _storeVersion[store]=(_storeVersion[store]||0)+1;
   const entry=await cacheReadEntry(store);
   const db=await openCache();
   const tx=db.transaction(CACHE_STORE,'readwrite');
@@ -321,6 +338,7 @@ async function dbAdd(store,data){
   }
   const tableName=TABLA[store]||store;
   const input={...data};
+  delete input._light; delete input.fotosurls; delete input.fotoscount; // campos solo del listado ligero
   if(['partesTrabajo','revisiones','solicitudesMaterial'].includes(store) && window.authState?.user && !Object.prototype.hasOwnProperty.call(input,'createdBy')){
     input.createdBy=window.authState.user.id;
   }
@@ -363,7 +381,7 @@ function mergePartesTrabajo(serverRecord, localRecord){
   // Campos que se priorizan del servidor (no se sobrescriben)
   const serverPriority=['id','createdAt','createdBy','updatedat'];
   // Campos que se priorizan del local (última edición del usuario)
-  const localPriority=['estado','notas','ubicacionId','ubicacionNombre','ubicacionDireccion','kmInicial','kmFinal','horaEntrada','horaSalida','fotos'];
+  const localPriority=['estado','notas','ubicacionId','ubicacionNombre','ubicacionDireccion','kmInicial','kmFinal','horaEntrada','horaSalida','fotos','materiales'];
   // Campos que se combinan (arrays)
   const mergeFields=['puertaIds'];
   
@@ -396,6 +414,7 @@ async function dbPut(store,data){
   rejectAuthenticatedOfflineWrite();
   const tableName=TABLA[store]||store;
   const input={...data};
+  delete input._light; delete input.fotosurls; delete input.fotoscount; // campos solo del listado ligero
   if(['partesTrabajo','revisiones','solicitudesMaterial'].includes(store) && window.authState?.user && !Object.prototype.hasOwnProperty.call(input,'createdBy')){
     input.createdBy=window.authState.user.id;
   }
@@ -433,8 +452,13 @@ async function dbPut(store,data){
   }
   try{
     // Para partes de trabajo, hacer merge por campos si hay conflicto
+    let parteExiste=false;
     if(store==='partesTrabajo'){
-      const {data:existing}=await supabaseDB.from(tableName).select('*').eq('id',obj.id).maybeSingle();
+      // La lectura directa de la tabla está restringida por columnas; se usa la función RPC
+      const {data:rows,error:readError}=await supabaseDB.rpc('get_app_work_parts',{p_id:String(obj.id)});
+      if(readError) throw readError;
+      const existing=Array.isArray(rows)?rows[0]:null;
+      parteExiste=!!existing;
       if(existing && existing.updatedat){
         const existingTime=new Date(existing.updatedat).getTime();
         const newTime=obj.updatedat?new Date(obj.updatedat).getTime():Date.now();
@@ -445,7 +469,11 @@ async function dbPut(store,data){
         }
       }
     }
-    const upsertQuery=supabaseDB.from(tableName).upsert(obj);
+    // Un upsert exige SELECT sobre las columnas restringidas (DNI, firmas, fotos); un UPDATE no
+    const writeQuery=(store==='partesTrabajo' && parteExiste)
+      ? (()=>{const {id:_id,...changes}=obj;return supabaseDB.from(tableName).update(changes).eq('id',obj.id);})()
+      : supabaseDB.from(tableName).upsert(obj);
+    const upsertQuery=writeQuery;
     const {data:result,error}=await (store==='partesTrabajo'
       ? upsertQuery.select('id').maybeSingle()
       : upsertQuery.select().maybeSingle());
@@ -510,23 +538,10 @@ async function dbGetAll(store){
   const cached=entry?.data;
   const cacheFresh=Array.isArray(cached) && entry.complete!==false && Date.now()-entry.ts<TTL;
   if(!navigator.onLine) return cacheApplyPending(store,Array.isArray(cached)?cached:[]);
-  if(store==='partesTrabajo' && window.authState?.user){
-    const {data,error}=await supabaseDB.rpc('get_app_work_parts');
-    if(error) throw error;
-    const result=await cacheApplyPending(store,fromJSArray(data||[]));
-    await cacheWrite(store,result);
-    return result;
-  }
-  if(store==='almacen' && window.authState?.user){
-    const {data,error}=await supabaseDB.rpc('get_app_warehouse');
-    if(error) throw error;
-    const result=await cacheApplyPending(store,fromJSArray(data||[]));
-    await cacheWrite(store,result);
-    return result;
-  }
   if(cacheFresh){
     const result=await cacheApplyPending(store,cached);
-    if(navigator.onLine) refreshStoreCache(store,tableName).catch(()=>{});
+    // Realtime invalida la caché ante cualquier cambio; solo se refresca en segundo plano si tiene cierta edad
+    if(Date.now()-entry.ts>=BG_REFRESH_AFTER) refreshStoreCache(store,tableName).catch(()=>{});
     return result;
   }
   try{
@@ -537,13 +552,38 @@ async function dbGetAll(store){
   }
 }
 
-async function refreshStoreCache(store,tableName){
-  const {data,error}=await supabaseDB.from(tableName).select();
-  if(error) throw error;
-  const result=await cacheApplyPending(store,fromJSArray(data||[]));
-  await cacheWrite(store,result);
-  if(window.__onDataSynced) window.__onDataSynced(store,result);
-  return result;
+const _storeVersion = {};
+const _refreshInFlight = {};
+function refreshStoreCache(store,tableName){
+  // Si ya hay una descarga en curso de la misma tabla, se reutiliza
+  if(_refreshInFlight[store]) return _refreshInFlight[store];
+  const promise=(async()=>{
+    let result;
+    for(let attempt=0;attempt<3;attempt++){
+      const version=_storeVersion[store]||0;
+      // Partes y almacén se leen con RPC (columnas restringidas por rol)
+      const rpcName=window.authState?.user
+        ? (store==='partesTrabajo' ? 'get_app_work_parts_list' : store==='almacen' ? 'get_app_warehouse' : null)
+        : null;
+      let {data,error}=rpcName
+        ? await supabaseDB.rpc(rpcName)
+        : await supabaseDB.from(tableName).select();
+      // Si el listado ligero aún no está instalado en Supabase, se usa el completo
+      if(error && rpcName==='get_app_work_parts_list') ({data,error}=await supabaseDB.rpc('get_app_work_parts'));
+      if(error) throw error;
+      result=await cacheApplyPending(store,fromJSArray(data||[]));
+      // Si llegó un cambio en tiempo real durante la descarga, los datos pueden estar ya viejos: se repite
+      if((_storeVersion[store]||0)!==version && attempt<2) continue;
+      await cacheWrite(store,result,(_storeVersion[store]||0)===version);
+      break;
+    }
+    if(window.__onDataSynced) window.__onDataSynced(store,result);
+    return result;
+  })();
+  _refreshInFlight[store]=promise;
+  const clear=()=>{ if(_refreshInFlight[store]===promise) delete _refreshInFlight[store]; };
+  promise.then(clear,clear);
+  return promise;
 }
 
 async function dbDelete(store,id){

@@ -1,4 +1,4 @@
-const CACHE_NAME = 'autopuerta-v82';  // refresh shell after budget validation
+const CACHE_NAME = 'autopuerta-v103';  // hoja-medidas fix alineación + logo PDF + repostajes OCR
 
 // ═══════════════════════════════════════════════════════════
 //  INSTALL
@@ -86,25 +86,34 @@ self.addEventListener('fetch', event => {
   const isCode = /\.(js|css)$/i.test(url.pathname);       // 🔧 separado del resto
   const isMedia = /\.(png|jpg|jpeg|svg|ico|webp|woff2?)$/i.test(url.pathname);
 
+  // Si no hay red ni copia en caché, se devuelve una respuesta válida en vez de undefined
+  const offlineResponse = () => new Response('', { status: 503, statusText: 'Service Unavailable' });
+
+  const putInCache = (request, response) => {
+    // Solo respuestas completas y propias; las parciales (206) o opacas no se pueden cachear
+    if (response.ok && response.status === 200) {
+      const clone = response.clone();
+      caches.open(CACHE_NAME).then(c => c.put(request, clone)).catch(() => {});
+    }
+  };
+
+  // 'no-cache' obliga a revalidar con el servidor: evita que el navegador móvil sirva
+  // un index.html o JS viejo de su caché HTTP aunque el service worker sea nuevo
   const networkFirst = () =>
-    fetch(event.request).then(response => {
-      if (response.ok) {
-        const clone = response.clone();
-        caches.open(CACHE_NAME).then(c => c.put(event.request, clone));
-      }
+    fetch(new Request(event.request, { cache: 'no-cache' })).then(response => {
+      putInCache(event.request, response);
       return response;
-    }).catch(() => caches.match(event.request));
+    }).catch(() =>
+      caches.match(event.request).then(cached => cached || offlineResponse())
+    );
 
   const cacheFirst = () =>
     caches.match(event.request).then(cached =>
       cached || fetch(event.request).then(response => {
-        if (response.ok) {
-          const clone = response.clone();
-          caches.open(CACHE_NAME).then(c => c.put(event.request, clone));
-        }
+        putInCache(event.request, response);
         return response;
       })
-    );
+    ).catch(() => offlineResponse());
 
   if (isHtml)      event.respondWith(networkFirst());     // siempre última versión
   else if (isCode) event.respondWith(networkFirst());     // 🔧 ANTES cache-first → causa del bug

@@ -1,4 +1,4 @@
-const { jsPDF } = window.jspdf;
+let jsPDF; // se asigna al cargar jsPDF bajo demanda (ver ensurePdfLibs)
 
 // Inserta una imagen dentro de un recuadro conservando su proporción y centrada.
 function pdfAddImageContain(doc, data, x, y, w, h) {
@@ -74,7 +74,11 @@ function getCompanyLogoDataUrl() {
 }
 
 async function loadCompanyLogoDataUrl() {
+  // 1º: imagen corporativa propia (logo-empresa.png en la carpeta del proyecto).
+  // 2º: icono de la app como respaldo.
   const candidates = [
+    './logo-empresa.png',
+    'logo-empresa.png',
     './icons/icon-512.png',
     './icons/icon-192.png',
     '/icons/icon-512.png',
@@ -107,44 +111,58 @@ function createPDF(title, subtitle = 'Gestión de Puertas Automáticas', statusT
   const doc = new jsPDF();
   const p = PDF_BRAND.primary;
   const a = statusColor || PDF_BRAND.accent;
-  const textX = logo ? 38 : 14;
+  const textX = logo ? 43 : 20;
 
-  doc.setFillColor(p[0], p[1], p[2]);
-  doc.rect(0, 0, 210, 30, 'F');
-  doc.setFillColor(PDF_BRAND.accent[0], PDF_BRAND.accent[1], PDF_BRAND.accent[2]);
-  doc.rect(0, 30, 210, 1.6, 'F');
+  doc.setFillColor(PDF_BRAND.shadow[0], PDF_BRAND.shadow[1], PDF_BRAND.shadow[2]);
+  doc.roundedRect(15.2, 7.4, 182, 25, 3, 3, 'F');
+  doc.setFillColor(PDF_BRAND.panel[0], PDF_BRAND.panel[1], PDF_BRAND.panel[2]);
+  doc.setDrawColor(PDF_BRAND.panelBorder[0], PDF_BRAND.panelBorder[1], PDF_BRAND.panelBorder[2]);
+  doc.setLineWidth(0.45);
+  doc.roundedRect(14, 6, 182, 25, 3, 3, 'FD');
   if (logo) {
-    try { doc.addImage(logo, 'PNG', 14, 6, 18, 18); }
+    doc.setFillColor(255, 255, 255);
+    doc.setDrawColor(PDF_BRAND.panelBorder[0], PDF_BRAND.panelBorder[1], PDF_BRAND.panelBorder[2]);
+    doc.roundedRect(19, 9.5, 18, 18, 3.5, 3.5, 'FD');
+    try { doc.addImage(logo, 'PNG', 20.8, 11.3, 14.4, 14.4); }
     catch (err) { console.warn('No se pudo cargar el logo en el PDF:', err); }
   }
-  doc.setTextColor(255,255,255);
-  doc.setFontSize(16);
+  doc.setTextColor(p[0], p[1], p[2]);
+  doc.setFontSize(18);
   doc.setFont(undefined, 'bold');
-  doc.text('Valgom', textX, 15);
+  doc.text('VALGOM', textX, 22.5);
   doc.setFontSize(8);
-  doc.setFont(undefined, 'normal');
-  doc.text(subtitle, textX, 22);
   doc.setFont(undefined, 'bold');
-  doc.text(title, 196, 15, { align: 'right' });
+  doc.setTextColor(PDF_BRAND.accentDark[0], PDF_BRAND.accentDark[1], PDF_BRAND.accentDark[2]);
+  doc.text(title, 190, 17.5, { align: 'right' });
   doc.setFont(undefined, 'normal');
-  doc.text(formatDate(new Date().toISOString()), 196, 22, { align: 'right' });
+  doc.setTextColor(PDF_BRAND.muted[0], PDF_BRAND.muted[1], PDF_BRAND.muted[2]);
+  doc.text(formatDate(new Date().toISOString()), 190, 24, { align: 'right' });
 
   if (statusText) {
     doc.setFillColor(a[0], a[1], a[2]);
-    doc.roundedRect(142, 8, 52, 11, 3, 3, 'F');
+    doc.roundedRect(92, 12, 42, 10, 5, 5, 'F');
     doc.setTextColor(255,255,255);
-    doc.setFontSize(8);
+    doc.setFontSize(7.5);
     doc.setFont(undefined, 'bold');
-    doc.text(String(statusText).toUpperCase(), 168, 15, { align: 'center' });
+    doc.text(String(statusText).toUpperCase(), 113, 18.4, { align: 'center' });
   }
 
   doc.setTextColor(PDF_BRAND.text[0], PDF_BRAND.text[1], PDF_BRAND.text[2]);
   return doc;
 }
 
-async function createBrandedPDF(title, subtitle, statusText, statusColor){
-  const logo = await getCompanyLogoDataUrl();
-  return createPDF(title, subtitle, statusText, statusColor, logo);
+async function createBrandedPDF(title, subtitle, statusText, statusColor, sinLogo = false, sinCabecera = false){
+  // jsPDF/autotable se cargan bajo demanda; sin esto falla "jsPDF is not defined"
+  await window.ensurePdfLibs();
+  jsPDF = window.jspdf.jsPDF;
+  const logo = sinLogo ? null : await getCompanyLogoDataUrl();
+  const doc = createPDF(title, subtitle, statusText, statusColor, logo);
+  if(sinCabecera){
+    // Eliminar la franja de cabecera: página en blanco para dibujar desde arriba
+    doc.deletePage(1);
+    doc.addPage();
+  }
+  return doc;
 }
 
 function addPDFFooter(doc,page){
@@ -171,11 +189,16 @@ function pdfSectionTitle(doc, texto, y){
 }
 
 // Tarjeta con sombra suave y borde fino
-function pdfBox(doc, x, y, w, h, fillColor = PDF_BRAND.card, borderColor = PDF_BRAND.cardBorder, shadowColor = PDF_BRAND.shadow){
+function pdfBox(doc, x, y, w, h, fillColor = PDF_BRAND.panel, borderColor = PDF_BRAND.panelBorder, shadowColor = PDF_BRAND.shadow){
+  // Todas las tarjetas comparten el estilo del encabezado (verde suave); solo se respetan los colores semánticos (avisos, éxito…)
+  if (fillColor === PDF_BRAND.card || fillColor === PDF_BRAND.soft || fillColor === PDF_BRAND.white) fillColor = PDF_BRAND.panel;
+  if (borderColor === PDF_BRAND.cardBorder) borderColor = PDF_BRAND.panelBorder;
+  if (shadowColor === PDF_BRAND.shadowStrong) shadowColor = PDF_BRAND.shadow;
   doc.setFillColor(shadowColor[0],shadowColor[1],shadowColor[2]);
-  doc.roundedRect(x+1.2,y+1.4,w,h,3,3,'F');
+  doc.roundedRect(x+1.8,y+2,w,h,3,3,'F');   // sombra ancha (1.8mm) para dar profundidad
+  doc.roundedRect(x+0.9,y+1,w,h,3,3,'F');   // segunda capa: sombra más suave
   doc.setFillColor(fillColor[0],fillColor[1],fillColor[2]);
-  doc.setLineWidth(0.45);
+  doc.setLineWidth(0.55);
   doc.setDrawColor(borderColor[0],borderColor[1],borderColor[2]);
   doc.roundedRect(x,y,w,h,3,3,'FD');
 }
@@ -233,7 +256,7 @@ function pdfTitledTextCard(doc,title,text,x,y,w,fill=PDF_BRAND.card,border=PDF_B
 }
 
 function pdfTableStyle(extra = {}){
-  const p = PDF_BRAND.primary, s = PDF_BRAND.card, b = PDF_BRAND.cardBorder;
+  const p = PDF_BRAND.primary, s = PDF_BRAND.panel, b = PDF_BRAND.panelBorder;
   return Object.assign({
     theme:'striped',
     margin:{left:14,right:14,bottom:18},
@@ -451,78 +474,151 @@ window.generatePDF_clientes = async function(id){
 window.generatePDF_presupuesto = async function(id, opts){
   const p = await dbGet('presupuestos',id);
   if(!p){showToast('Presupuesto no encontrado','error');return}
-  const doc = await createBrandedPDF('Presupuesto '+p.id, 'Gestión de Puertas Automáticas');
+  const doc = await createBrandedPDF('Presupuesto', '', null, null, true, true); // sin franja superior: el presupuesto empieza con la tarjeta empresa
   const company=typeof window.getCompanySettings==='function'
     ? await window.getCompanySettings()
     : {trade_name:'Valgom'};
-  const X = 14, W = 182, third = 56, gap = 7;
-  let y = 42;
+  const logo = await getCompanyLogoDataUrl();
+  const X = 14, W = 182;
+  let y = 14; // sin franja superior: el contenido empieza arriba del todo y gana espacio
 
+  // Cargar datos del cliente para su tarjeta
+  let cliente = null;
+  try{ cliente = p.clienteId ? await dbGet('clientes',p.clienteId) : null; }catch(_){ }
+
+  const FILA = 11;   // alto de cada fila de campos
+  const CAB = 14;    // alto del título de tarjeta
+  const colA=X+8, colB=X+72, colC=X+130; // columnas fijas, alineadas en todas las tarjetas
+
+  // ── TARJETA 1: Empresa (logo + datos) ──
   const hasLegal=Boolean(company.legal_name||company.tax_id);
   const hasAddress=Boolean(company.address);
   const hasContact=Boolean(company.phone||company.email||company.website);
-  const companyCardHeight=18+(hasLegal?10:0)+(hasAddress?10:0)+(hasContact?10:0);
+  const compRows=(hasLegal?1:0)+(hasAddress?1:0)+(hasContact&&!hasLegal&&!hasAddress?1:0);
+  const companyCardHeight=CAB+compRows*FILA+6;
   pdfBox(doc,X,y,W,companyCardHeight,PDF_BRAND.panel,PDF_BRAND.panelBorder);
-  pdfCardHeading(doc,company.trade_name||company.legal_name||'Valgom',X+6,y+8);
-  let companyInfoY=y+21;
+  if(logo){
+    try{ doc.addImage(logo,'PNG',X+7,y+5,12,12); }
+    catch(err){ try{ pdfAddImageContain(doc,logo,X+7,y+5,12,12); }catch(_){}}
+  }
+  doc.setFontSize(12); doc.setFont(undefined,'bold');
+  doc.setTextColor(PDF_BRAND.text[0],PDF_BRAND.text[1],PDF_BRAND.text[2]);
+  doc.text(company.trade_name||company.legal_name||'Valgom',X+(logo?22:8),y+10);
+  doc.setFontSize(7); doc.setFont(undefined,'normal');
+  doc.setTextColor(PDF_BRAND.muted[0],PDF_BRAND.muted[1],PDF_BRAND.muted[2]);
+  doc.text('Gestión de puertas automáticas',X+(logo?22:8),y+14);
+  let cy=y+CAB+5.5;
   if(hasLegal){
-    pdfField(doc,'Razón social',company.legal_name||'—',X+6,companyInfoY,85);
-    pdfField(doc,'CIF / NIF',company.tax_id||'—',X+98,companyInfoY,78);
-    companyInfoY+=10;
+    pdfField(doc,'Razón social',company.legal_name||'—',colA,cy,58);
+    pdfField(doc,'CIF / NIF',company.tax_id||'—',colB,cy,52);
+    if(company.phone) pdfField(doc,'Teléfono',company.phone,colC,cy,46);
+    cy+=FILA;
   }
   if(hasAddress){
-    pdfField(doc,'Dirección',company.address,X+6,companyInfoY,W-12);
-    companyInfoY+=10;
+    pdfField(doc,'Dirección',company.address,colA,cy,58);
+    if(company.email) pdfField(doc,'Email',company.email,colB,cy,52);
+    if(company.website) pdfField(doc,'Web',company.website,colC,cy,46);
+    cy+=FILA;
   }
-  if(hasContact){
-    pdfField(doc,'Teléfono',company.phone||'—',X+6,companyInfoY,48);
-    pdfField(doc,'Email',company.email||'—',X+61,companyInfoY,66);
-    pdfField(doc,'Web',company.website||'—',X+135,companyInfoY,41);
+  if(hasContact && !hasLegal && !hasAddress){
+    pdfField(doc,'Teléfono',company.phone||'—',colA,cy,58);
+    pdfField(doc,'Email',company.email||'—',colB,cy,52);
+    pdfField(doc,'Web',company.website||'—',colC,cy,46);
+    cy+=FILA;
   }
-  y+=companyCardHeight+6;
+  y+=companyCardHeight+8;
 
-  y = pdfSectionTitle(doc,'Datos del presupuesto',y);
-  pdfBox(doc,X,y,W,23,PDF_BRAND.panel,PDF_BRAND.panelBorder);
-  pdfField(doc,'Cliente',p.clienteNombre||'—',X+5,y+15,W-58);
-  const statusText=String(getStatusLabel(p.estado)||p.estado||'').toUpperCase();
-  doc.setFillColor(PDF_BRAND.accent[0],PDF_BRAND.accent[1],PDF_BRAND.accent[2]);
-  doc.roundedRect(X+W-50,y+5,44,12,3,3,'F');
-  doc.setFontSize(7);
-  doc.setFont(undefined,'bold');
-  doc.setTextColor(255,255,255);
-  doc.text(statusText,X+W-28,y+12.5,{align:'center',maxWidth:40});
-  y += 29;
-  pdfInfoCard(doc,'Nº Presupuesto',p.id,X,y,third);
-  pdfInfoCard(doc,'Fecha',formatDate(p.fecha),X+third+gap,y,third);
-  pdfInfoCard(doc,'Válido hasta',formatDate(p.validoHasta),X+(third+gap)*2,y,third);
-  y += 25;
+  // ── TARJETA 2: Datos del cliente ──
+  const cliRows=1+(cliente?.email?1:0)+(cliente?.direccion?1:0);
+  const cliCardHeight=CAB+cliRows*FILA+6;
+  pdfBox(doc,X,y,W,cliCardHeight,PDF_BRAND.panel,PDF_BRAND.panelBorder);
+  pdfCardHeading(doc,'Datos del cliente',colA,y+8);
+  doc.setFontSize(12); doc.setFont(undefined,'bold');
+  doc.setTextColor(PDF_BRAND.text[0],PDF_BRAND.text[1],PDF_BRAND.text[2]);
+  doc.text(p.clienteNombre||'Cliente',colA,y+14,{maxWidth:W-16});
+  let ky=y+CAB+5.5;
+  pdfField(doc,'Contacto',cliente?.contacto||'—',colA,ky,58);
+  pdfField(doc,'Teléfono',cliente?.telefono||'—',colB,ky,52);
+  pdfField(doc,'DNI / NIF',cliente?.dni||'—',colC,ky,46);
+  ky+=FILA;
+  if(cliente?.email){
+    pdfField(doc,'Email',cliente.email,colA,ky,58);
+    if(cliente?.direccion) pdfField(doc,'Dirección',cliente.direccion,colB,ky,W-(colB-X)-8);
+    ky+=FILA;
+  } else if(cliente?.direccion){
+    pdfField(doc,'Dirección',cliente.direccion,colA,ky,W-16);
+    ky+=FILA;
+  }
+  y+=cliCardHeight+8;
+
+  // ── TARJETA 3: Datos del presupuesto ──
+  const presCardHeight=CAB+2*FILA+6;
+  pdfBox(doc,X,y,W,presCardHeight,PDF_BRAND.panel,PDF_BRAND.panelBorder);
+  pdfCardHeading(doc,'Datos del presupuesto',colA,y+8);
+  let py=y+CAB+5.5;
+  pdfField(doc,'Nº Presupuesto',p.id||'—',colA,py,58);
+  pdfField(doc,'Fecha',formatDate(p.fecha),colB,py,52);
+  pdfField(doc,'Válido hasta',formatDate(p.validoHasta),colC,py,46);
+  py+=FILA;
+  pdfField(doc,'Parte asociado',p.parteId||'—',colA,py,58);
+  pdfField(doc,'Estado',getStatusLabel(p.estado)||p.estado||'—',colB,py,52);
+  py+=FILA;
+  y+=presCardHeight+8;
 
   if(p.lineItems && p.lineItems.length>0){
-    y = pdfSectionTitle(doc,'Conceptos',y);
     const tableData = p.lineItems.map((item,i)=>[i+1,item.descripcion||'—',item.tipoId||'—',item.cantidad,formatCurrency(item.precio),formatCurrency(item.cantidad*item.precio)]);
-    doc.autoTable(pdfTableStyle({startY:y,head:[['#','Descripción','Tipo','Cant.','P. Unitario','Subtotal']],body:tableData,columnStyles:{0:{cellWidth:10,halign:'center'},2:{cellWidth:26},3:{cellWidth:16,halign:'center'},4:{cellWidth:28,halign:'right'},5:{cellWidth:28,halign:'right'}}}));
-    y = doc.lastAutoTable.finalY + 10;
+    doc.autoTable(pdfTableStyle({startY:y,head:[['#','Descripción','Tipo','Cant.','P. Unitario','Importe']],body:tableData,columnStyles:{0:{cellWidth:10,halign:'center'},2:{cellWidth:26},3:{cellWidth:16,halign:'center'},4:{cellWidth:28,halign:'right'},5:{cellWidth:28,halign:'right'}}}));
+    y = doc.lastAutoTable.finalY + 8;
   }
 
-  if(y > 232){ doc.addPage(); y = 20; }
-  const tx = 126, tw = 70;
-  pdfBox(doc,tx,y,tw,34);
-  doc.setFontSize(9); doc.setFont(undefined,'normal');
+  // ── Desglose de totales: debajo de las líneas, tarjeta a ancho completo ──
+  if(y+46>270){ doc.addPage(); y = 24; }
+  const th = 42;
+  pdfBox(doc,X,y,W,th);
+  let ty=y+10;
+  doc.setFontSize(9.5); doc.setFont(undefined,'normal');
   doc.setTextColor(PDF_BRAND.muted[0],PDF_BRAND.muted[1],PDF_BRAND.muted[2]);
-  doc.text('Subtotal',tx+6,y+9); doc.text('IVA (21%)',tx+6,y+16);
+  doc.text('Subtotal',X+8,ty);
+  doc.text('IVA (21%)',X+8,ty+6.5);
   doc.setTextColor(PDF_BRAND.text[0],PDF_BRAND.text[1],PDF_BRAND.text[2]);
-  doc.text(formatCurrency(p.subtotal||0),tx+tw-6,y+9,{align:'right'});
-  doc.text(formatCurrency(p.iva||0),tx+tw-6,y+16,{align:'right'});
+  doc.text(formatCurrency(p.subtotal||0),X+W-8,ty,{align:'right'});
+  doc.text(formatCurrency(p.iva||0),X+W-8,ty+6.5,{align:'right'});
+  // Banda del total destacada
   doc.setFillColor(PDF_BRAND.accent[0],PDF_BRAND.accent[1],PDF_BRAND.accent[2]);
-  doc.roundedRect(tx,y+21,tw,13,3,3,'F');
-  doc.setTextColor(255,255,255); doc.setFont(undefined,'bold'); doc.setFontSize(11);
-  doc.text('TOTAL',tx+6,y+29.5);
-  doc.text(formatCurrency(p.total||0),tx+tw-6,y+29.5,{align:'right'});
-  y += 44;
+  doc.roundedRect(X+5,y+20,W-10,17,3,3,'F');
+  doc.setTextColor(255,255,255); doc.setFont(undefined,'bold'); doc.setFontSize(12);
+  doc.text('TOTAL',X+12,y+31.5);
+  doc.text(formatCurrency(p.total||0),X+W-12,y+31.5,{align:'right'});
+  y += th + 8;
 
-  if(p.notas){
-    if(y > 245){ doc.addPage(); y = 24; }
-    y = pdfTitledTextCard(doc,'Notas',p.notas,X,y,W,PDF_BRAND.warn,PDF_BRAND.warnBorder,PDF_BRAND.warnText)+8;
+  // Notas: bloque desactivado a petición del cliente (el dato sigue en BD, no se imprime)
+
+  // ── Hoja de medidas rellena (página extra) ──
+  if(p.medidasPlanta && p.medidasPlanta.sistema==='hoja-v1' && p.medidasPlanta.imagenUrl){
+    doc.addPage();
+    doc.setFontSize(14); doc.setFont(undefined,'bold'); doc.setTextColor(PDF_BRAND.text[0],PDF_BRAND.text[1],PDF_BRAND.text[2]);
+    doc.text('Hoja de medidas — ' + (p.medidasPlanta.tipoNombre||''), 14, 18);
+    doc.setFontSize(9); doc.setFont(undefined,'normal');
+    doc.setTextColor(PDF_BRAND.muted[0],PDF_BRAND.muted[1],PDF_BRAND.muted[2]);
+    doc.text('Cliente: ' + (p.clienteNombre||'—') + '   ·   Fecha: ' + (p.medidasPlanta.fecha||'—') + '   ·   Técnico: ' + (p.medidasPlanta.tecnico||'—'), 14, 25);
+    try{
+      const bgUrl = p.medidasPlanta.imagenUrl;
+      const dataUrl = bgUrl.startsWith('data:') ? bgUrl : (await fetch(bgUrl).then(r=>r.blob()).then(b=>new Promise(res=>{
+        const fr=new FileReader(); fr.onload=()=>res(fr.result); fr.readAsDataURL(b);
+      })));
+      const fmt = dataUrl.includes('image/png') ? 'PNG' : 'JPEG';
+      doc.addImage(dataUrl, fmt, 14, 32, 182, 260, undefined, 'FAST');
+      // Escribir los valores encima (posición en % sobre la imagen 182×260 mm)
+      doc.setFontSize(10); doc.setFont(undefined,'bold'); doc.setTextColor(15,23,42);
+      (p.medidasPlanta.campos||[]).forEach(c=>{
+        const v = String(p.medidasPlanta.valores?.[c.id] ?? '').trim();
+        if(!v) return;
+        const cx = 14 + (c.x/100)*182;
+        const cy = 32 + (c.y/100)*260;
+        const cw = ((c.w||14)/100)*182;
+        doc.text(String(v), cx + cw/2, cy + 4, {align:'center', maxWidth: cw});
+      });
+    }catch(e){ console.warn('Hoja de medidas en PDF:', e); }
   }
   addPDFFootersAllPages(doc);
   const fileName = 'presupuesto_'+p.id+'.pdf';
@@ -614,13 +710,15 @@ window.generatePDF_partes = async function(id){
   y += summaryHeight + 6;
 
   // ── Servicio y técnico ──
-  pdfBox(doc,14,y,182,42,PDF_BRAND.soft,PDF_BRAND.cardBorder);
+  pdfBox(doc,14,y,182,55);
   pdfCardHeading(doc,'Servicio y técnico',20,y+8);
   pdfField(doc,'Técnico',p.empleadoNombre||'—',20,y+20,78);
   pdfField(doc,'Tipo de puerta',p.tipoPuerta||'—',108,y+20,80);
-  pdfField(doc,'Puertas',puertasTexto,20,y+33,78);
-  pdfField(doc,'Km · horas · fotos',(p.kms||0)+' km · '+(p.horas||0)+' h · '+(p.fotos?.length||0),108,y+33,80);
-  y += 50;
+  pdfField(doc,'Puertas',puertasTexto,20,y+33,170);
+  pdfField(doc,'Kilómetros',(p.kms||0)+' km',20,y+46,50);
+  pdfField(doc,'Horas',(p.horas||0)+' h',80,y+46,50);
+  pdfField(doc,'Fotos',String(p.fotos?.length||p.fotoscount||0),140,y+46,50);
+  y += 63;
 
   // ── Trabajo realizado ──
   const descriptionLines=doc.splitTextToSize(p.descripcion||'—',170);
@@ -628,7 +726,7 @@ window.generatePDF_partes = async function(id){
   const descriptionHeight=descriptionLines.length*4.5;
   const notesHeight=notesLines.length?8+notesLines.length*4.5:0;
   const workHeight=27+descriptionHeight+notesHeight;
-  pdfBox(doc,14,y,182,workHeight,PDF_BRAND.soft,PDF_BRAND.cardBorder);
+  pdfBox(doc,14,y,182,workHeight);
   pdfCardHeading(doc,'Trabajo realizado',20,y+8);
   let textY=y+19;
   doc.setFontSize(7);
@@ -656,6 +754,56 @@ window.generatePDF_partes = async function(id){
     doc.text(notesLines,20,textY);
   }
   y+=workHeight+8;
+
+  // ── Material utilizado ──
+  const materialesPdf=(Array.isArray(p.materiales)?p.materiales:[]).filter(m=>m&&String(m.descripcion||'').trim());
+  if(materialesPdf.length){
+    if(y+34>270){doc.addPage();y=24;}
+    y=pdfSectionTitle(doc,'Material utilizado',y);
+    doc.autoTable(pdfTableStyle({
+      startY:y,
+      margin:{left:14,right:14,top:24,bottom:18},
+      head:[['#','Material','Cantidad','Unidad']],
+      body:materialesPdf.map((m,i)=>[i+1,String(m.descripcion),String(Number(m.cantidad)||0).replace('.',','),String(m.unidad||'ud')]),
+      columnStyles:{0:{cellWidth:10,halign:'center'},2:{cellWidth:28,halign:'right'},3:{cellWidth:24,halign:'center'}}
+    }));
+    y=(doc.lastAutoTable?.finalY||y)+8;
+  }
+  // ── Fotografías del parte: enlaces a las fotos (no se incrustan en el PDF) ──
+  const partPhotos=(Array.isArray(p.fotos)?p.fotos:[]).filter(f=>typeof f==='string'&&f);
+  if(partPhotos.length){
+    const urls=[];
+    let migrated=false;
+    for(const photo of partPhotos){
+      if(photo.startsWith('data:image/')){
+        const url=await window.uploadParteFoto(photo);
+        if(url){urls.push(url);migrated=true;}
+        else urls.push(null);
+      }else urls.push(photo);
+    }
+    // Las fotos antiguas en base64 quedan guardadas como URL para no volver a subirlas
+    if(migrated){
+      try{await dbPut('partesTrabajo',{...p,fotos:urls.map((u,i)=>u||partPhotos[i])});}
+      catch(error){console.warn('No se pudieron guardar las URLs de las fotos:',error);}
+    }
+    if(y+24>270){doc.addPage();y=24;}
+    y=pdfSectionTitle(doc,'Fotografías',y);
+    urls.forEach((url,index)=>{
+      if(y+9>270){doc.addPage();y=24;}
+      doc.setFont(undefined,'normal');
+      doc.setFontSize(9);
+      if(url){
+        doc.setTextColor(37,99,235);
+        doc.textWithLink('Foto '+(index+1)+' — abrir foto',20,y+4,{url});
+      }else{
+        doc.setTextColor(PDF_BRAND.muted[0],PDF_BRAND.muted[1],PDF_BRAND.muted[2]);
+        doc.text('Foto '+(index+1)+' — no disponible (sin conexión al generar el PDF)',20,y+4);
+      }
+      y+=7;
+    });
+    doc.setTextColor(PDF_BRAND.text[0],PDF_BRAND.text[1],PDF_BRAND.text[2]);
+    y+=4;
+  }
 
   // ═══════════ BLOQUE DE FIRMAS (ROBUSTO - SIN SOLAPAMIENTOS) ═══════════
   const signatureSpace=48;
@@ -786,18 +934,24 @@ window.generatePDF_revision=async function(revisionId,{download=true}={}){
       if(typeof imageData!=='string')continue;
       if(!imageData.startsWith('data:image/'))imageData=await urlToCompressedJPEG(imageData);
       if(!imageData)continue;
-      if(y+74>276){doc.addPage();y=24;}
-      pdfBox(doc,14,y,182,68,PDF_BRAND.white,PDF_BRAND.cardBorder,PDF_BRAND.shadowStrong);
+      // Medir primero TODO el contenido (texto + imagen) para reservar el alto exacto
+      // y que la tarjeta nunca solape el texto que hay debajo.
+      let cardH=0;
       try{
         const dimensions=doc.getImageProperties(imageData);
-        const scale=Math.min(86/dimensions.width,52/dimensions.height);
-        const width=dimensions.width*scale;
-        const height=dimensions.height*scale;
+        const scale=Math.min(80/dimensions.width,48/dimensions.height);
+        const imgW=dimensions.width*scale;
+        const imgH=dimensions.height*scale;
         doc.setFontSize(7.5);doc.setFont(undefined,'bold');doc.setTextColor(PDF_BRAND.accentDark[0],PDF_BRAND.accentDark[1],PDF_BRAND.accentDark[2]);
-        doc.text(doc.splitTextToSize(photo.label,86),20,y+7);
-        doc.addImage(imageData,'JPEG',20,y+11,width,height,undefined,'FAST');
+        const textLines=doc.splitTextToSize(photo.label,80);
+        const textH=textLines.length*4.5;
+        cardH=8+textH+2+imgH+8; // margen sup. + texto + separación + imagen + margen inf.
+        if(y+cardH>276){doc.addPage();y=24;}
+        pdfBox(doc,14,y,182,cardH,PDF_BRAND.white,PDF_BRAND.cardBorder,PDF_BRAND.shadowStrong);
+        doc.text(textLines,20,y+7);
+        doc.addImage(imageData,'JPEG',20,y+9+textH,imgW,imgH,undefined,'FAST');
+        y+=cardH+6;
       }catch(error){console.warn('No se pudo incluir una foto en el PDF:',error);}
-      y+=74;
     }
   }
   addPDFFootersAllPages(doc);
@@ -888,3 +1042,19 @@ window.generatePDF_ruta=async function(revisions,{rutaNombre='',cadenaNombre=''}
   doc.save('ruta_'+String(rutaNombre||'sin-nombre').replace(/[^a-zA-Z0-9_-]/g,'_')+'_'+getToday()+'.pdf');
   showToast('PDF de la ruta generado');
 };
+
+// jsPDF y autotable se cargan bajo demanda la primera vez que se genera un PDF
+['generatePDF_clientes','generatePDF_presupuesto','generatePDF_partes','generatePDF_revision',
+ 'generatePDF_almacen','generatePDF_presupuestos','generatePDF_ruta'].forEach(name => {
+  const original = window[name];
+  window[name] = async function(...args){
+    try{
+      await window.ensurePdfLibs();
+    }catch(error){
+      showToast(error.message,'error');
+      throw error;
+    }
+    jsPDF = window.jspdf.jsPDF;
+    return original.apply(this,args);
+  };
+});

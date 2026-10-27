@@ -88,9 +88,13 @@ async function bootAuthenticatedApp() {
     appShellInitialized = true;
   }
   navigateTo('dashboard');
-  registerServiceWorker();   // único punto de registro del SW
   checkVehiculoAlerts();     // ← ahora sí se ejecuta
 }
+
+// ── Registro del SW al cargar la página (independiente de la sesión) ────
+// Debe instalarse YA para que el shell quede precacheado aunque el usuario
+// aún no haya iniciado sesión (offline en la pantalla de login, PWA instalable).
+registerServiceWorker();   // único punto de registro del SW
 
 window.addEventListener('valgom:authenticated', () => {
   Promise.resolve(appBooted ? navigateTo('dashboard') : bootAuthenticatedApp()).catch(error => {
@@ -117,6 +121,90 @@ function setupNavigation() {
   });
 }
 
+// ===== COLOR PRINCIPAL =====
+// Valores por defecto (el admin los puede cambiar desde Configuración > Apariencia).
+// Color de acento: 'verde' | 'naranja' | 'naranja-oscuro' | 'azul' | 'rojo' | 'violeta' | 'teal' | hex libre
+const BRAND_COLOR = 'verde';
+// Color de la LETRA de los botones: '' (por defecto del tema) o cualquier hex/nombre CSS.
+const BUTTON_TEXT_COLOR = '';
+
+const BRAND_COLORS = {
+  'verde':          { primary:'#16a34a', dark:'#15803d', light:'#22c55e' },
+  'naranja':        { primary:'#f97316', dark:'#ea580c', light:'#fb923c' },
+  'naranja-oscuro': { primary:'#c2410c', dark:'#9a3412', light:'#ea580c' },
+  'azul':           { primary:'#2563eb', dark:'#1d4ed8', light:'#3b82f6' },
+  'rojo':           { primary:'#dc2626', dark:'#b91c1c', light:'#ef4444' },
+  'violeta':        { primary:'#8b5cf6', dark:'#7c3aed', light:'#a78bfa' },
+  'teal':           { primary:'#14b8a6', dark:'#0d9488', light:'#2dd4bf' }
+};
+
+// Oscurecer/aclarar un hex en porcentaje (-100..100)
+function shadeHex(hex, pct) {
+  try {
+    let h = hex.replace('#','');
+    if (h.length === 3) h = h.split('').map(ch => ch + ch).join('');
+    if (h.length !== 6) return hex;
+    const num = parseInt(h, 16);
+    let r = (num >> 16) & 255, g = (num >> 8) & 255, b = num & 255;
+    const t = pct < 0 ? 0 : 255, p = Math.abs(pct) / 100;
+    r = Math.round((t - r) * p + r); g = Math.round((t - g) * p + g); b = Math.round((t - b) * p + b);
+    return '#' + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1);
+  } catch (_) { return hex; }
+}
+
+// Aplica el color de marca + color de letra de botones (usa localStorage si el admin lo configuró)
+function applyBrandColor() {
+  let colorName = BRAND_COLOR, textColor = BUTTON_TEXT_COLOR;
+  try {
+    const saved = JSON.parse(localStorage.getItem('ap_brand') || '{}');
+    if (saved.primary) colorName = saved.primary;
+    if (typeof saved.btnText === 'string') textColor = saved.btnText;
+  } catch (_) {}
+
+  const c = BRAND_COLORS[colorName] || {
+    primary: colorName,
+    dark: shadeHex(colorName, -18),
+    light: shadeHex(colorName, 18)
+  };
+  const root = document.documentElement;
+  root.style.setProperty('--primary', c.primary);
+  root.style.setProperty('--primary-dark', c.dark);
+  root.style.setProperty('--primary-light', c.light);
+
+  // Color de letra de los botones (siempre genera la regla, para poder cambiarlo en vivo)
+  let st = document.getElementById('brand-btn-text-style');
+  if (!st) {
+    st = document.createElement('style');
+    st.id = 'brand-btn-text-style';
+    document.head.appendChild(st);
+  }
+  st.textContent = textColor
+    ? ('.btn,.btn-primary,.btn-secondary,.btn-success,.btn-outline,.btn-danger,.btn-sm,.btn-icon,.icon-btn{color:' + textColor + '!important}' +
+       '.btn i,.btn svg,.icon-btn i,.icon-btn svg{color:' + textColor + '!important}')
+    : '';
+}
+
+// Helpers públicos para el selector de Configuración
+window.setBrandColor = function(color) {
+  let saved = {};
+  try { saved = JSON.parse(localStorage.getItem('ap_brand') || '{}'); } catch (_) {}
+  saved.primary = color;
+  localStorage.setItem('ap_brand', JSON.stringify(saved));
+  applyBrandColor();
+};
+window.setButtonTextColor = function(color) {
+  let saved = {};
+  try { saved = JSON.parse(localStorage.getItem('ap_brand') || '{}'); } catch (_) {}
+  saved.btnText = color || '';
+  localStorage.setItem('ap_brand', JSON.stringify(saved));
+  applyBrandColor();
+};
+window.getBrandSettings = function() {
+  try { return JSON.parse(localStorage.getItem('ap_brand') || '{}'); } catch (_) { return {}; }
+};
+// Mapa de paleta accesible para el selector de Apariencia
+window.__brandColorsMap = BRAND_COLORS;
+
 function applyTheme(mode) {
   document.body.classList.toggle('light', mode === 'light');
   document.documentElement.classList.toggle('light', mode === 'light');
@@ -141,6 +229,7 @@ function applyTheme(mode) {
 
 function initTheme() {
   const saved = localStorage.getItem('theme') || 'dark';
+  applyBrandColor();
   applyTheme(saved);
   const btn = document.getElementById('themeToggle');
   if (btn && !btn.dataset.bound) {
@@ -406,15 +495,14 @@ function navigateTo(page, arg) {
   return renderPromise;
 }
 
-// ── Badge de pendientes en el nav ──────────────────────────
+// ── Badge de pendientes en el nav (usa el motor único de revisiones) ──
 async function actualizarBadgeRevisiones() {
-  if (typeof getPendientesRevision !== 'function' || !window.setNavBadge) return;
-
   try {
-    const p = await getPendientesRevision();
-    window.setNavBadge('revisionesProgramadas', p.length);
+    const items = window.getEstadoRevisiones ? await window.getEstadoRevisiones() : [];
+    const vencidas = items.filter(i => i.proximaRevision && new Date(i.proximaRevision) < new Date()).length;
+    window.setNavBadge('revisionesCliente', vencidas);
   } catch (e) {
-    console.warn('[badge] getPendientesRevision falló:', e.message);
+    console.warn('[badge] getEstadoRevisiones falló:', e.message);
   }
 }
 
@@ -423,11 +511,20 @@ function openModal(title, bodyHTML, footerHTML) {
   document.getElementById('modalTitle').textContent = title;
   document.getElementById('modalBody').innerHTML = bodyHTML;
   document.getElementById('modalFooter').innerHTML = footerHTML || '';
+  document.getElementById('modalOverlay').classList.remove('confirm-mode');
   document.getElementById('modalOverlay').classList.add('open');
 }
 
 function closeModal() {
-  document.getElementById('modalOverlay')?.classList.remove('open');
+  // Si el modal de Apariencia estaba abierto con cambios sin confirmar, restaurar colores
+  if (typeof window.__apRevert === 'function') {
+    try { window.__apRevert(); } catch (_) {}
+    window.__apRevert = null;
+  }
+  document.getElementById('modalOverlay')?.classList.remove('open', 'confirm-mode');
+  // Al cerrar un formulario de revisión se descarta su borrador pendiente
+  if (window.__hiperberReviewDraft) window.__hiperberReviewDraft = null;
+  if (window.__doticsVisitDraft) window.__doticsVisitDraft = null;
 }
 window.closeModal = closeModal;
 window.openModal = openModal;
@@ -526,8 +623,14 @@ window.mostrarToast = showToast;
 // ── Service Worker (PWA offline + instalable en Android) ───
 function registerServiceWorker() {
   if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('./sw.js')
-      .then(reg => console.log('SW registrado', reg.scope))
+    navigator.serviceWorker.register('./sw.js', { updateViaCache: 'none' })
+      .then(reg => {
+        console.log('SW registrado', reg.scope);
+        // En móvil la app queda abierta mucho tiempo: se busca versión nueva al volver a ella
+        document.addEventListener('visibilitychange', () => {
+          if (document.visibilityState === 'visible') reg.update().catch(() => {});
+        });
+      })
       .catch(err => console.warn('SW no registrado:', err));
   }
 }
@@ -803,12 +906,17 @@ async function eliminarUbicacion(id) {
 // GESTIÓN DE PUERTAS (Clientes)
 // ==========================================
 
-// Helper: días hasta una fecha (negativo si ya pasó)
+// Helper: días hasta una fecha (negativo si ya pasó). Parseo LOCAL de YYYY-MM-DD
+// (si se usa new Date('YYYY-MM-DD') se interpreta en UTC y con Math.ceil
+//  una fecha que es HOY puede contar como 1 día: bug del dashboard de revisiones)
 function diasHasta(fechaStr) {
   if (!fechaStr) return null;
+  const m = String(fechaStr).slice(0, 10).match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return null;
+  const f = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+  f.setHours(0, 0, 0, 0);
   const hoy = new Date(); hoy.setHours(0, 0, 0, 0);
-  const f = new Date(fechaStr); f.setHours(0, 0, 0, 0);
-  return Math.ceil((f - hoy) / (1000 * 60 * 60 * 24));
+  return Math.round((f - hoy) / (1000 * 60 * 60 * 24));
 }
 
 let puertaClienteActual = null;
@@ -1087,18 +1195,34 @@ async function guardarRevision() {
 
   const estadoFinal = document.getElementById('rev_estado_final').value;
   const tecnicoId   = document.getElementById('rev_tecnico').value || null;
+  const empleados = window.isTechnician?.()
+    ? (window.authState.employee ? [window.authState.employee] : [])
+    : await dbGetAll('empleados');
+  const tecnicoNombre = empleados.find(e => e.id === tecnicoId)?.nombre || null;
+  // Recuperar cliente y cadena para las notas estructuradas (fuera de scope en abrirRevision)
+  const cliente = puerta.clienteId ? await dbGet('clientes', puerta.clienteId) : null;
+  const cadenaId = cliente?.cadenaId ?? cliente?.cadenaid;
+  const cadena = cadenaId ? await dbGet('cadenas', cadenaId) : null;
 
-  const revision = {
+    const revision = {
     id: 'REV-' + Date.now(),
     puertaId: puerta.id,
     clienteId: puerta.clienteId,
     fecha,
     tecnicoId,
+    tecnicoNombre,
     items,
     hallazgos: items.filter(i => i.hallazgo).map(i => `${i.concepto}: ${i.hallazgo}`).join(' | '),
     correctivo: document.getElementById('rev_correctivo').value.trim(),
     estadoTrasRevision: estadoFinal,
-    notas: document.getElementById('rev_notas').value.trim(),
+    notas: JSON.stringify({
+      form: 'PUERTA_REVISION_V1',
+      cadenaId: cadena?.id ? String(cadena.id) : null,
+      cadena: cadena?.nombre || '',
+      cliente: cliente?.nombre || '',
+      tecnicos: tecnicoNombre || '',
+      observaciones: document.getElementById('rev_notas').value.trim()
+    }),
     createdAt: new Date().toISOString()
   };
 
@@ -1111,13 +1235,23 @@ async function guardarRevision() {
     proximaRevision: null
   };
   if (window.isTechnician?.()) {
-    const { data: nextRevision, error } = await window.supabaseDB.rpc('update_door_revision_schedule', {
-      p_id: String(puerta.id),
-      p_last_revision: fecha,
-      p_state: estadoFinal
-    });
-    if (error) throw error;
-    puertaActualizada.proximaRevision = nextRevision;
+    try {
+      const { data: nextRevision, error } = await window.supabaseDB.rpc('update_door_revision_schedule', {
+        p_id: String(puerta.id),
+        p_last_revision: fecha,
+        p_state: estadoFinal
+      });
+      if (error) throw error;
+      puertaActualizada.proximaRevision = nextRevision;
+    } catch (error) {
+      // El RPC puede fallar (offline, RPC no desplegado...). Fallback: calcular localmente.
+      console.error('update_door_revision_schedule falló, usando cálculo local:', error);
+      const client = puerta.clienteId ? await dbGet('clientes', puerta.clienteId) : null;
+      const routeId = client?.rutaId ?? client?.rutaid;
+      const route = routeId ? await dbGet('rutas', routeId) : null;
+      const frequency = Number(route?.frecuenciaMeses ?? route?.frecuenciameses) || 6;
+      puertaActualizada.proximaRevision = calcularProximaRevision(fecha, frequency);
+    }
     await dbPut('puertas', puertaActualizada);
   } else {
     const client = puerta.clienteId ? await dbGet('clientes', puerta.clienteId) : null;
@@ -1186,7 +1320,7 @@ function renderNivel1Rutas(rutas, puertas, clientes) {
   let html = `
     <div class="review-header" style="display:flex;justify-content:space-between;align-items:center;margin:20px 0 24px 0;">
       <h2 style="margin:0;font-size:1.4rem;color:#1e293b;">📋 Informe de Revisión</h2>
-      <button class="btn btn-primary" onclick="goHome()">← Volver</button>
+      <button class="btn btn-back" onclick="goHome()">← Volver</button>
     </div>
     <p style="color:#64748b;font-size:0.9rem;margin-bottom:20px;">Selecciona una ruta para ver las puertas pendientes de revisión</p>
     <div class="review-rutas-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px;">
@@ -1244,7 +1378,7 @@ async function renderNivel2Detalle(rutaId, puertas, clientes, hoy) {
   let html = `
     <div class="review-header" style="display:flex;justify-content:space-between;align-items:center;margin:20px 0 24px 0;">
       <h2 style="margin:0;font-size:1.3rem;color:#1e293b;">🗺️ ${escapeHtml(ruta?.nombre || 'Ruta')} <span style="font-size:0.9rem;color:#64748b;">(${pendientes.length} puerta(s))</span></h2>
-      <button class="btn btn-primary" onclick="abrirRondaRevisiones()">← Volver a rutas</button>
+      <button class="btn btn-back" onclick="abrirRondaRevisiones()">← Volver a rutas</button>
     </div>
   `;
 
