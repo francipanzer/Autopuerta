@@ -44,6 +44,27 @@ Después de migrar SQL y desplegar la función, publica/recarga la aplicación. 
 - La solicitud de material no incluye precios; al convertirla se crea un presupuesto en borrador para que oficina complete la valoración.
 - Los cambios de permisos de pantalla son solo una capa de UX: RLS y las funciones SQL son los controles efectivos de datos.
 
+## Albaranes de obra
+
+1. Si aún no están configurados los datos de empresa, ejecuta `SUPABASE_DATOS_EMPRESA.sql` después de `SUPABASE_AUTH_ROLES.sql`.
+2. Ejecuta (o vuelve a ejecutar; es idempotente) `SUPABASE_ALBARANES.sql` después de `SUPABASE_AUTH_ROLES.sql` y `SUPABASE_PUSH.sql`. La versión actual añade también el vínculo único entre presupuesto y albarán. Comprueba que `push_config.webhook_secret` coincide con el secreto `PUSH_WEBHOOK_SECRET` de la función.
+3. Despliega la versión actualizada de `send-push` para que los técnicos reciban un aviso al ser asignados:
+
+```powershell
+npx.cmd supabase@latest functions deploy send-push --project-ref ziimllianelsocrdeeut --no-verify-jwt
+```
+
+4. En **Configuración → Datos de empresa**, comprueba que estén completos los datos que deben aparecer en el PDF.
+
+Desde un presupuesto aprobado, administración puede crear un albarán que copia cliente y conceptos sin precios, asociándolo al presupuesto para impedir duplicados. Después asigna el documento a uno o varios técnicos. RLS permite a cada técnico consultar únicamente los albaranes asignados a su ficha; desde ahí puede firmar con el cliente y compartir/descargar el PDF. La firma se guarda mediante una función SQL que comprueba la asignación.
+
+## Aprobación online de presupuestos (opcional)
+
+1. Ejecuta `SUPABASE_APROBACION_ONLINE.sql` en el SQL Editor (después de los scripts de roles, push y albaranes; es idempotente, puedes volver a ejecutarlo) y despliega `send-push` y `recordatorios-presupuestos`. Para los recordatorios, activa la extensión `pg_cron` en Database → Extensions (el script programa una ejecución diaria a las 8:00 UTC).
+2. Publica `aprobar.html`, `js/aprobar.js` y `js/public-config.js` junto al resto de archivos.
+3. En **Configuración → Aprobación online de presupuestos** activa el interruptor y ajusta: caducidad del enlace, firma obligatoria y recordatorios (cada cuántos días y máximo, o desactivados).
+4. En un presupuesto borrador o enviado aparece el botón **Aprobación online**: eliges WhatsApp, email o ambos (con teléfono y email editables) y si quieres recordatorios para ese envío. El cliente firma con el dedo (móvil) o el ratón (PC). Los recordatorios salen por email si hay Resend (`RESEND_API_KEY`, `RESEND_FROM_EMAIL`); si no hay email o Resend, se avisa a administración para reenviar el enlace. Al aceptar el cliente, el presupuesto pasa a aprobado, se crea el albarán sin asignar y administración recibe un aviso. En el albarán, el icono **Material** compara las líneas con el almacén y permite pedir lo que falta.
+
 ## Compartir PDFs de revisiones
 
 1. Ejecuta `SUPABASE_REVISIONES_STORAGE.sql` en el SQL Editor después de `SUPABASE_AUTH_ROLES.sql`. El bucket `revision-pdfs` queda privado y solo admite PDFs de hasta 20 MB.

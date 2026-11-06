@@ -2,9 +2,9 @@
 const { execSync } = require('child_process');
 const fs = require('fs');
 
-const files = ['js/pages.js','js/app.js','js/auth.js','js/utils.js','js/db.js',
-  'js/informe-revisiones-cliente.js','js/plantillas-medidas.js','js/revision-forms.js',
-  'js/pdf-generator.js','js/realtime.js','js/incidencias.js','js/push.js','sw.js','index.html'];
+const files = ['js/pages.js', 'js/app.js', 'js/auth.js', 'js/utils.js', 'js/db.js',
+  'js/informe-revisiones-cliente.js', 'js/tipos-puerta.js', 'js/medidas.js', 'js/medidas-datos.js', 'js/revision-forms.js',
+  'js/pdf-generator.js', 'js/realtime.js', 'js/incidencias.js', 'js/push.js', 'sw.js', 'index.html'];
 
 let ok = true;
 for (const f of files) {

@@ -65,7 +65,7 @@ values
       "lista_equipos": {
         "nombre_campo": "equipos",
         "campos": [
-          {"id": "tipoProducto", "tipo": "select", "label": "Tipo producto", "opciones": ["SECCIONAL", "RAPIDA", "RAPIDA PLEGABLE", "BARRERA", "BASCULANTE", "CORREDERA", "CORREDERA CRISTAL"], "obligatorio": false},
+          {"id": "tipoProducto", "tipo": "select", "label": "Tipo producto", "opciones": ["SECCIONAL", "RAPIDA", "BARRERA", "BASCULANTE", "CORREDERA", "CORREDERA CRISTAL"], "obligatorio": false},
           {"id": "denominacionCliente", "tipo": "texto", "label": "Denominación cliente", "obligatorio": false},
           {"id": "numeroSerie", "tipo": "texto", "label": "Nº de serie", "obligatorio": false},
           {"id": "estado", "tipo": "radio", "label": "Estado", "opciones": [{"valor": "bueno", "label": "Bueno"}, {"valor": "operativo", "label": "Operativo"}, {"valor": "no_usar", "label": "No usar"}], "obligatorio": true},

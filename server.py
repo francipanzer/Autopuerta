@@ -4,6 +4,8 @@ from http.server import HTTPServer, SimpleHTTPRequestHandler
 from datetime import datetime
 import mimetypes
 import smtplib
+import urllib.request
+import urllib.parse
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
@@ -85,7 +87,9 @@ class Handler(SimpleHTTPRequestHandler):
                     to_email = data.get('to')
                     subject = data.get('subject')
                     body = data.get('body')
-                    result = self.send_email(config, to_email, subject, body)
+                    # Acuse de recibo: activado por defecto
+                    with_acuse = data.get('acuse', True)
+                    result = self.send_email(config, to_email, subject, body, with_acuse)
                     self.send_response(200)
                     self.send_header('Content-Type', 'application/json')
                     self.end_headers()
@@ -137,7 +141,7 @@ class Handler(SimpleHTTPRequestHandler):
             print(f'Error conexión SMTP: {e}')
             return {'success': False, 'error': str(e)}
 
-    def send_email(self, config, to_email, subject, body):
+    def send_email(self, config, to_email, subject, body, with_acuse=True):
         """Envía un email usando la configuración SMTP"""
         try:
             host = config.get('host')
@@ -157,6 +161,15 @@ class Handler(SimpleHTTPRequestHandler):
             msg['Subject'] = subject
             msg.attach(MIMEText(body, 'plain'))
 
+            # ── Acuse de recibo / lectura (RFC 3798): el cliente de correo del
+            #    destinatario preguntará "el remitente pide confirmación de lectura".
+            #    Cuando el cliente confirme, llegará UN EMAIL a la casilla 'user'
+            #    con asunto "Confirmación de lectura" — señal para administración.
+            if with_acuse:
+                msg['Disposition-Notification-To'] = user
+                msg['Return-Receipt-To'] = user          # legado (algunos clientes lo usan)
+                msg['X-Confirm-Reading-To'] = user       # otro alias legacy
+
             if secure:
                 server = smtplib.SMTP_SSL(host, port)
             else:
@@ -175,6 +188,32 @@ class Handler(SimpleHTTPRequestHandler):
             return {'success': False, 'error': str(e)}
 
     def do_GET(self):
+        # ── Proxy de geocodificación: Nominatim bloquea CORS desde el navegador ──
+        if self.path.startswith('/geocode?'):
+            try:
+                q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query).get('q', [''])[0]
+                if not q:
+                    raise ValueError('Falta q')
+                url = ('https://nominatim.openstreetmap.org/search?format=json&limit=5'
+                       '&addressdetails=1&countrycodes=es&q=' + urllib.parse.quote(q))
+                req = urllib.request.Request(url, headers={
+                    'User-Agent': 'AutoPuertaPro/1.0 (uso interno; contacto: admin@valgomdoors.com)',
+                    'Accept-Language': 'es'
+                })
+                with urllib.request.urlopen(req, timeout=10) as r:
+                    data = r.read()
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/json; charset=utf-8')
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.end_headers()
+                self.wfile.write(data)
+            except Exception as e:
+                self.send_response(502)
+                self.send_header('Content-Type', 'application/json')
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.end_headers()
+                self.wfile.write(json.dumps({'error': str(e)}).encode())
+            return
         if self.path.startswith('/fotos/') and self.path.endswith('.jpg'):
             fname = os.path.basename(self.path.split('/')[-1])
             fpath = os.path.abspath(os.path.join(FOTOS_DIR, fname))
