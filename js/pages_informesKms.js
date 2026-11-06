@@ -7,7 +7,7 @@ async function render_informesKms(container) {
   container.innerHTML = `
     <div class="page-header">
       <h2><i class="fas fa-chart-pie"></i> Informes de Kilometraje</h2>
-      <button class="btn" id="btnRepostaje" style="background:#16a34a;color:#fff;border:none;padding:10px 18px;border-radius:10px;font-weight:700;box-shadow:0 4px 14px rgba(22,163,74,.35);font-size:15px">
+      <button class="btn btn-primary" id="btnRepostaje">
         <i class="fas fa-gas-pump"></i> Registrar repostaje
       </button>
     </div>

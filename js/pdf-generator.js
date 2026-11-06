@@ -75,7 +75,7 @@ function getCompanyLogoDataUrl() {
 
 async function loadCompanyLogoDataUrl() {
   // 1º: imagen corporativa propia (logo-empresa.png en la carpeta del proyecto).
-  // 2º: icono de la app como respaldo.
+  // 2º: icono de la app como respaldo. Solo se intentan URLs que existan (evita 404 en consola)
   const candidates = [
     './logo-empresa.png',
     'logo-empresa.png',
@@ -88,6 +88,10 @@ async function loadCompanyLogoDataUrl() {
   ];
 
   for (const url of candidates) {
+    try {
+      const probe = await fetch(url, { method: 'HEAD' });
+      if (!probe.ok) continue;
+    } catch (_) { continue; }
     try {
       const response = await fetch(url, { cache: 'no-store' });
       if (!response.ok) continue;
@@ -164,6 +168,8 @@ async function createBrandedPDF(title, subtitle, statusText, statusColor, sinLog
   }
   return doc;
 }
+window.createBrandedPDF = createBrandedPDF;
+window.getCompanyLogoDataUrl = getCompanyLogoDataUrl;
 
 function addPDFFooter(doc,page){
   const totalPages = doc.internal.getNumberOfPages();
@@ -474,106 +480,102 @@ window.generatePDF_clientes = async function(id){
 window.generatePDF_presupuesto = async function(id, opts){
   const p = await dbGet('presupuestos',id);
   if(!p){showToast('Presupuesto no encontrado','error');return}
-  const doc = await createBrandedPDF('Presupuesto', '', null, null, true, true); // sin franja superior: el presupuesto empieza con la tarjeta empresa
+  const doc = await createBrandedPDF('Presupuesto', '', null, null, true, true); // sin franja: layout estilo presupuesto clásico
   const company=typeof window.getCompanySettings==='function'
     ? await window.getCompanySettings()
     : {trade_name:'Valgom'};
   const logo = await getCompanyLogoDataUrl();
   const X = 14, W = 182;
-  let y = 14; // sin franja superior: el contenido empieza arriba del todo y gana espacio
+  let y = 14;
 
   // Cargar datos del cliente para su tarjeta
   let cliente = null;
   try{ cliente = p.clienteId ? await dbGet('clientes',p.clienteId) : null; }catch(_){ }
 
-  const FILA = 11;   // alto de cada fila de campos
-  const CAB = 14;    // alto del título de tarjeta
-  const colA=X+8, colB=X+72, colC=X+130; // columnas fijas, alineadas en todas las tarjetas
-
-  // ── TARJETA 1: Empresa (logo + datos) ──
-  const hasLegal=Boolean(company.legal_name||company.tax_id);
-  const hasAddress=Boolean(company.address);
-  const hasContact=Boolean(company.phone||company.email||company.website);
-  const compRows=(hasLegal?1:0)+(hasAddress?1:0)+(hasContact&&!hasLegal&&!hasAddress?1:0);
-  const companyCardHeight=CAB+compRows*FILA+6;
-  pdfBox(doc,X,y,W,companyCardHeight,PDF_BRAND.panel,PDF_BRAND.panelBorder);
+  // ══ LAYOUT ESTILO PRESUPUESTO CLÁSICO (según modelopresupuesto.png) ══
+  // ── CABECERA: logo a la izquierda + datos de empresa al centro + caja cliente a la derecha ──
+  const cabH = 42;
+  pdfBox(doc,X,y,W,cabH,PDF_BRAND.white,PDF_BRAND.panelBorder);
   if(logo){
-    try{ doc.addImage(logo,'PNG',X+7,y+5,12,12); }
-    catch(err){ try{ pdfAddImageContain(doc,logo,X+7,y+5,12,12); }catch(_){}}
+    try{ doc.addImage(logo,'PNG',X+6,y+6,26,26); }
+    catch(err){ try{ pdfAddImageContain(doc,logo,X+6,y+6,26,26); }catch(_){}}
   }
-  doc.setFontSize(12); doc.setFont(undefined,'bold');
+  doc.setFontSize(13); doc.setFont(undefined,'bold');
   doc.setTextColor(PDF_BRAND.text[0],PDF_BRAND.text[1],PDF_BRAND.text[2]);
-  doc.text(company.trade_name||company.legal_name||'Valgom',X+(logo?22:8),y+10);
-  doc.setFontSize(7); doc.setFont(undefined,'normal');
+  doc.text(company.trade_name||company.legal_name||'VALGOM',X+36,y+12);
+  doc.setFontSize(7.5); doc.setFont(undefined,'normal');
   doc.setTextColor(PDF_BRAND.muted[0],PDF_BRAND.muted[1],PDF_BRAND.muted[2]);
-  doc.text('Gestión de puertas automáticas',X+(logo?22:8),y+14);
-  let cy=y+CAB+5.5;
-  if(hasLegal){
-    pdfField(doc,'Razón social',company.legal_name||'—',colA,cy,58);
-    pdfField(doc,'CIF / NIF',company.tax_id||'—',colB,cy,52);
-    if(company.phone) pdfField(doc,'Teléfono',company.phone,colC,cy,46);
-    cy+=FILA;
-  }
-  if(hasAddress){
-    pdfField(doc,'Dirección',company.address,colA,cy,58);
-    if(company.email) pdfField(doc,'Email',company.email,colB,cy,52);
-    if(company.website) pdfField(doc,'Web',company.website,colC,cy,46);
-    cy+=FILA;
-  }
-  if(hasContact && !hasLegal && !hasAddress){
-    pdfField(doc,'Teléfono',company.phone||'—',colA,cy,58);
-    pdfField(doc,'Email',company.email||'—',colB,cy,52);
-    pdfField(doc,'Web',company.website||'—',colC,cy,46);
-    cy+=FILA;
-  }
-  y+=companyCardHeight+8;
+  let dy=y+18;
+  if(company.legal_name) { doc.text(String(company.legal_name).slice(0,58),X+36,dy); dy+=4; }
+  if(company.tax_id){ doc.text('CIF: '+company.tax_id,X+36,dy); dy+=4; }
+  if(company.address){ doc.text(String(company.address).slice(0,58),X+36,dy); dy+=4; }
+  if(company.phone){ doc.text('Tel. '+company.phone+(company.email?'  ·  '+company.email:''),X+36,dy); dy+=4; }
+  if(company.website){ doc.text(String(company.website),X+36,dy); dy+=4; }
 
-  // ── TARJETA 2: Datos del cliente ──
-  const cliRows=1+(cliente?.email?1:0)+(cliente?.direccion?1:0);
-  const cliCardHeight=CAB+cliRows*FILA+6;
-  pdfBox(doc,X,y,W,cliCardHeight,PDF_BRAND.panel,PDF_BRAND.panelBorder);
-  pdfCardHeading(doc,'Datos del cliente',colA,y+8);
-  doc.setFontSize(12); doc.setFont(undefined,'bold');
+  // Caja del cliente a la derecha (estilo tarjetita del modelo), centrada verticalmente
+  // Con nombre largo: el nombre corta con "..." controlado y el resto de datos caben
+  const cliBoxW = 68, cliBoxX = X+W-cliBoxW-6, cliBoxH = 38;
+  const cliBoxY = y + (cabH - cliBoxH) / 2; // centrada con respecto a la cabecera
+  pdfBox(doc,cliBoxX,cliBoxY,cliBoxW,cliBoxH,PDF_BRAND.card,PDF_BRAND.cardBorder,PDF_BRAND.shadowStrong);
+  doc.setFontSize(6.5); doc.setFont(undefined,'bold');
+  doc.setTextColor(PDF_BRAND.muted[0],PDF_BRAND.muted[1],PDF_BRAND.muted[2]);
+  doc.text('CLIENTE',cliBoxX+4,cliBoxY+6);
+  doc.setFontSize(9); doc.setFont(undefined,'bold');
   doc.setTextColor(PDF_BRAND.text[0],PDF_BRAND.text[1],PDF_BRAND.text[2]);
-  doc.text(p.clienteNombre||'Cliente',colA,y+14,{maxWidth:W-16});
-  let ky=y+CAB+5.5;
-  pdfField(doc,'Contacto',cliente?.contacto||'—',colA,ky,58);
-  pdfField(doc,'Teléfono',cliente?.telefono||'—',colB,ky,52);
-  pdfField(doc,'DNI / NIF',cliente?.dni||'—',colC,ky,46);
-  ky+=FILA;
-  if(cliente?.email){
-    pdfField(doc,'Email',cliente.email,colA,ky,58);
-    if(cliente?.direccion) pdfField(doc,'Dirección',cliente.direccion,colB,ky,W-(colB-X)-8);
-    ky+=FILA;
-  } else if(cliente?.direccion){
-    pdfField(doc,'Dirección',cliente.direccion,colA,ky,W-16);
-    ky+=FILA;
-  }
-  y+=cliCardHeight+8;
+  // Nombre en 2 líneas máximo con recorte controlado
+  const nomLines = doc.splitTextToSize(String(p.clienteNombre||'—'), cliBoxW-8).slice(0,2);
+  nomLines.forEach((ln,i)=>doc.text(ln,cliBoxX+4,cliBoxY+11+i*4.4));
+  doc.setFontSize(6.8); doc.setFont(undefined,'normal');
+  doc.setTextColor(PDF_BRAND.muted[0],PDF_BRAND.muted[1],PDF_BRAND.muted[2]);
+  let gy = cliBoxY + 11 + nomLines.length*4.4 + 1.5;
+  const put = (lbl, val) => {
+    if(!val) return;
+    doc.text(lbl + ': ' + String(val).slice(0,40), cliBoxX+4, gy, {maxWidth:cliBoxW-8});
+    gy += 4.6;
+  };
+  put('NIF', cliente?.dni);
+  put('Tel', cliente?.telefono);
+  put('Dir', cliente?.direccion);
 
-  // ── TARJETA 3: Datos del presupuesto ──
-  const presCardHeight=CAB+2*FILA+6;
-  pdfBox(doc,X,y,W,presCardHeight,PDF_BRAND.panel,PDF_BRAND.panelBorder);
-  pdfCardHeading(doc,'Datos del presupuesto',colA,y+8);
-  let py=y+CAB+5.5;
-  pdfField(doc,'Nº Presupuesto',p.id||'—',colA,py,58);
-  pdfField(doc,'Fecha',formatDate(p.fecha),colB,py,52);
-  pdfField(doc,'Válido hasta',formatDate(p.validoHasta),colC,py,46);
-  py+=FILA;
-  pdfField(doc,'Parte asociado',p.parteId||'—',colA,py,58);
-  pdfField(doc,'Estado',getStatusLabel(p.estado)||p.estado||'—',colB,py,52);
-  py+=FILA;
-  y+=presCardHeight+8;
+  y += cabH + 7;
 
+  // ── FRANJA DE DATOS: FECHA · Nº · VALIDEZ · CONTACTO · ESTADO ──
+  const franjaH = 16;
+  pdfBox(doc,X,y,W,franjaH,PDF_BRAND.panel,PDF_BRAND.panelBorder);
+  doc.setFontSize(6.5); doc.setFont(undefined,'bold');
+  doc.setTextColor(PDF_BRAND.muted[0],PDF_BRAND.muted[1],PDF_BRAND.muted[2]);
+  const franjaCampos = [['FECHA',formatDate(p.fecha)],['Nº PRESUPUESTO',p.id||'—'],['VÁLIDO HASTA',formatDate(p.validoHasta)],['PLAZO ENTREGA',p.plazoEntrega||'—'],['CONTACTO',cliente?.contacto||'—'],['ESTADO',getStatusLabel(p.estado)||p.estado||'—']];
+  const paso = (W-12)/franjaCampos.length;
+  franjaCampos.forEach((campo,i)=>{
+    const fx = X+6+i*paso;
+    doc.text(campo[0],fx,y+7);
+    doc.setFont(undefined,'normal'); doc.setFontSize(8.2);
+    doc.setTextColor(PDF_BRAND.text[0],PDF_BRAND.text[1],PDF_BRAND.text[2]);
+    doc.text(String(campo[1]||'—').slice(0,24),fx,y+12.5,{maxWidth:paso-3});
+    doc.setFont(undefined,'bold'); doc.setFontSize(6.5);
+    doc.setTextColor(PDF_BRAND.muted[0],PDF_BRAND.muted[1],PDF_BRAND.muted[2]);
+  });
+  y += franjaH + 8;
+
+  // ── TABLA DE LÍNEAS (estilo del modelo: con columna Código; tipo con nombre legible) ──
+  let tiposPuertaMap = new Map();
+  try{ (await window.TiposPuerta.filasDB()).forEach(t => tiposPuertaMap.set(t.id, t.nombre)); }catch(_){ }
   if(p.lineItems && p.lineItems.length>0){
-    const tableData = p.lineItems.map((item,i)=>[i+1,item.descripcion||'—',item.tipoId||'—',item.cantidad,formatCurrency(item.precio),formatCurrency(item.cantidad*item.precio)]);
-    doc.autoTable(pdfTableStyle({startY:y,head:[['#','Descripción','Tipo','Cant.','P. Unitario','Importe']],body:tableData,columnStyles:{0:{cellWidth:10,halign:'center'},2:{cellWidth:26},3:{cellWidth:16,halign:'center'},4:{cellWidth:28,halign:'right'},5:{cellWidth:28,halign:'right'}}}));
-    y = doc.lastAutoTable.finalY + 8;
+    const tableData = p.lineItems.map((item,i)=>{
+      const tipoNombre = tiposPuertaMap.get(item.tipoId) || item.tipoId || '—';
+      return [String(i+1).padStart(2,'0'),item.descripcion||'—',String(item.ref||''),tipoNombre,item.cantidad,formatCurrency(item.precio),formatCurrency(item.cantidad*item.precio)];
+    });
+    doc.autoTable(pdfTableStyle({startY:y,head:[['Código','Descripción','REF','Tipo','Cant.','P. Unitario','Importe']],body:tableData,columnStyles:{0:{cellWidth:14,halign:'center'},2:{cellWidth:18},3:{cellWidth:24},4:{cellWidth:12,halign:'center'},5:{cellWidth:26,halign:'right'},6:{cellWidth:26,halign:'right'}}}));
+    y = doc.lastAutoTable.finalY;
   }
 
-  // ── Desglose de totales: debajo de las líneas, tarjeta a ancho completo ──
-  if(y+46>270){ doc.addPage(); y = 24; }
+  // ── Totales SIEMPRE en la parte baja de la página ──
+  const pageH = doc.internal.pageSize.getHeight();
   const th = 42;
+  const totalsY = Math.max(y + 10, pageH - th - 16); // anclado abajo (tarjeta 42mm + pie)
+  if(totalsY > y){ y = totalsY; }
+
+  // ── Desglose de totales: tarjeta a ancho completo anclada abajo ──
   pdfBox(doc,X,y,W,th);
   let ty=y+10;
   doc.setFontSize(9.5); doc.setFont(undefined,'normal');
@@ -591,33 +593,37 @@ window.generatePDF_presupuesto = async function(id, opts){
   doc.text(formatCurrency(p.total||0),X+W-12,y+31.5,{align:'right'});
   y += th + 8;
 
-  // Notas: bloque desactivado a petición del cliente (el dato sigue en BD, no se imprime)
+  // ── Observaciones / condiciones (estilo del modelo: bloque de texto bajo los totales) ──
+  const notasPres = String(p.notas||'').trim();
+  if(notasPres){
+    const linesNotas = doc.splitTextToSize(notasPres, W-16);
+    const nh = 10 + linesNotas.length*4.4 + 4;
+    pdfBox(doc,X,Math.min(y,pageH-nh-16),W,nh,PDF_BRAND.card,PDF_BRAND.cardBorder);
+    doc.setFontSize(6.5); doc.setFont(undefined,'bold'); doc.setTextColor(PDF_BRAND.muted[0],PDF_BRAND.muted[1],PDF_BRAND.muted[2]);
+    doc.text('OBSERVACIONES',X+8,Math.min(y,pageH-nh-16)+7);
+    doc.setFontSize(8.2); doc.setFont(undefined,'normal'); doc.setTextColor(PDF_BRAND.text[0],PDF_BRAND.text[1],PDF_BRAND.text[2]);
+    doc.text(linesNotas,X+8,Math.min(y,pageH-nh-16)+13);
+    y = Math.min(y,pageH-nh-16) + nh + 6;
+  }
 
   // ── Hoja de medidas rellena (página extra) ──
-  if(p.medidasPlanta && p.medidasPlanta.sistema==='hoja-v1' && p.medidasPlanta.imagenUrl){
+  if(p.medidasPlanta && p.medidasPlanta.sistema==='hoja-v1' && (p.medidasPlanta.imagenUrl || p.medidasPlanta.svg)){
     doc.addPage();
     doc.setFontSize(14); doc.setFont(undefined,'bold'); doc.setTextColor(PDF_BRAND.text[0],PDF_BRAND.text[1],PDF_BRAND.text[2]);
     doc.text('Hoja de medidas — ' + (p.medidasPlanta.tipoNombre||''), 14, 18);
     doc.setFontSize(9); doc.setFont(undefined,'normal');
     doc.setTextColor(PDF_BRAND.muted[0],PDF_BRAND.muted[1],PDF_BRAND.muted[2]);
     doc.text('Cliente: ' + (p.clienteNombre||'—') + '   ·   Fecha: ' + (p.medidasPlanta.fecha||'—') + '   ·   Técnico: ' + (p.medidasPlanta.tecnico||'—'), 14, 25);
+    const notasMedidas = String(p.medidasPlanta.notas || '').trim();
+    if(notasMedidas) doc.text(doc.splitTextToSize('Observaciones: '+notasMedidas,182),14,30);
     try{
-      const bgUrl = p.medidasPlanta.imagenUrl;
-      const dataUrl = bgUrl.startsWith('data:') ? bgUrl : (await fetch(bgUrl).then(r=>r.blob()).then(b=>new Promise(res=>{
-        const fr=new FileReader(); fr.onload=()=>res(fr.result); fr.readAsDataURL(b);
-      })));
-      const fmt = dataUrl.includes('image/png') ? 'PNG' : 'JPEG';
-      doc.addImage(dataUrl, fmt, 14, 32, 182, 260, undefined, 'FAST');
-      // Escribir los valores encima (posición en % sobre la imagen 182×260 mm)
-      doc.setFontSize(10); doc.setFont(undefined,'bold'); doc.setTextColor(15,23,42);
-      (p.medidasPlanta.campos||[]).forEach(c=>{
-        const v = String(p.medidasPlanta.valores?.[c.id] ?? '').trim();
-        if(!v) return;
-        const cx = 14 + (c.x/100)*182;
-        const cy = 32 + (c.y/100)*260;
-        const cw = ((c.w||14)/100)*182;
-        doc.text(String(v), cx + cw/2, cy + 4, {align:'center', maxWidth: cw});
-      });
+      // La hoja se dibuja con el mismo motor que la pantalla (valores dentro de sus casillas, marcas, repeticiones)
+      const dataUrl = await window.HOJA_MEDIDAS.renderizar(p.medidasPlanta, 1500);
+      const props = doc.getImageProperties(dataUrl);
+      const maxW = 182, maxH = notasMedidas ? 230 : 245, escala = Math.min(maxW/props.width,maxH/props.height);
+      const imgW = props.width*escala, imgH = props.height*escala;
+      const imgX = 14+(maxW-imgW)/2, imgY = notasMedidas ? 40 : 32;
+      doc.addImage(dataUrl, props.fileType, imgX, imgY, imgW, imgH, undefined, 'FAST');
     }catch(e){ console.warn('Hoja de medidas en PDF:', e); }
   }
   addPDFFootersAllPages(doc);
@@ -643,10 +649,14 @@ window.generatePDF_partes = async function(id){
   const companyLogo = await getCompanyLogoDataUrl();
   const fechaTxt = (typeof formatDate === 'function') ? formatDate(p.fecha) : (p.fecha||'');
   let clienteDireccion = String(p.clienteDireccion || '');
+  let clienteFicha = null; // ficha completa del cliente (para el sello en el PDF)
   let ubicacionNombre = String(p.ubicacionNombre || '');
   let ubicacionDireccion = String(p.ubicacionDireccion || '');
-  if(p.clienteId && !clienteDireccion){
-    try{clienteDireccion=String((await dbGet('clientes',p.clienteId))?.direccion||'');}
+  if(p.clienteId){
+    try{
+      clienteFicha = await dbGet('clientes', p.clienteId);
+      clienteDireccion = clienteDireccion || String(clienteFicha?.direccion||'');
+    }
     catch(error){console.warn('No se pudo cargar la dirección del cliente para el PDF:',error);}
   }
   if(p.ubicacionId && (!ubicacionNombre || !ubicacionDireccion)){
@@ -718,11 +728,27 @@ window.generatePDF_partes = async function(id){
   pdfField(doc,'Kilómetros',(p.kms||0)+' km',20,y+46,50);
   pdfField(doc,'Horas',(p.horas||0)+' h',80,y+46,50);
   pdfField(doc,'Fotos',String(p.fotos?.length||p.fotoscount||0),140,y+46,50);
+  // Puertas intervenidas (marcadas con el check en el parte): destacadas en verde, con su observación
+  if(Array.isArray(p.puertaIds) && p.puertaIds.length){
+    const det = p.puertasDetalle || p.puertasdetalle || {};
+    const puertas = await dbGetAll('puertas').catch(() => []);
+    const mapP = Object.fromEntries(puertas.map(x => [x.id, x.nombre]));
+    const lineasPuertas = p.puertaIds.map(id => {
+      const nom = mapP[id] || id;
+      const obs = det[id] || '';
+      return obs ? ('✔ ' + nom + ': ' + obs) : ('✔ ' + nom);
+    });
+    doc.setFontSize(7.5); doc.setFont(undefined,'bold');
+    doc.setTextColor(PDF_BRAND.accentDark[0],PDF_BRAND.accentDark[1],PDF_BRAND.accentDark[2]);
+    doc.text(doc.splitTextToSize(lineasPuertas.join('\n'),78),108,y+33);
+    doc.setFont(undefined,'normal');
+  }
   y += 63;
 
   // ── Trabajo realizado ──
   const descriptionLines=doc.splitTextToSize(p.descripcion||'—',170);
-  const notesLines=p.notas?doc.splitTextToSize(p.notas,170):[];
+  // Notas del parte: desactivadas a petición (el dato sigue en BD, no se imprime)
+  const notesLines=[];
   const descriptionHeight=descriptionLines.length*4.5;
   const notesHeight=notesLines.length?8+notesLines.length*4.5:0;
   const workHeight=27+descriptionHeight+notesHeight;
@@ -846,6 +872,9 @@ window.generatePDF_partes = async function(id){
   const yFirma = y;
   const yDNI = yFirma + boxH + 4;
 
+  // Sello del cliente: fotografiado en el momento del parte (guardado en el propio parte)
+  const selloCliente = p.selloCliente || null;
+
   // ═══ IZQUIERDA: FIRMA CLIENTE + DNI CLIENTE ═══
   pdfBox(doc, xIzq, yFirma, boxW, boxH, PDF_BRAND.card, PDF_BRAND.cardBorder, PDF_BRAND.shadowStrong);
   doc.setFontSize(8); doc.setTextColor(100,116,139);
@@ -853,6 +882,10 @@ window.generatePDF_partes = async function(id){
 
   if(firmaCliente){
     pdfAddImageContain(doc, firmaCliente, xIzq + 5, yFirma + 8, boxW - 10, boxH - 12);
+  }
+  if(selloCliente){
+    // Sello del día impreso sobre la firma (esquina superior derecha, superpuesto)
+    try{ pdfAddImageContain(doc, selloCliente, xIzq + boxW - 28, yFirma + 6, 24, 24); }catch(_){ }
   }
 
   doc.setFontSize(7); doc.setTextColor(100,116,139);
@@ -889,11 +922,162 @@ window.generatePDF_partes = async function(id){
   doc.save('Parte_'+partIdForFile+'_'+dateForFile+'.pdf');
 };
 
+// ── PDF formato DOTICS: formulario físico "INFORME VISITA DE MANTENIMIENTO" ──
+// A4 horizontal, cabecera con campos, tabla de equipos y pie de firmas.
+// Opción de fotos: se incluyen como enlaces clicable (no descuadran el PDF);
+// si la foto ya es un dataURL pequeño también se puede embeber miniatura.
+window.generatePDF_dotics=async function(revision,metadata,{download=true}={}){
+  await window.ensurePdfLibs();
+  jsPDF=window.jspdf.jsPDF;
+  const items=revision.items||[];
+  // A4 apaisado
+  const doc=new jsPDF({orientation:'landscape',unit:'mm',format:'a4'});
+  const W=297,H=210,M=12;               // márgenes
+  const contentW=W-M*2;
+
+  const logo=await getCompanyLogoDataUrl();
+  // Cabecera: logo + título del formulario
+  let y=M;
+  if(logo){
+    try{
+      const props=doc.getImageProperties(logo);
+      const h=16,ratio=props.width/props.height;
+      doc.setFillColor(255,255,255);doc.setDrawColor(203,213,225);doc.setLineWidth(.4);
+      doc.roundedRect(M,y,16*ratio>24?24:16*ratio,h,2,2,'FD');
+      doc.addImage(logo,'PNG',M+2,y+2,Math.min(24,16*ratio)-4,h-4,undefined,'FAST');
+    }catch(e){}
+  }
+  doc.setFontSize(15);doc.setFont(undefined,'bold');doc.setTextColor(15,23,42);
+  doc.text('INFORME VISITA DE MANTENIMIENTO',W/2,y+9,{align:'center'});
+  doc.setFontSize(9);doc.setFont(undefined,'normal');doc.setTextColor(100,116,139);
+  doc.text(String(metadata.cliente||metadata.cadena||'DOTICS').toUpperCase(),W/2,y+15,{align:'center'});
+  doc.setFontSize(8);doc.setTextColor(100,116,139);
+  doc.text('Nº Revisión: '+String(revision.id||'—'),W-M,y+9,{align:'right'});
+  y+=20;
+
+  // Bloque de datos: Cliente / Nº contrato / Nº intervención / Técnico/s / Fecha
+  const fields=[
+    ['Cliente',metadata.cliente||metadata.cadena||'—'],
+    ['N.º contrato mantenimiento',metadata.contrato||'—'],
+    ['N.º intervención',metadata.intervencion||'—'],
+    ['Técnico/s',metadata.tecnicos||revision.tecnicoNombre||'—'],
+    ['Fecha',formatDate(revision.fecha)]
+  ];
+  const fw=contentW/fields.length;
+  const fh=17;
+  pdfBox(doc,M,y,contentW,fh,PDF_BRAND.panel,PDF_BRAND.panelBorder);
+  fields.forEach(([label,value],i)=>{
+    doc.setFontSize(6.5);doc.setFont(undefined,'normal');doc.setTextColor(100,116,139);
+    doc.text(String(label).toUpperCase(),M+i*fw+3,y+5);
+    doc.setFontSize(9);doc.setFont(undefined,'bold');doc.setTextColor(15,23,42);
+    // Valor completo en varias líneas (los nombres de varios técnicos no se cortan)
+    const lines=doc.splitTextToSize(String(value||'—'),fw-6).slice(0,2);
+    doc.text(lines,M+i*fw+3,y+10.5);
+  });
+  y+=fh+6;
+
+  // Tabla de equipos (la columna Fotos lleva miniaturas pequeñas dentro de la fila:
+  // siempre visibles, sin depender de enlaces que muchos visores no abren)
+  const head=[['Tipo producto','Denom. cliente','Nº de serie','Estado del equipo','Observaciones','Fotos']];
+  const body=items.map(item=>[
+    item.tipoProducto||item.tipoPuerta||item.tipo||'—',
+    item.denominacionCliente||item.concepto||'—',
+    item.numeroSerie||'—',
+    item.estadoEquipo==='bueno'?'Bueno':item.estadoEquipo==='operativo'?'Operativo':item.estadoEquipo==='no_usar'?'No usar':(item.estadoEquipo||item.estado||'—'),
+    item.observaciones||item.hallazgo||'',
+    (item.fotos||[]).length?String(item.fotos.length)+' foto'+(item.fotos.length>1?'s':''):'—'
+  ]);
+  if(!body.length) body.push(['—','—','—','—','—','—']);
+  const fotosPorFila=items.map(item=>item.fotos||[]);
+  doc.autoTable(pdfTableStyle({
+    startY:y,margin:{left:M,right:M,bottom:34},
+    head,body,
+    columnStyles:{0:{cellWidth:38},1:{cellWidth:62},2:{cellWidth:36},3:{cellWidth:28,halign:'center'},5:{cellWidth:26,halign:'center'}},
+    styles:{fontSize:8,cellPadding:2.2,valign:'middle'},
+    headStyles:{fillColor:PDF_BRAND.primary,textColor:255,fontSize:8,fontStyle:'bold',cellPadding:2.5},
+    bodyStyles:{fontSize:8,cellPadding:2.2,textColor:PDF_BRAND.text,overflow:'linebreak'},
+    didDrawCell:data=>{
+      // Miniaturas embebidas en la celda de fotos (hasta 3, ~9 mm cada una)
+      if(data.section==='body'&&data.column.index===5){
+        const fotos=fotosPorFila[data.row.index]||[];
+        if(!fotos.length) return;
+        const cell=data.cell;
+        const size=8.5;
+        let fx=cell.x+2;
+        const fy=cell.y+(cell.height-size)/2;
+        for(let i=0;i<Math.min(3,fotos.length);i++){
+          try{
+            doc.addImage(fotos[i],'JPEG',fx,fy,size,size,undefined,'FAST');
+            doc.setDrawColor(203,213,225);doc.setLineWidth(0.2);doc.rect(fx,fy,size,size);
+          }catch(e){}
+          fx+=size+1.5;
+        }
+        if(fotos.length>3){
+          doc.setFontSize(6);doc.setTextColor(100,116,139);
+          doc.text('+'+(fotos.length-3),fx,fy+size-1);
+        }
+      }
+    },
+    willDrawCell:data=>{
+      // La columna de fotos reserva su alto según el número de miniaturas
+      if(data.section==='body'&&data.column.index===5){
+        const fotos=fotosPorFila[data.row.index]||[];
+        if(fotos.length) data.cell.styles.minCellHeight=Math.max(data.cell.styles.minCellHeight||0,11);
+      }
+    }
+  }));
+  y=(doc.lastAutoTable?.finalY||y)+8;
+
+  // Observaciones generales
+  if(metadata.observaciones){
+    const lines=doc.splitTextToSize(metadata.observaciones,contentW-12);
+    const h=Math.max(12,lines.length*4.6+9);
+    if(y+h>H-58){doc.addPage('a4','landscape');y=M;}
+    pdfBox(doc,M,y,contentW,h,PDF_BRAND.warn,PDF_BRAND.warnBorder);
+    doc.setFontSize(7);doc.setFont(undefined,'bold');doc.setTextColor(120,53,15);
+    doc.text('OBSERVACIONES GENERALES',M+5,y+5);
+    doc.setFontSize(8.5);doc.setFont(undefined,'normal');doc.setTextColor(15,23,42);
+    doc.text(lines,M+5,y+10);
+    y+=h+6;
+  }
+
+  // (Las fotos van embebidas en la columna «Fotos» de la tabla, dentro de cada fila)
+
+  // Pie: VºBº cliente + firma técnico + sello
+  const yPie=H-32;
+  const bw=(contentW-12)/3;
+  [[M,'VºBº CLIENTE'],[M+bw+6,'FIRMA TÉCNICO'],[M+(bw+6)*2,'SELLO']]
+    .forEach(([x,label])=>{
+      doc.setDrawColor(148,163,184);doc.setLineWidth(.35);
+      doc.rect(x,yPie,bw,22);
+      doc.setFontSize(7);doc.setFont(undefined,'normal');doc.setTextColor(100,116,139);
+      doc.text(label,x+3,yPie+5);
+    });
+  // Firma del técnico si la revisión la guarda
+  try{
+    const firma=metadata.firma||metadata.firmaTecnico||revision.firma;
+    if(firma&&String(firma).startsWith('data:image')){
+      pdfAddImageContain(doc,firma,M+bw+8,yPie+6,bw-4,14);
+    }
+  }catch(e){}
+
+  addPDFFootersAllPages(doc);
+  const filename='revision_dotics_'+String(revision.id||'').replace(/[^a-zA-Z0-9_-]/g,'_')+'.pdf';
+  const blob=doc.output('blob');
+  if(download){doc.save(filename);showToast('PDF Dotics descargado');}
+  return {blob,filename};
+};
+
 window.generatePDF_revision=async function(revisionId,{download=true}={}){
   const revision=await dbGet('revisiones',revisionId);
   if(!revision){showToast('No se encontró la revisión','error');return;}
   let metadata={};
   try{metadata=JSON.parse(revision.notas||'{}');}catch(error){metadata={observaciones:revision.notas||''};}
+  // Las revisiones DOTICS salen en el formato del formulario físico
+  // "INFORME VISITA DE MANTENIMIENTO" (modelo Assa Abloy en horizontal).
+  if(metadata.form==='DOTICS_VISITA_V1'||String(metadata.cadena||metadata.cliente||'').trim().toLocaleUpperCase()==='DOTICS'){
+    return generatePDF_dotics(revision,metadata,{download});
+  }
   const items=revision.items||[];
   const doc=await createBrandedPDF('Informe de Revisión','Revisión de equipos');
   const chain=metadata.cadena||metadata.cliente||'—';

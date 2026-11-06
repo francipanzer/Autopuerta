@@ -24,7 +24,7 @@ function _badge(fecha){
   return {texto:'Al día', clase:'badge-green'};
 }
 function _fmt(f){ try{ return f?new Date(f).toLocaleDateString('es-ES'):'—'; }catch(e){ return String(f||'—'); } }
-function _esc(s){ return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+const _esc = s => escapeHtml(s);   // única definición global (utils.js)
 
 // ═══════════════════════════════════════════════════════════
 //  MOTOR ÚNICO — getEstadoRevisiones()
@@ -138,11 +138,13 @@ window.__revRefrescar=async function(){
 window.__revPintarProximas=async function(cont){
   const {q,fecha}=_filtros();
   let items=await window.getEstadoRevisiones();
+  // Solo clientes/rutas CON revisión pendiente programada (los demás van a Historial)
+  items=items.filter(i=>i.proximaRevision);
   if(q) items=items.filter(i=>i.nombre.toLowerCase().includes(q)||(i.rutaNombre||'').toLowerCase().includes(q));
   if(fecha) items=items.filter(i=>String(i.proximaRevision||'').slice(0,10)===fecha);
 
   if(!items.length){
-    cont.innerHTML='<div class="empty-state"><i class="fas fa-check-circle"></i><h3>Sin resultados</h3><p>No hay clientes ni rutas que coincidan con la busqueda.</p></div>';
+    cont.innerHTML='<div class="empty-state"><i class="fas fa-check-circle"></i><h3>Sin revisiones pendientes</h3><p>Todos los clientes y rutas están al día. Consulta el Historial para ver las pasadas.</p></div>';
     return;
   }
 
@@ -262,6 +264,7 @@ window.verTiendasDeRuta=async function(cadenaId, rutaId){
         '<h2 class="page-revisiones-title"><i class="fas fa-route"></i> '+_esc(fila.rutaNombre)+'</h2>'+
         '<p class="page-revisiones-subtitle">'+_esc(cadenaNombre)+' - '+tiendas.length+' tienda'+(tiendas.length===1?'':'s')+(fila.proximaRevision?' - proxima el '+_fmt(fila.proximaRevision):'')+'</p>'+
       '</div><div class="header-actions">'+
+        '<button class="btn btn-outline" data-accion="optimizar" data-ruta-id="'+_esc(rutaId)+'" data-cadena-id="'+_esc(cadenaId)+'" data-ruta-nombre="'+_esc(fila.rutaNombre)+'" data-cadena-nombre="'+_esc(cadenaNombre)+'"><i class="fas fa-route"></i> Optimizar ruta</button>'+
         '<button class="btn btn-primary" data-accion="registrar" data-id="'+_esc(cadenaId)+'" data-es-cadena="1" data-ruta-id="'+_esc(rutaId)+'"><i class="fas fa-clipboard-check"></i> Registrar revision</button>'+
         '<button class="btn btn-outline" data-accion="pdf" data-id="'+_esc(cadenaId)+'" data-es-cadena="1" data-ruta-id="'+_esc(rutaId)+'"><i class="fas fa-file-pdf"></i> PDF de la ruta</button>'+
       '</div></div>'+
@@ -306,6 +309,7 @@ window.verTiendasDeRuta=async function(cadenaId, rutaId){
     const fecha=fila.proximaRevision||new Date().toISOString().slice(0,10);
     if(acc==='registrar') window.openHiperberReviewForm(cadenaId,null,{rutaId,fecha});
     if(acc==='pdf') window.generatePDF_informeCliente(cadenaId,true,rutaId);
+    if(acc==='optimizar') window.optimizarRutaTiendas(btn.getAttribute('data-ruta-id'),btn.getAttribute('data-cadena-id'),btn.getAttribute('data-ruta-nombre'),btn.getAttribute('data-cadena-nombre'));
   });
 };
 

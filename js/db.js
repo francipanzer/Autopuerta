@@ -38,6 +38,7 @@ const TABLA = {
   puertas:       'puertas',
   revisiones:    'revisiones',
   partesTrabajo: 'partes_trabajo',
+  albaranes: 'albaranes',
   cadenas:       'cadenas',
   rutas:         'rutas',
   articulos:     'articulos',
@@ -48,7 +49,9 @@ const TABLA = {
   incidencias: 'incidencias',
   manuales:      'manuales',
   plantillasRevisiones: 'plantillas_revisiones',
-  proveedores:   'proveedores'
+  proveedores:   'proveedores',
+  entradasMaterial: 'entradas_material',
+  almacenAlias:  'almacen_alias'
 };
 
 // ── Renombrado camelCase ↔ snake_case ──────────────────────
@@ -70,7 +73,7 @@ const REN_OUT = {
   precioVenta:'precioventa',
   stockMinimo:'stockminimo',
   puertaIds:'puertaids',
-  cliente_id:'cliente_Id',
+  puertasDetalle:'puertasdetalle',
   clienteId:'clienteid',
   tecnicoId:'tecnicoid',
   clienteNombre:'clientenombre',
@@ -110,7 +113,20 @@ const REN_OUT = {
   resueltaAt:'resueltaat',
   validoHasta:'validohasta',
   fotosAlbaran:'fotosalbaran',
-  lineItems:'lineitems'
+  lineItems:'lineitems',
+  emailSecundario:'emailsecundario',
+  selloCliente:'sellocliente',
+  motivoInterno:'motivointerno',
+  internoOrigen:'internoorigen',
+  internoDestino:'internodestino',
+  // Clientes (Sage + geolocalización)
+  sageCodigo:'sagecodigo',
+  sageDatos:'sagedatos',
+  tecnicoIds:'tecnicoids',
+  clienteDireccion:'clientedireccion',
+  clienteTelefono:'clientetelefono',
+  clienteDocumento:'clientedocumento',
+  firmadoAt:'firmadoat'
 };
 const REN_IN = {
   updatedat:'updatedAt',
@@ -130,7 +146,7 @@ const REN_IN = {
   precioventa:'precioVenta',
   stockminimo:'stockMinimo',
   puertaids:'puertaIds',
-  cliente_Id:'cliente_id',
+  puertasdetalle:'puertasDetalle',
   clienteid:'clienteId',
   clientenombre:'clienteNombre',
   tipopuerta:'tipoPuerta',
@@ -168,13 +184,36 @@ const REN_IN = {
   resueltaat:'resueltaAt',
   validohasta:'validoHasta',
   fotosalbaran:'fotosAlbaran',
-  lineitems:'lineItems'
+  lineitems:'lineItems',
+  emailsecundario:'emailSecundario',
+  sellocliente:'selloCliente',
+  motivointerno:'motivoInterno',
+  internoorigen:'internoOrigen',
+  internodestino:'internoDestino',
+  // Clientes
+  sagecodigo:'sageCodigo',
+  sagedatos:'sageDatos',
+  tecnicoids:'tecnicoIds',
+  clientedireccion:'clienteDireccion',
+  clientetelefono:'clienteTelefono',
+  clientedocumento:'clienteDocumento',
+  firmadoat:'firmadoAt'
 };
+
+// El mapeo de lectura se completa con todo lo que se escribe: un campo añadido solo a REN_OUT
+// (p. ej. tecnicoId) ya no vuelve de la base de datos con otro nombre.
+for(const[camel,col]of Object.entries(REN_OUT)){ if(!(col in REN_IN)) REN_IN[col]=camel; }
+const _unmappedWarned=new Set();
 
 function toDB(obj){
   if(!obj || typeof obj!=='object') return obj;
   const o={};
   for(const[k,v]of Object.entries(obj)){
+    // Las columnas son minúsculas: una clave con mayúsculas sin entrada en REN_OUT fallará en Supabase
+    if(REN_OUT[k]===undefined && /[A-Z]/.test(k) && !_unmappedWarned.has(k)){
+      _unmappedWarned.add(k);
+      console.warn('[db] El campo "'+k+'" no está en REN_OUT; Supabase lo rechazará. Añádelo (camelCase → minúsculas).');
+    }
     o[REN_OUT[k]||k]=v;
   }
   o.updatedat=new Date().toISOString();
@@ -270,6 +309,11 @@ function queueRecordId(item){
   return item.data?.id===undefined ? null : String(item.data.id);
 }
 
+const SYNC_FAILED_KEY='autopuerta_sync_failed';
+function currentOwnerId(){ return window.authState?.user?.id||null; }
+// Cada usuario solo ve y sincroniza sus operaciones pendientes (las de otro se conservan intactas)
+function isOwnQueueItem(item){ const me=currentOwnerId(); return !item.ownerId || !me || item.ownerId===me; }
+
 function readSyncQueue(){
   try{
     const queue=JSON.parse(localStorage.getItem('autopuerta_sync_queue')||'[]');
@@ -277,16 +321,39 @@ function readSyncQueue(){
   }catch(e){ return []; }
 }
 
+function readSyncFailed(){
+  try{
+    const list=JSON.parse(localStorage.getItem(SYNC_FAILED_KEY)||'[]');
+    return Array.isArray(list) ? list : [];
+  }catch(e){ return []; }
+}
+
+function writeSyncFailed(list){
+  try{ localStorage.setItem(SYNC_FAILED_KEY,JSON.stringify(list)); }
+  catch(e){ console.warn('[SyncQueue] no se pudo guardar la lista de operaciones fallidas:',e.message); }
+}
+
+function syncCounts(){
+  return {pending:readSyncQueue().filter(isOwnQueueItem).length, failed:readSyncFailed().filter(isOwnQueueItem).length};
+}
+
+function emitSyncState(){
+  window.dispatchEvent(new CustomEvent('autopuerta:sync-state',{detail:{...syncCounts(),online:navigator.onLine}}));
+}
+
 function writeSyncQueue(queue){
-  localStorage.setItem('autopuerta_sync_queue',JSON.stringify(queue));
-  window.dispatchEvent(new CustomEvent('autopuerta:sync-state',{detail:{pending:queue.length,online:navigator.onLine}}));
+  try{ localStorage.setItem('autopuerta_sync_queue',JSON.stringify(queue)); }
+  catch(e){ throw new Error('No hay espacio en el móvil para guardar los cambios pendientes de enviar'); }
+  emitSyncState();
 }
 
 async function enqueueSyncOperation(item){
   const recordId=item.action==='delete' ? String(item.id) : queueRecordId(item);
-  const entry={...item,recordId,ts:Date.now(),queueId:'SYNC-'+Date.now()+'-'+Math.random().toString(36).slice(2,8)};
+  const entry={...item,recordId,ts:Date.now(),editedAt:new Date().toISOString(),attempts:0,ownerId:currentOwnerId(),
+    queueId:'SYNC-'+Date.now()+'-'+Math.random().toString(36).slice(2,8)};
   const queue=readSyncQueue().filter(pending=>{
-    return !(pending.store===entry.store && recordId!==null && queueRecordId(pending)===recordId);
+    // Una operación nueva sustituye a la pendiente del mismo registro, pero solo si es del mismo usuario
+    return !(pending.store===entry.store && recordId!==null && queueRecordId(pending)===recordId && isOwnQueueItem(pending));
   });
   queue.push(entry);
   writeSyncQueue(queue);
@@ -328,7 +395,8 @@ window.dbGetTechnicianEmployee=async function(){
 
 window.clearAuthenticatedCache=async function(){
   for(const store of Object.keys(TABLA)) await cacheWrite(store,[],false);
-  await dbSyncQueueClear();
+  // La cola de envíos pendientes NO se borra: pertenece a cada usuario (ownerId) y se enviará cuando vuelva a entrar.
+  // Borrarla aquí perdía en silencio el trabajo hecho sin conexión si la sesión caducaba.
 };
 
 async function dbAdd(store,data){
@@ -410,6 +478,60 @@ function mergePartesTrabajo(serverRecord, localRecord){
   return merged;
 }
 
+// ── Guardado sin pisar cambios ajenos ─────────────────────────────────────
+// Antes: upsert del registro completo (last-write-wins: se perdía lo que otro había editado en OTROS campos).
+// Ahora: UPDATE solo de los campos que cambió este usuario, con bloqueo optimista por updatedat; si otro usuario
+// editó mientras tanto, se fusiona campo a campo (los contadores como el stock suman la diferencia).
+const PUT_IGNORE=['id','updatedAt','updatedat','createdAt','createdat','createdBy','createdby','_light'];
+const PUT_DELTA_FIELDS={almacen:['stock']};
+
+function reportPutConflicts(store,id,conflicts){
+  console.warn('[db] Edición simultánea en',store,id,conflicts);
+  try{ window.dispatchEvent(new CustomEvent('autopuerta:conflict',{detail:{store,id,conflicts}})); }catch(e){}
+  const pisados=conflicts.filter(c=>c.kind==='overwrite').map(c=>c.field);
+  if(pisados.length && window.showToast){
+    window.showToast('Otro usuario había modificado también: '+pisados.join(', ')+'. Se ha guardado tu versión.','warning');
+  }
+}
+
+async function putMerging(store,tableName,input,obj){
+  const SU=window.SyncUtils;
+  if(!SU || !window.authState?.user) return null;
+  const entry=await cacheReadEntry(store);
+  const base=Array.isArray(entry?.data) ? entry.data.find(r=>String(r.id)===String(obj.id)) : null;
+  if(!base) return null;                                   // registro nuevo o sin versión local: upsert de siempre
+  const changed=SU.diffFields(base,input,PUT_IGNORE);
+  if(!Object.keys(changed).length) return base;            // nada que guardar
+  const finish=async row=>{
+    const saved=fromJS({...row,id:obj.id});
+    await cacheUpdateStore(store,rows=>{
+      const index=rows.findIndex(record=>String(record.id)===String(obj.id));
+      if(index===-1) rows.push(saved); else rows[index]=saved;
+      return rows;
+    });
+    return saved;
+  };
+  const lock=base.updatedAt||base.updatedat||null;
+  let query=supabaseDB.from(tableName).update(toDB(changed)).eq('id',obj.id);
+  if(lock) query=query.eq('updatedat',lock);               // solo escribe si nadie lo ha tocado desde que lo vi
+  const first=await query.select();
+  if(first.error) throw first.error;
+  if(first.data && first.data.length) return finish(first.data[0]);
+  // 0 filas: otro usuario lo modificó (o lo borró) → se lee lo que hay y se fusiona
+  const current=await supabaseDB.from(tableName).select().eq('id',obj.id).maybeSingle();
+  if(current.error) throw current.error;
+  if(!current.data) return null;                           // borrado por otro: se recrea como antes
+  const merge=SU.threeWayMerge(base,input,fromJS(current.data),{ignore:PUT_IGNORE,deltaFields:PUT_DELTA_FIELDS[store]||[]});
+  let row=current.data;
+  if(Object.keys(merge.patch).length){
+    const second=await supabaseDB.from(tableName).update(toDB(merge.patch)).eq('id',obj.id).select();
+    if(second.error) throw second.error;
+    if(second.data && second.data[0]) row=second.data[0];
+  }
+  if(merge.conflicts.length) reportPutConflicts(store,obj.id,merge.conflicts);
+  return finish(row);
+}
+
 async function dbPut(store,data){
   rejectAuthenticatedOfflineWrite();
   const tableName=TABLA[store]||store;
@@ -451,6 +573,10 @@ async function dbPut(store,data){
     return local;
   }
   try{
+    if(store!=='partesTrabajo'){
+      const merged=await putMerging(store,tableName,input,obj);
+      if(merged) return merged;
+    }
     // Para partes de trabajo, hacer merge por campos si hay conflicto
     let parteExiste=false;
     if(store==='partesTrabajo'){
@@ -552,6 +678,27 @@ async function dbGetAll(store){
   }
 }
 
+// Lee toda la tabla por páginas: PostgREST devuelve como máximo 1000 filas por petición y el resto se perdía en silencio
+async function selectAllRows(tableName){
+  const SU=window.SyncUtils;
+  if(!SU) return supabaseDB.from(tableName).select();
+  let ordered=true;
+  try{
+    const data=await SU.fetchAllPages((from,to)=>{
+      let q=supabaseDB.from(tableName).select('*',from===0?{count:'exact'}:{});
+      if(ordered) q=q.order('id',{ascending:true});    // orden estable para que las páginas no se solapen
+      return q.range(from,to).then(res=>{
+        if(res.error && ordered && from===0 && String(res.error.code)==='42703'){   // tabla sin columna id
+          ordered=false;
+          return supabaseDB.from(tableName).select('*',{count:'exact'}).range(from,to);
+        }
+        return res;
+      });
+    });
+    return {data,error:null};
+  }catch(error){ return {data:null,error}; }
+}
+
 const _storeVersion = {};
 const _refreshInFlight = {};
 function refreshStoreCache(store,tableName){
@@ -567,7 +714,7 @@ function refreshStoreCache(store,tableName){
         : null;
       let {data,error}=rpcName
         ? await supabaseDB.rpc(rpcName)
-        : await supabaseDB.from(tableName).select();
+        : await selectAllRows(tableName);
       // Si el listado ligero aún no está instalado en Supabase, se usa el completo
       if(error && rpcName==='get_app_work_parts_list') ({data,error}=await supabaseDB.rpc('get_app_work_parts'));
       if(error) throw error;
@@ -658,7 +805,7 @@ async function dbSyncQueuePush(item){
   return enqueueSyncOperation(item);
 }
 
-async function dbSyncQueueGetPending(){ return readSyncQueue(); }
+async function dbSyncQueueGetPending(){ return readSyncQueue().filter(isOwnQueueItem); }
 
 async function dbSyncQueueComplete(id){
   const queue=readSyncQueue();
@@ -682,40 +829,88 @@ function scheduleSyncRetry(){
   syncRetryDelay=Math.min(syncRetryDelay*2,300000);
 }
 
+function moveSyncToFailed(item,error){
+  const failed=readSyncFailed();
+  failed.push({...item,error:window.SyncUtils.errorMessage(error),failedAt:new Date().toISOString()});
+  writeSyncFailed(failed);
+  writeSyncQueue(readSyncQueue().filter(q=>(q.queueId||q.id)!==(item.queueId||item.id)));
+}
+
+function bumpSyncAttempt(item,error,countAttempt){
+  const queue=readSyncQueue();
+  const found=queue.find(q=>(q.queueId||q.id)===(item.queueId||item.id));
+  if(!found) return;
+  if(countAttempt) found.attempts=(found.attempts||0)+1;
+  found.lastError=window.SyncUtils.errorMessage(error);
+  try{ writeSyncQueue(queue); }catch(e){}
+}
+
 async function flushSyncQueue(){
   if(!navigator.onLine || !window.authState?.user) return;
   if(syncFlushPromise) return syncFlushPromise;
   syncFlushPromise=(async()=>{
-    const queue=readSyncQueue();
+    const SU=window.SyncUtils;
+    const queue=readSyncQueue().filter(isOwnQueueItem);
     for(const item of queue){
       try{
         const tableName=TABLA[item.store]||item.store;
         let response;
         if(item.action==='delete'){
           const recordId=item.recordId??(String(item.id||'').startsWith('SYNC-')?null:item.id);
-          if(recordId===null || recordId===undefined) throw new Error('Operación de borrado sin id de registro');
+          if(recordId===null || recordId===undefined){
+            const bad=new Error('Operación de borrado sin id de registro'); bad.status=400; throw bad;
+          }
           response=await supabaseDB.from(tableName).delete().eq('id',recordId);
         }else{
-          response=await supabaseDB.from(tableName).upsert(toDB(item.data));
+          const row=toDB(item.data);
+          // La hora de edición es la del momento en que se hizo, no la de la sincronización
+          if(item.editedAt) row.updatedat=item.editedAt;
+          response=await supabaseDB.from(tableName).upsert(row);
         }
-        if(response.error) throw response.error;
+        if(response.error) throw SU.errorFromResponse(response);
         await dbSyncQueueComplete(item.queueId||item.id);
       }catch(error){
-        console.warn('[SyncQueue] operación conservada para reintento:',error.message);
+        const decision=SU.decideAfterError(error,item.attempts||0,{online:navigator.onLine});
+        if(decision.action==='fail'){
+          // El servidor la rechaza (permisos, datos inválidos…): reintentar no la arregla. Se aparta y se sigue con las demás.
+          console.warn('[SyncQueue] operación rechazada, pasa a fallidas:',error.message);
+          try{ moveSyncToFailed(item,error); }catch(e){}
+          continue;
+        }
+        console.warn('[SyncQueue] operación conservada para reintento ('+decision.kind+'):',error.message);
+        bumpSyncAttempt(item,error,decision.countAttempt);
         scheduleSyncRetry();
-        break;
+        break;                                           // sin red/sesión/servidor: el resto espera para mantener el orden
       }
     }
-    const pending=readSyncQueue();
+    const pending=readSyncQueue().filter(isOwnQueueItem);
     if(!pending.length) syncRetryDelay=5000;
-    window.dispatchEvent(new CustomEvent('autopuerta:sync-state',{detail:{pending:pending.length,online:navigator.onLine}}));
+    emitSyncState();
     return pending.length;
   })().finally(()=>{
     syncFlushPromise=null;
-    if(navigator.onLine && readSyncQueue().length) scheduleSyncRetry();
+    if(navigator.onLine && readSyncQueue().filter(isOwnQueueItem).length) scheduleSyncRetry();
   });
   return syncFlushPromise;
 }
+
+// Operaciones que el servidor rechazó: el usuario puede reintentarlas o descartarlas
+window.dbFlushSyncQueue=()=>flushSyncQueue();
+window.dbSyncInfo=()=>({pending:readSyncQueue().filter(isOwnQueueItem),failed:readSyncFailed().filter(isOwnQueueItem)});
+window.dbSyncFailedRetry=id=>{
+  const failed=readSyncFailed();
+  const index=failed.findIndex(item=>(item.queueId||item.id)===id);
+  if(index===-1) return;
+  const [item]=failed.splice(index,1);
+  writeSyncFailed(failed);
+  delete item.error; delete item.failedAt; item.attempts=0;
+  const queue=readSyncQueue(); queue.push(item); writeSyncQueue(queue);
+  flushSyncQueue();
+};
+window.dbSyncFailedDiscard=id=>{
+  writeSyncFailed(readSyncFailed().filter(item=>(item.queueId||item.id)!==id));
+  emitSyncState();
+};
 
 window.addEventListener('online',()=>flushSyncQueue());
 window.addEventListener('offline',()=>window.dispatchEvent(new CustomEvent('autopuerta:sync-state',{detail:{pending:readSyncQueue().length,online:false}})));

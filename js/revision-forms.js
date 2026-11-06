@@ -260,12 +260,7 @@ window.eliminarFotoCampo = function(campoId, index) {
   }
 };
 
-// ── Helpers ─────────────────────────────────────────────────
-function escapeHtml(text) {
-  const div = document.createElement('div');
-  div.textContent = text;
-  return div.innerHTML;
-}
+// escapeHtml ya no se redefine aquí: la única definición está en utils.js
 
 // Exportar funciones globales
 window.cargarPlantillaRevision = cargarPlantillaRevision;
@@ -311,7 +306,7 @@ function renderEquiposLista() {
           <label for="equipo-tipo-${index}">Tipo producto</label>
           <select id="equipo-tipo-${index}" onchange="actualizarEquipo(${index}, 'tipoProducto', this.value)">
             <option value="">— Seleccionar —</option>
-            ${['SECCIONAL','RAPIDA','RAPIDA PLEGABLE','BARRERA','BASCULANTE','CORREDERA','CORREDERA CRISTAL'].map(t => `<option value="${t}" ${equipo.tipoProducto === t ? 'selected' : ''}>${t}</option>`).join('')}
+            ${window.TiposPuerta.opciones(equipo.tipoProducto, { por: 'codigo', etiqueta: 'codigo', vacio: false })}
           </select>
         </div>
         <div class="form-group">

@@ -103,7 +103,7 @@ window.PLANTILLAS_MEDIDAS = (function(){
           <!-- Hueco abierto -->
           <rect x="48" y="38" width="204" height="144" fill="#f8fafc" stroke="#cbd5e1" stroke-dasharray="3,3"/>
           <!-- Hoja corriendo -->
-          <rect x="${48+v.hueco*0.15}" y="38" width="${204-v.hueco*0.15}" height="144" fill="#dcfce7" stroke="#16a34a" stroke-width="2"/>
+          <rect x="${48+v.hueco*0.15}" y="38" width="${Math.max(20, 204-v.hueco*0.15)}" height="144" fill="#dcfce7" stroke="#16a34a" stroke-width="2"/>
           <!-- Riel superior -->
           <rect x="40" y="24" width="220" height="6" fill="#1e3a5f"/>
           ${Array.from({length: v.hojas}, (_,i)=>`<circle cx="${70+i*60}" cy="27" r="3" fill="#f59e0b"/>`).join('')}

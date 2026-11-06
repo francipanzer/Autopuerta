@@ -62,7 +62,7 @@ async function renderTableros(container) {
         <div class="page-header">
           <div><h2><i class="fas fa-table-columns"></i> Tableros</h2><p>Organiza el trabajo y comparte los cambios en tus dispositivos.</p></div>
           <div class="header-actions">
-            ${selectedBoard ? `<button class="btn btn-outline btn-sm" type="button" data-board-action="rename"><i class="fas fa-pen"></i> Renombrar</button><button class="btn btn-outline btn-sm" type="button" data-board-action="delete"><i class="fas fa-trash"></i></button>` : ''}
+            ${selectedBoard ? `<button class="btn btn-secondary btn-sm" type="button" data-board-action="rename"><i class="fas fa-pen"></i> Renombrar</button><button class="btn btn-danger btn-sm" type="button" data-board-action="delete"><i class="fas fa-trash"></i></button>` : ''}
             <button class="btn btn-primary" type="button" data-board-action="create"><i class="fas fa-plus"></i> Nuevo tablero</button>
           </div>
         </div>

@@ -233,7 +233,7 @@ window.render_dashboard = async function(el){
     </div>
 
     <div class="card" style="margin-top:20px; grid-column: 1 / -1;">
-      <div class="card-header"><h3>sltimos presupuestos</h3><button class="btn btn-outline btn-sm" onclick="navigateTo('presupuestos')">Ver todos</button></div>
+      <div class="card-header"><h3>Últimos presupuestos</h3><button class="btn btn-outline btn-sm" onclick="navigateTo('presupuestos')">Ver todos</button></div>
       <div class="table-wrapper"><table><thead><tr><th>ID</th><th>Cliente</th><th>Fecha</th><th>Total</th><th>Estado</th></tr></thead><tbody>
         ${presupuestos.slice(-5).reverse().map(p =>
           `<tr><td>${escapeHtml(p.id)}</td><td>${escapeHtml(p.clienteNombre)}</td><td>${formatDate(p.fecha)}</td><td>${formatCurrency(p.total)}</td>
@@ -243,7 +243,7 @@ window.render_dashboard = async function(el){
     </div>
 
     <div class="card" style="margin-top:20px; grid-column: 1 / -1;">
-      <div class="card-header"><h3>ultimas tareas en curso</h3><button class="btn btn-outline btn-sm" onclick="navigateTo('partesTrabajo')">Ver todos</button></div>
+      <div class="card-header"><h3>Últimas tareas en curso</h3><button class="btn btn-outline btn-sm" onclick="navigateTo('partesTrabajo')">Ver todos</button></div>
       <div class="table-wrapper"><table><thead><tr><th>Parte</th><th>Cliente</th><th>Tipo</th><th>Fecha</th></tr></thead><tbody>
         ${partes.slice(-5).reverse().map(p =>
           `<tr><td>${escapeHtml(p.id)}</td><td>${escapeHtml(p.clienteNombre)}</td><td>${escapeHtml(p.tipoPuerta)}</td>
@@ -327,54 +327,113 @@ window.renderPaginatedRows = function(tbody, items, renderRow, { colspan = 1, em
 window.render_clientes = async function(el){
   el.innerHTML =
     '<div class="page-header"><div><h2>Clientes</h2><p>Gestión de clientes</p></div>'+
-    '<div class="header-actions"><button class="btn btn-primary" onclick="showClienteForm()"><i class="fas fa-plus"></i> Nuevo Cliente</button><button class="btn btn-success" onclick="showImportClientesModal()"><i class="fas fa-file-excel"></i> Importar Excel/CSV</button><button class="btn btn-outline" onclick="showImportFolioModal()"><i class="fas fa-file-image"></i> Importar datos</button></div></div>'+
+    '<div class="header-actions"><button class="btn btn-primary" onclick="showClienteForm()"><i class="fas fa-plus"></i> Nuevo Cliente</button><button class="btn btn-success" onclick="showImportClientesModal()"><i class="fas fa-file-excel"></i> Importar Excel/CSV</button><button class="btn btn-secondary" onclick="showImportFolioModal()"><i class="fas fa-file-image"></i> Importar datos</button><button class="btn btn-secondary" onclick="showDuplicadosClientes()" title="Buscar y fusionar clientes duplicados"><i class="fas fa-clone"></i> Duplicados</button></div></div>'+
     '<div class="search-bar">'+
-      '<input type="text" placeholder="Buscar cliente..." id="searchCliente" oninput="renderClientes()">'+
-      '<select id="filterTipo" onchange="renderClientes()"><option value="">Todos</option><option value="empresa">Empresa</option><option value="particular">Particular</option></select></div>'+
+      '<input type="text" placeholder="Buscar cliente..." id="searchCliente" oninput="window.__cliPagina=0;renderClientes()">'+
+      '<select id="filterTipo" onchange="window.__cliPagina=0;renderClientes()"><option value="">Todos</option><option value="empresa">Empresa</option><option value="particular">Particular</option></select>'+
+      '<select id="filterProvincia" onchange="window.__cliPagina=0;renderClientes()"><option value="">Todas las provincias</option></select></div>'+
     '<div class="card"><div  class="table-wrapper"><table><thead>'+
-      '<tr><th>ID</th><th>Nombre</th><th>Padre</th><th>Ruta</th><th>Contacto</th><th>Teléfono</th><th>Email</th><th>Tipo</th><th>Acciones</th></tr>'+
-    '</thead><tbody id="clientesBody"></tbody></table></div></div>';
+      '<tr><th>Nombre</th></tr>'+
+    '</thead><tbody id="clientesBody"></tbody></table></div></div>'+
+    '<div id="navClientes" style="display:none;text-align:center;margin-top:12px">'+
+      '<button class="btn btn-outline btn-sm" id="btnCliPrev" style="display:none"><i class="fas fa-chevron-up"></i> Mostrar menos</button> '+
+      '<button class="btn btn-outline btn-sm" id="btnCliMore">Mostrar más</button>'+
+    '</div>'+
+    '<div style="margin-top:10px"><small id="cliContador" style="color:var(--text-muted)"></small></div>';
   renderClientes();
 };
 
+// Extraer provincia de la dirección compuesta ("..., 30001 Murcia, Murcia")
+window.__provinciaDeCliente = function(c){
+  const dir = String(c.direccion||'');
+  const partes = dir.split(',').map(s=>s.trim()).filter(Boolean);
+  return partes.length>=2 ? partes[partes.length-1] : '';
+};
+
+window.__cliPagina = 0; // índice de bloque de 20
 window.renderClientes = async function(){
   const [clientes, cadenas, rutas] = await Promise.all([
     dbGetAll('clientes'), dbGetAll('cadenas'), dbGetAll('rutas')
   ]);
-  const allClientes = clientes;
-  
-  // Mapas para lookup rápido
-  const cadenaMap = new Map(cadenas.map(c => [String(c.id), c.nombre]));
-  const rutaMap = new Map(rutas.map(r => [String(r.id), r.nombre]));
-  const clienteMap = new Map(allClientes.map(c => [String(c.id), c.nombre]));
-  
   const q = (document.getElementById('searchCliente')?.value||'').toLowerCase();
   const tipo = document.getElementById('filterTipo')?.value||'';
-  const filtered = clientes.filter(c=>{
-    if(q && !JSON.stringify(c).toLowerCase().includes(q)) return false;
-    if(tipo && c.tipo!==tipo) return false;
-    return true;
-  });
-  
-  renderPaginatedRows(document.getElementById('clientesBody'), filtered, c=>{
-    const padreNombre = c.padreId ? clienteMap.get(String(c.padreId)) || (c.cadenaId ? cadenaMap.get(String(c.cadenaId)) : '') : '';
-    const rutaNombre = c.rutaId ? rutaMap.get(String(c.rutaId)) : '';
-    
-    return '<tr><td>'+escapeHtml(c.id)+'</td><td><strong>'+escapeHtml(c.nombre)+'</strong></td>'+
-      '<td>'+escapeHtml(padreNombre)+'</td>'+
-      '<td>'+escapeHtml(rutaNombre)+'</td>'+
-      '<td>'+escapeHtml(c.contacto)+'</td>'+
-      '<td>'+escapeHtml(c.telefono)+'</td><td>'+escapeHtml(c.email)+'</td>'+
-      '<td><span class="badge '+(c.tipo==='empresa'?'badge-blue':'badge-gray')+'">'+(c.tipo==='empresa'?'Empresa':'Particular')+'</span></td>'+
-      '<td class="actions-cell">'+
-        '<button class="btn btn-outline btn-sm btn-icon" title="Ubicaciones" onclick="gestionarUbicaciones(\''+c.id+'\')"><i class="fas fa-map-marker-alt"></i></button>'+
-        '<button class="btn btn-outline btn-sm btn-icon" title="Puertas" onclick="gestionarPuertas(\''+c.id+'\')"><i class="fas fa-door-open"></i></button>'+
-        '<button class="btn btn-outline btn-sm btn-icon" title="Histórico revisiones" onclick="verHistoricoPuertas(\''+c.id+'\')"><i class="fas fa-clock-rotate-left"></i></button>'+
-        '<button class="btn btn-outline btn-sm btn-icon" title="Editar" data-action="edit-cliente" data-id="'+escapeHtml(c.id)+'"><i class="fas fa-pen"></i></button>'+
-        '<button class="btn btn-outline btn-sm btn-icon" title="PDF" onclick="generatePDF_clientes(\''+c.id+'\')"><i class="fas fa-file-pdf"></i></button>'+
-        '<button class="btn btn-outline btn-sm btn-icon" title="Eliminar" onclick="confirmDelete(\'Cliente '+escapeHtml(c.nombre)+'\', ()=>deleteCliente(\''+c.id+'\'))"><i class="fas fa-trash"></i></button>'+
-      '</td>';
-  }, {colspan:9, empty:'<tr><td colspan="9" style="text-align:center;padding:30px;color:var(--text-muted)">Sin clientes</td></tr>'});
+  const provSel = document.getElementById('filterProvincia');
+  const prov = provSel?.value||'';
+  window.__bindCliNav?.();
+  if(provSel && provSel.options.length<=1){
+    const provs = [...new Set(clientes.map(window.__provinciaDeCliente).filter(Boolean))].sort();
+    provSel.innerHTML = '<option value="">Todas las provincias</option>' + provs.map(p=>'<option>'+escapeHtml(p)+'</option>').join('');
+  }
+  const filtered = clientes
+    .filter(c=>{
+      if(q && !JSON.stringify(c).toLowerCase().includes(q)) return false;
+      if(tipo && c.tipo!==tipo) return false;
+      if(prov && window.__provinciaDeCliente(c)!==prov) return false;
+      return true;
+    })
+    .sort((a,b)=>String(a.nombre||'').localeCompare(String(b.nombre||''),'es',{sensitivity:'base'}));
+
+  const POR_PAG = 20;
+  const total = filtered.length;
+  const inicio = window.__cliPagina * POR_PAG;
+  const visibles = filtered.slice(inicio, inicio + POR_PAG);
+
+  const tbody = document.getElementById('clientesBody');
+  if(!tbody) return;
+  tbody.innerHTML = visibles.map(c=>
+    '<tr data-cliente-row="'+escapeHtml(c.id)+'" style="cursor:pointer"><td style="padding:9px 14px"><strong>'+escapeHtml(c.nombre)+'</strong></td></tr>'
+  ).join('') || '<tr><td style="text-align:center;padding:30px;color:var(--text-muted)">Sin clientes</td></tr>';
+
+  // Botones mostrar más / menos
+  const nav = document.getElementById('navClientes');
+  if(nav){
+    nav.style.display = total > POR_PAG ? 'block' : 'none';
+    document.getElementById('btnCliMore').style.display = (inicio+POR_PAG < total) ? '' : 'none';
+    document.getElementById('btnCliPrev').style.display = (inicio > 0) ? '' : 'none';
+  }
+  const cont = document.getElementById('cliContador');
+  if(cont) cont.textContent = total ? ('Mostrando ' + (inicio+1) + '–' + Math.min(inicio+POR_PAG, total) + ' de ' + total + ' clientes') : '';
+
+  if(!tbody.__panelBound){
+    tbody.__panelBound = true;
+    tbody.addEventListener('click', e => {
+      const row = e.target.closest('tr[data-cliente-row]');
+      if(row) window.verFichaCliente(row.dataset.clienteRow);
+    });
+  }
+};
+
+window.clientesMostrarMas = function(){ window.__cliPagina++; renderClientes(); };
+window.clientesMostrarMenos = function(){ window.__cliPagina = Math.max(0, window.__cliPagina-1); renderClientes(); };
+window.__bindCliNav = function(){
+  const more = document.getElementById('btnCliMore');
+  const prev = document.getElementById('btnCliPrev');
+  if(more && !more.__bound){ more.__bound = true; more.addEventListener('click', window.clientesMostrarMas); }
+  if(prev && !prev.__bound){ prev.__bound = true; prev.addEventListener('click', window.clientesMostrarMenos); }
+};
+
+window.verFichaCliente = async function(id){
+  const c = await dbGet('clientes', id);
+  if(!c) return;
+  const dir = String(c.direccion||'');
+  openModal('👤 ' + (c.nombre || 'Cliente'),
+    '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:14px">'+
+      '<div><small style="color:var(--text-muted)">ID</small><div><strong>'+escapeHtml(c.id)+'</strong></div></div>'+
+      '<div><small style="color:var(--text-muted)">Tipo</small><div>'+(c.tipo==='empresa'?'Empresa':'Particular')+'</div></div>'+
+      '<div><small style="color:var(--text-muted)">DNI / CIF</small><div><strong>'+escapeHtml(c.dni||'—')+'</strong></div></div>'+
+      '<div><small style="color:var(--text-muted)">Contacto</small><div>'+escapeHtml(c.contacto||'—')+'</div></div>'+
+      '<div><small style="color:var(--text-muted)">Teléfono</small><div>'+escapeHtml(c.telefono||'—')+'</div></div>'+
+      '<div><small style="color:var(--text-muted)">Email</small><div>'+escapeHtml(c.email||'—')+'</div></div>'+
+      '<div style="grid-column:1/-1"><small style="color:var(--text-muted)">Dirección</small><div>'+escapeHtml(dir||'—')+'</div></div>'+
+      (c.lat ? '<div style="grid-column:1/-1"><small style="color:var(--text-muted)">Coordenadas</small><div>📍 '+c.lat.toFixed(5)+', '+c.lng.toFixed(5)+'</div></div>' : '')+
+    '</div>',
+    '<button class="btn btn-outline btn-sm" onclick="closeModal()">Cerrar</button>'+
+    '<button class="btn btn-primary btn-sm" onclick="closeModal();showClienteForm(\''+escapeHtml(c.id)+'\')"><i class="fas fa-pen"></i> Editar ficha</button>'+
+    '<button class="btn btn-primary btn-sm" onclick="closeModal();gestionarUbicaciones(\''+escapeHtml(c.id)+'\')"><i class="fas fa-map-marker-alt"></i> Ubicaciones</button>'+
+    '<button class="btn btn-primary btn-sm" onclick="closeModal();gestionarPuertas(\''+escapeHtml(c.id)+'\')"><i class="fas fa-door-open"></i> Puertas</button>'+
+    '<button class="btn btn-primary btn-sm" onclick="closeModal();verHistoricoPuertas(\''+escapeHtml(c.id)+'\')"><i class="fas fa-clock-rotate-left"></i> Histórico</button>'+
+    '<button class="btn btn-primary btn-sm" onclick="closeModal();generatePDF_clientes(\''+escapeHtml(c.id)+'\')"><i class="fas fa-file-pdf"></i> PDF</button>'+
+    '<button class="btn btn-danger btn-sm" onclick="closeModal();confirmDelete(\'Cliente '+escapeHtml(c.nombre)+'\', ()=>deleteCliente(\''+escapeHtml(c.id)+'\'))"><i class="fas fa-trash"></i> Eliminar</button>');
 };
 async function showClienteForm(editId = null, opts = {}) {
   const id = editId ? String(editId) : null;
@@ -418,6 +477,7 @@ async function showClienteForm(editId = null, opts = {}) {
     '<div class="form-group"><label>Ruta</label><select id="cf_ruta">'+opcionesRuta+'</select></div>'+
     '<div class="form-group"><label>Persona de contacto</label><input id="cf_contacto" value="'+escapeHtml(c.contacto||'')+'"></div>'+
     '<div class="form-group"><label>Email</label><input id="cf_email" type="email" value="'+escapeHtml(c.email||'')+'"></div>'+
+    '<div class="form-group"><label>DNI / CIF</label><input id="cf_dni" oninput="this.value=this.value.toUpperCase()" value="'+escapeHtml(c.dni||'')+'" placeholder="12345678Z o B12345678"></div>'+
     '<div class="form-group"><label>Teléfono</label><input id="cf_telefono" class="only-num" value="'+(c.telefono ? c.telefono.replace(/\D/g,'') : '')+'"></div>'+
     '<div class="form-group"><label>Dirección</label>'+
       '<div style="display:flex;gap:6px">'+
@@ -461,6 +521,7 @@ window.saveCliente = async function(id){
       contacto: document.getElementById('cf_contacto').value.trim(),
       email: document.getElementById('cf_email').value.trim(),
       telefono: document.getElementById('cf_telefono').value.trim(),
+      dni: document.getElementById('cf_dni').value.trim().toUpperCase(),
       direccion: document.getElementById('cf_direccion').value.trim(),
       lat: window.__geoCliente?.lat || existing?.lat || null,
       lng: window.__geoCliente?.lng || existing?.lng || null,
@@ -533,43 +594,245 @@ window.deleteCliente = async function(id){
   await dbDelete('clientes',id);
   showToast('Cliente eliminado');navigateTo('clientes');
 };
+
+// ═══ Detector / fusionador de clientes duplicados ═══
+function __normDup(s){
+  return String(s||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/\b(s\.l|s\.l\.u|s\.a|sl|slu|sa|c\.b|cb|sociedad|limitada|anonima|cooperativa)\b/g,'').replace(/[^a-z0-9]/g,'');
+}
+window.showDuplicadosClientes = async function(){
+  const clientes = await dbGetAll('clientes');
+  if(clientes.length < 2){ showToast('No hay clientes suficientes','info'); return; }
+  // Agrupar: mismo DNI/CIF, o nombre normalizado idéntico, o nombre+teléfono
+  const grupos = [];
+  const usados = new Set();
+  const byDni = {};
+  clientes.forEach(c=>{ const d=String(c.dni||'').trim().toUpperCase(); if(d && d!=='—') (byDni[d]=byDni[d]||[]).push(c); });
+  Object.values(byDni).forEach(g=>{ if(g.length>1){ grupos.push(g); g.forEach(c=>usados.add(c.id)); } });
+  const restantes = clientes.filter(c=>!usados.has(c.id));
+  const byNombre = {};
+  restantes.forEach(c=>{ const n=__normDup(c.nombre); if(n.length>=4) (byNombre[n]=byNombre[n]||[]).push(c); });
+  Object.values(byNombre).forEach(g=>{ if(g.length>1){ grupos.push(g); g.forEach(c=>usados.add(c.id)); } });
+  if(!grupos.length){
+    openModal('🔍 Clientes duplicados',
+      '<p style="text-align:center;padding:20px;color:var(--text-muted)"><i class="fas fa-circle-check" style="font-size:28px;display:block;margin-bottom:10px;color:var(--success,#16a34a)"></i>¡Buenas noticias! No he encontrado clientes duplicados.<br><small>Comparo por DNI/CIF y por nombre (ignorando mayúsculas, tildes y sufijos S.L./S.A.).</small></p>',
+      '<button class="btn btn-outline" onclick="closeModal()">Cerrar</button>');
+    return;
+  }
+  const html = grupos.map((g,i)=>
+    '<div style="border:1px solid var(--border);border-radius:10px;padding:12px;margin-bottom:10px">'+
+      '<strong>Grupo '+(i+1)+'</strong> <span class="badge badge-orange">'+g.length+' fichas</span>'+
+      '<div style="margin-top:8px;display:flex;flex-direction:column;gap:6px">'+g.map(c=>
+        '<label style="display:flex;align-items:center;gap:8px;padding:6px;border:1px solid var(--border);border-radius:8px;cursor:pointer">'+
+          '<input type="radio" name="dupgrp'+i+'" value="'+escapeHtml(String(c.id))+'" '+(c.dni?'checked':'')+'>'+
+          '<div style="flex:1"><strong>'+escapeHtml(c.nombre)+'</strong>'+
+            '<div style="font-size:12px;color:var(--text-muted)">'+escapeHtml(c.id)+' · '+(c.dni?'DNI/CIF '+escapeHtml(c.dni):'sin DNI')+(c.telefono?' · ☎ '+escapeHtml(c.telefono):'')+(c.email?' · ✉ '+escapeHtml(c.email):'')+'</div></div>'+
+        '</label>').join('')+
+      '</div><small style="color:var(--text-muted);display:block;margin-top:6px">Marca la ficha que QUIERES CONSERVAR: se fusionan en ella los datos no vacíos de las demás y se reasignan sus puertas, ubicaciones, partes y presupuestos.</small>'+
+    '</div>').join('');
+  openModal('🔍 Clientes duplicados ('+grupos.length+' grupos)',
+    '<div style="max-height:55vh;overflow:auto;padding-right:4px">'+html+'</div>',
+    '<button class="btn btn-outline" onclick="closeModal()">Cancelar</button>'+
+    '<button class="btn btn-primary" onclick="fusionarDuplicadosClientes()"><i class="fas fa-code-merge"></i> Fusionar seleccionados</button>');
+  window.__dupGrupos = grupos;
+};
+
+window.fusionarDuplicadosClientes = async function(){
+  const grupos = window.__dupGrupos || [];
+  const puertas = await dbGetAll('puertas');
+  const ubicaciones = await dbGetAll('ubicaciones').catch(()=>[]);
+  const partes = await dbGetAll('partesTrabajo');
+  const presupuestos = await dbGetAll('presupuestos');
+  let fusiones = 0, errores = 0;
+  for(let i=0;i<grupos.length;i++){
+    const sel = document.querySelector('input[name="dupgrp'+i+'"]:checked');
+    if(!sel) continue;
+    const conservar = grupos[i].find(c=>String(c.id)===sel.value);
+    const demas = grupos[i].filter(c=>String(c.id)!==sel.value);
+    if(!conservar || !demas.length) continue;
+    // Fusionar campos no vacíos
+    const fusion = {...conservar};
+    ['dni','telefono','email','contacto','direccion','tipo','lat','lng'].forEach(k=>{
+      if(!fusion[k] && fusion[k]!==0) demas.forEach(d=>{ if(d[k]!==undefined && d[k]!==null && d[k]!=='') fusion[k]=d[k]; });
+    });
+    try{
+      await dbPut('clientes', fusion);
+      // Reasignar registros hijos al cliente conservado
+      for(const d of demas){
+        for(const pu of puertas.filter(x=>String(x.clienteId)===String(d.id))){
+          await dbPut('puertas', {...pu, clienteId: conservar.id});
+        }
+        for(const ub of ubicaciones.filter(x=>String(x.clienteId)===String(d.id))){
+          await dbPut('ubicaciones', {...ub, clienteId: conservar.id});
+        }
+        for(const pt of partes.filter(x=>String(x.clienteId)===String(d.id))){
+          await dbPut('partesTrabajo', {...pt, clienteId: conservar.id, clienteNombre: fusion.nombre});
+        }
+        for(const pr of presupuestos.filter(x=>String(x.clienteId)===String(d.id))){
+          await dbPut('presupuestos', {...pr, clienteId: conservar.id, clienteNombre: fusion.nombre});
+        }
+        await dbDelete('clientes', d.id);
+        fusiones++;
+      }
+    } catch(e){ console.error('Fusión:',e); errores++; }
+  }
+  closeModal();
+  showToast(errores ? ('Fusionados '+fusiones+' con '+errores+' errores') : ('✅ Fusionados '+fusiones+' clientes duplicados'), errores?'warning':'success');
+  navigateTo('clientes');
+};
 //  PRESUPUESTOS
 window.render_presupuestos = async function(el){
   el.innerHTML =
     '<div class="page-header"><div><h2>Presupuestos</h2><p>Genera y gestiona presupuestos</p></div>'+
     '<div class="header-actions">'+
-      '<button class="btn btn-outline" onclick="importarPresupuestoFoto()" title="Importar un presupuesto desde una foto (OCR)"><i class="fas fa-wand-magic-sparkles"></i> Importar desde foto</button>'+
+      '<button class="btn btn-secondary" onclick="importarPresupuestoFoto()" title="Importar un presupuesto desde una foto (OCR)"><i class="fas fa-wand-magic-sparkles"></i> Importar desde foto</button>'+
       '<button class="btn btn-primary" onclick="showPresupuestoForm()"><i class="fas fa-plus"></i> Nuevo Presupuesto</button>'+
-      '<button class="btn btn-outline" onclick="showPlantillasPresupuesto()"><i class="fas fa-bookmark"></i> Plantillas</button>'+
-      '<button class="btn btn-outline" onclick="generatePDF_presupuestos()"><i class="fas fa-file-pdf"></i> Exportar todo</button></div></div>'+
-    '<div class="search-bar"><input type="text" placeholder="Buscar..." id="searchPres" oninput="renderPresupuestos()"></div>'+
+      '<button class="btn btn-secondary" onclick="showPlantillasPresupuesto()"><i class="fas fa-bookmark"></i> Plantillas</button>'+
+      '<button class="btn btn-secondary" onclick="generatePDF_presupuestos()"><i class="fas fa-file-pdf"></i> Exportar todo</button>'+
+      (window.isAdmin&&window.isAdmin()?'<button class="btn btn-secondary" onclick="exportarPresupuestosSage()" title="CSV de los presupuestos APROBADOS para Sage 50 (respeta cliente y fechas)"><i class="fas fa-file-csv"></i> Exportar a Sage</button>':'')+'</div></div>'+
+    '<div class="search-bar">'+
+      '<input type="text" placeholder="Buscar..." id="searchPres" oninput="window.__presPagina=0;renderPresupuestos()">'+
+      '<select id="filterCliPres" onchange="window.__presPagina=0;renderPresupuestos()"><option value="">Todos los clientes</option></select>'+
+      '<select id="filterEstadoPres" onchange="window.__presPagina=0;renderPresupuestos()"><option value="">Todos los estados</option><option value="borrador">Borrador</option><option value="enviado">Enviado</option><option value="aprobado">Aprobado</option><option value="rechazado">Rechazado</option></select>'+
+      '<input type="date" id="presDesde" onchange="window.__presPagina=0;renderPresupuestos()" title="Desde">'+
+      '<input type="date" id="presHasta" onchange="window.__presPagina=0;renderPresupuestos()" title="Hasta">'+
+    '</div>'+
     '<div class="card"><div  class="table-wrapper"><table><thead>'+
-      '<tr><th>ID</th><th>Cliente</th><th>Fecha</th><th>Válido hasta</th><th>Total</th><th>Parte</th><th>Estado</th><th>Acciones</th></tr>'+
-    '</thead><tbody id="presBody"></tbody></table></div></div>';
+      '<tr><th>ID</th><th>Cliente</th><th>Fecha</th><th>Válido hasta</th><th>Total</th><th>Parte</th><th>Estado</th></tr>'+
+    '</thead><tbody id="presBody"></tbody></table></div></div>'+
+    '<div id="navPres" style="display:none;text-align:center;margin-top:12px">'+
+      '<button class="btn btn-outline btn-sm" id="btnPresPrev" style="display:none"><i class="fas fa-chevron-up"></i> Mostrar menos</button> '+
+      '<button class="btn btn-outline btn-sm" id="btnPresMore">Mostrar más</button>'+
+    '</div>'+
+    '<div style="margin-top:10px"><small id="presContador" style="color:var(--text-muted)"></small></div>';
   renderPresupuestos();
+  const more = document.getElementById('btnPresMore');
+  const prev = document.getElementById('btnPresPrev');
+  if(more && !more.__bound){ more.__bound = true; more.addEventListener('click', window.presupuestosMostrarMas); }
+  if(prev && !prev.__bound){ prev.__bound = true; prev.addEventListener('click', window.presupuestosMostrarMenos); }
+  try{
+    const clientesPres = await dbGetAll('clientes');
+    const selCliPres = document.getElementById('filterCliPres');
+    if(selCliPres){
+      selCliPres.innerHTML = '<option value="">Todos los clientes</option>' +
+        clientesPres.slice().sort((a,b)=>(a.nombre||'').localeCompare(b.nombre||''))
+          .map(c=>'<option value="'+escapeHtml(c.id)+'">'+escapeHtml(c.nombre)+'</option>').join('');
+    }
+  }catch(_){ }
 };
 
 window.renderPresupuestos = async function(){
   const presupuestos = await dbGetAll('presupuestos');
   window.__presupuestosCache = Object.fromEntries(presupuestos.map(p=>[p.id,p]));
   const q = (document.getElementById('searchPres')?.value||'').toLowerCase();
-  const filtered = presupuestos.filter(p=>JSON.stringify(p).toLowerCase().includes(q));
-  document.getElementById('presBody').innerHTML = filtered.map(p=>
-    '<tr><td><strong>'+escapeHtml(p.id)+'</strong></td><td>'+escapeHtml(p.clienteNombre)+'</td>'+
+  const cliFiltro = document.getElementById('filterCliPres')?.value||'';
+  const estFiltro = document.getElementById('filterEstadoPres')?.value||'';
+  const desFiltro = document.getElementById('presDesde')?.value||'';
+  const hasFiltro = document.getElementById('presHasta')?.value||'';
+  const filtered = presupuestos.filter(p=>{
+    if(q && !JSON.stringify(p).toLowerCase().includes(q)) return false;
+    if(cliFiltro && String(p.clienteId||'')!==String(cliFiltro)) return false;
+    if(estFiltro && p.estado!==estFiltro) return false;
+    if(desFiltro && String(p.fecha||'') < desFiltro) return false;
+    if(hasFiltro && String(p.fecha||'') > hasFiltro) return false;
+    return true;
+  }).sort((a,b)=>String(b.fecha||'').localeCompare(String(a.fecha||'')));
+  const POR_PAG_PRES = 20;
+  window.__presPagina = Math.max(0, Math.min(window.__presPagina||0, Math.floor(Math.max(filtered.length-1,0)/POR_PAG_PRES)));
+  const inicioP = window.__presPagina * POR_PAG_PRES;
+  const visibles = filtered.slice(inicioP, inicioP + POR_PAG_PRES);
+  const tbodyP = document.getElementById('presBody');
+  tbodyP.innerHTML = visibles.map(p=>
+    '<tr data-pres-row="'+escapeHtml(p.id)+'" style="cursor:pointer"><td><strong>'+escapeHtml(p.id)+'</strong></td><td>'+escapeHtml(p.clienteNombre)+'</td>'+
     '<td>'+formatDate(p.fecha)+'</td><td>'+formatDate(p.validoHasta)+'</td>'+
     '<td>'+formatCurrency(p.total)+'</td>'+
     '<td>'+(p.parteId ? '<span class="badge badge-purple" title="Parte de trabajo asociado">'+escapeHtml(p.parteId)+'</span>' : '<span class="badge badge-gray">Individual</span>')+'</td>'+
     '<td><span class="badge '+getBadgeClass(p.estado)+'">'+getStatusLabel(p.estado)+'</span></td>'+
-    '<td class="actions-cell">'+
-      '<button class="btn btn-outline btn-sm btn-icon" title="Editar" data-action="edit-presupuesto" data-id="'+escapeHtml(p.id)+'"><i class="fas fa-pen"></i></button>'+
-      (p.medidasPlanta && p.medidasPlanta.sistema==='hoja-v1' ? '<button class="btn btn-outline btn-sm btn-icon" title="Ver hoja de medidas" onclick="HOJA_MEDIDAS.abrirVista(window.__presupuestosCache[\''+p.id+'\'].medidasPlanta)"><i class="fas fa-ruler-combined"></i></button>' : '')+
-      '<button class="btn btn-outline btn-sm btn-icon" title="Enviar al cliente" onclick="sendPresupuesto(\''+p.id+'\')"><i class="fas fa-paper-plane"></i></button>'+
-      '<button class="btn btn-outline btn-sm btn-icon" title="PDF" onclick="generatePDF_presupuesto(\''+p.id+'\')"><i class="fas fa-file-pdf"></i></button>'+
-      '<button class="btn btn-outline btn-sm btn-icon" title="Guardar como plantilla" onclick="savePresupuestoAsTemplate(\''+p.id+'\')"><i class="fas fa-bookmark"></i></button>'+
-      '<button class="btn btn-outline btn-sm btn-icon" title="Duplicar" onclick="duplicatePresupuesto(\''+p.id+'\')"><i class="fas fa-copy"></i></button>'+
-      '<button class="btn btn-outline btn-sm btn-icon" title="Eliminar" onclick="confirmDelete(\'Presupuesto '+escapeHtml(p.id)+'\', ()=>deletePresupuesto(\''+p.id+'\'))"><i class="fas fa-trash"></i></button>'+
-    '</td></tr>'
-  ).join('') || '<tr><td colspan="8" style="text-align:center;padding:30px;color:var(--text-muted)">Sin presupuestos</td></tr>';
+    '</tr>'
+  ).join('') || '<tr><td colspan="7" style="text-align:center;padding:30px;color:var(--text-muted)">Sin presupuestos</td></tr>';
+
+  // Botones mostrar más / menos
+  const navP = document.getElementById('navPres');
+  if(navP){
+    navP.style.display = filtered.length > POR_PAG_PRES ? 'block' : 'none';
+    document.getElementById('btnPresMore').style.display = (inicioP+POR_PAG_PRES < filtered.length) ? '' : 'none';
+    document.getElementById('btnPresPrev').style.display = (inicioP > 0) ? '' : 'none';
+  }
+  const contP = document.getElementById('presContador');
+  if(contP) contP.textContent = filtered.length ? ('Mostrando '+(inicioP+1)+'–'+Math.min(inicioP+POR_PAG_PRES, filtered.length)+' de '+filtered.length+' presupuestos') : '';
+
+  if(!tbodyP.__fichaBound){
+    tbodyP.__fichaBound = true;
+    tbodyP.addEventListener('click', e => {
+      if(e.target.closest('button') || e.target.closest('a')) return;
+      const row = e.target.closest('tr[data-pres-row]');
+      if(row) window.verFichaPresupuesto(row.dataset.presRow);
+    });
+  }
+};
+
+window.presupuestosMostrarMas = function(){ window.__presPagina++; renderPresupuestos(); };
+window.presupuestosMostrarMenos = function(){ window.__presPagina = Math.max(0,(window.__presPagina||0)-1); renderPresupuestos(); };
+
+// Ficha del presupuesto en modal
+window.verFichaPresupuesto = async function(id){
+  const p = window.__presupuestosCache?.[id] || await dbGet('presupuestos', id);
+  if(!p) return;
+  window.__presupuestosCache[p.id] = p;
+  await window.loadFeatures?.();
+  let albaranRelacionado = null;
+  if(window.isAdmin?.() && p.estado === 'aprobado'){
+    const {data,error}=await window.supabaseDB.from('albaranes')
+      .select('id,numero,fecha').eq('presupuestoid',String(p.id)).maybeSingle();
+    if(error){
+      console.error('[Presupuestos] No se pudo comprobar el albarán asociado:',error);
+      showToast('No se pudo comprobar si este presupuesto ya tiene albarán: '+error.message,'error');
+    }else{
+      albaranRelacionado=data;
+    }
+  }
+  const estadoLabels = {borrador:'Borrador',enviado:'Enviado',aprobado:'Aprobado',rechazado:'Rechazado'};
+  const estadoBadge = '<span class="badge '+getBadgeClass(p.estado)+'">'+(estadoLabels[p.estado]||getStatusLabel(p.estado)||p.estado)+'</span>';
+  const mp = p.medidasPlanta && p.medidasPlanta.sistema==='hoja-v1' ? p.medidasPlanta : null;
+  const medidasChip = mp
+    ? '<button type="button" class="btn btn-success btn-sm" title="Ver hoja de medidas" onclick="HOJA_MEDIDAS.abrirVista(window.__presupuestosCache[\''+escapeHtml(p.id)+'\'].medidasPlanta)"><i class="fas fa-ruler-combined"></i> '+escapeHtml(mp.tipoNombre||'Hoja de medidas')+'</button>' : '';
+  const items = (p.lineItems||[]).map(it=>
+    '<tr><td>'+escapeHtml(it.descripcion||'')+'</td>'+
+    '<td style="text-align:right">'+(Number(it.cantidad)||0)+'</td>'+
+    '<td style="text-align:right">'+formatCurrency(it.precio)+'</td>'+
+    '<td style="text-align:right"><strong>'+formatCurrency((Number(it.cantidad)||0)*(Number(it.precio)||0))+'</strong></td></tr>'
+  ).join('') || '<tr><td colspan="4" style="text-align:center;color:var(--text-muted)">Sin conceptos</td></tr>';
+  openModal('📋 '+(p.id||'Presupuesto'),
+    '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:14px">'+
+      '<div><small style="color:var(--text-muted)">Cliente</small><div><strong>'+escapeHtml(p.clienteNombre||'—')+'</strong></div></div>'+
+      '<div><small style="color:var(--text-muted)">Estado</small><div>'+estadoBadge+'</div></div>'+
+      '<div><small style="color:var(--text-muted)">Fecha</small><div>'+formatDate(p.fecha)+'</div></div>'+
+      '<div><small style="color:var(--text-muted)">Válido hasta</small><div>'+formatDate(p.validoHasta)+'</div></div>'+
+      '<div><small style="color:var(--text-muted)">Parte asociado</small><div>'+(p.parteId?escapeHtml(p.parteId):'<span class="badge badge-gray">Individual</span>')+'</div></div>'+
+      (medidasChip?'<div><small style="color:var(--text-muted)">Hoja de medidas</small><div>'+medidasChip+'</div></div>':'')+
+      (p.notas?'<div style="grid-column:1/-1"><small style="color:var(--text-muted)">Notas</small><div>'+escapeHtml(p.notas)+'</div></div>':'')+
+    '</div>'+
+    '<h4 style="margin:16px 0 8px">Conceptos</h4>'+
+    '<div class="table-wrapper"><table><thead><tr><th>Descripción</th><th style="text-align:right">Cant.</th><th style="text-align:right">Precio</th><th style="text-align:right">Subtotal</th></tr></thead><tbody>'+items+'</tbody></table></div>'+
+    '<div style="text-align:right;margin-top:8px">'+
+      '<div><small style="color:var(--text-muted)">Subtotal</small> '+formatCurrency(p.subtotal ?? (p.lineItems||[]).reduce((s,i)=>s+(Number(i.cantidad)||0)*(Number(i.precio)||0),0))+'</div>'+
+      '<div><small style="color:var(--text-muted)">IVA (21%)</small> '+formatCurrency(p.iva ?? 0)+'</div>'+
+      '<div style="font-size:1.1rem"><strong>TOTAL: '+formatCurrency(p.total)+'</strong></div>'+
+    '</div>',
+    '<div style="display:flex;flex-wrap:wrap;gap:8px;justify-content:flex-end;width:100%">'+
+      '<button class="btn btn-outline btn-sm" onclick="closeModal()">Cerrar</button>'+
+      '<button class="btn btn-primary btn-sm" onclick="closeModal();showPresupuestoForm(\''+escapeHtml(p.id)+'\')"><i class="fas fa-pen"></i> Editar</button>'+
+      '<button class="btn btn-success btn-sm" onclick="sendPresupuesto(\''+escapeHtml(p.id)+'\')"><i class="fas fa-paper-plane"></i> Enviar</button>'+
+      (window.aprobacionOnlineBoton?window.aprobacionOnlineBoton(p):'')+
+      '<button class="btn btn-outline btn-sm" onclick="generatePDF_presupuesto(\''+escapeHtml(p.id)+'\')"><i class="fas fa-file-pdf"></i> PDF</button>'+
+      (window.isAdmin?.() && p.estado==='aprobado'
+        ? (albaranRelacionado
+          ? '<button class="btn btn-secondary btn-sm" onclick="closeModal();navigateTo(\'albaranes\')"><i class="fas fa-file-signature"></i> Albarán creado · ALB-'+String(albaranRelacionado.fecha||'').slice(0,4)+'-'+String(albaranRelacionado.numero).padStart(4,'0')+'</button>'
+          : '<button class="btn btn-success btn-sm" onclick="closeModal();createAlbaranFromPresupuesto(\''+escapeHtml(p.id)+'\')"><i class="fas fa-file-signature"></i> Crear albarán</button>')
+        : '')+
+      '<button class="btn btn-outline btn-sm" onclick="savePresupuestoAsTemplate(\''+escapeHtml(p.id)+'\')"><i class="fas fa-bookmark"></i> Plantilla</button>'+
+      '<button class="btn btn-outline btn-sm" onclick="closeModal();duplicatePresupuesto(\''+escapeHtml(p.id)+'\')"><i class="fas fa-copy"></i> Duplicar</button>'+
+      '<button class="btn btn-danger btn-sm" onclick="confirmDelete(\'Presupuesto '+escapeHtml(p.id)+'\', ()=>deletePresupuesto(\''+escapeHtml(p.id)+'\'))"><i class="fas fa-trash"></i> Eliminar</button>'+
+    '</div>');
 };
 
 // Líneas de concepto """""""""""""""""""?
@@ -579,12 +842,22 @@ function renderLineItems(cid, items){
   const containerId = cid.endsWith('_items') ? cid : cid + '_items';
   const container = document.getElementById(containerId);
   if(!container) return;
+  const almacen = window.__almacenPres || [];
   container.innerHTML = items.map((item,i)=>
     '<tr data-idx="'+i+'">'+
-      '<td><input type="text" data-field="descripcion" value="'+escapeHtml(item.descripcion)+'" oninput="this.style.outline=\'\'" onchange="updateLineItem(\''+cid+'\','+i+',\'descripcion\',this.value)" style="min-width:200px"></td>'+
-      '<td><select data-field="tipoId" onchange="updateLineItem(\''+cid+'\','+i+',\'tipoId\',this.value)" style="min-width:180px">'+
-        '<option value="">— Sin tipo</option>'+
+      '<td><select data-field="tipoId" onchange="onLineTipoChange(\''+cid+'\','+i+',this.value)" style="min-width:170px">'+
+        '<option value="">— Sin tipo —</option>'+
         (window.__tipos||[]).map(t=>'<option value="'+t.id+'" '+(String(item.tipoId||'')===String(t.id)?'selected':'')+'>'+escapeHtml(t.nombre)+'</option>').join('')+'</td>'+
+      // Descripción: SELECT con los artículos del tipo elegido + opción manual
+      '<td><div style="display:flex;flex-direction:column;gap:4px;min-width:240px">'+
+        '<select data-field="descripcion_sel" onchange="onLineDescChange(\''+cid+'\','+i+',this)" style="min-width:240px">'+
+          '<option value="">— Elegir artículo del almacén —</option>'+
+          almacen.filter(a=>item.tipoId && String(a.categoria||a.tipoPuerta||'')===String(item.tipoId))
+            .map(a=>'<option value="'+escapeHtml(a.nombre)+'" data-precio="'+(a.precioVenta||0)+'" '+(a.nombre===item.descripcion?'selected':'')+'>'+escapeHtml(a.nombre)+' ('+escapeHtml(a.referencia||'')+')</option>').join('')+
+          '<option value="__manual__" '+(!almacen.some(a=>a.nombre===item.descripcion && String(a.categoria||a.tipoPuerta||'')===String(item.tipoId)) && item.descripcion?'selected':'')+'>✏️ Escribir manualmente…</option>'+
+        '</select>'+
+        '<input type="text" data-field="descripcion" value="'+escapeHtml(item.descripcion)+'" onchange="updateLineItem(\''+cid+'\','+i+',\'descripcion\',this.value)" style="display:'+(item.descripcion && !almacen.some(a=>a.nombre===item.descripcion && String(a.categoria||a.tipoPuerta||'')===String(item.tipoId))?'block':'none')+';min-width:240px" placeholder="Escribe el artículo a mano">'+
+      '</div></td>'+
       '<td><input type="number" data-field="cantidad" class="only-num-dec" min="0" step="0.01" inputmode="decimal" value="'+(Number(item.cantidad)||0)+'" onchange="updateLineItem(\''+cid+'\','+i+',\'cantidad\',this.value)" style="width:110px"></td>'+
       '<td><input type="number" data-field="precio" class="only-num-dec" min="0" step="0.01" inputmode="decimal" value="'+(Number(item.precio)||0)+'" onchange="updateLineItem(\''+cid+'\','+i+',\'precio\',this.value)" style="width:110px"></td>'+
       '<td><strong id="'+cid+'_subtotal_'+i+'">'+formatCurrency(item.cantidad*item.precio)+'</strong></td>'+
@@ -592,6 +865,58 @@ function renderLineItems(cid, items){
     '</tr>'
   ).join('');
 }
+
+// Al elegir un artículo del select de descripción: fija nombre y precio (o activa el input manual)
+window.onLineDescChange = function(cid, idx, sel){
+  if(!window.__lineItems[cid]) return;
+  const item = window.__lineItems[cid][idx];
+  if(!item) return;
+  const fila = sel.closest('tr');
+  const inpManual = fila?.querySelector('[data-field="descripcion"]');
+  if(sel.value === '__manual__'){
+    // Mostrar input manual, dejar vacío para escribir
+    if(inpManual){ inpManual.style.display='block'; inpManual.value=''; inpManual.focus(); }
+    item.descripcion = '';
+  } else if(sel.value){
+    // Artículo del almacén: fijar descripción y precio de venta
+    item.descripcion = sel.value;
+    item.precio = Number(sel.selectedOptions[0]?.dataset.precio)||0;
+    if(inpManual){ inpManual.style.display='none'; }
+    const inpPrecio = fila?.querySelector('[data-field="precio"]');
+    if(inpPrecio) inpPrecio.value = item.precio;
+  } else {
+    item.descripcion = '';
+    if(inpManual){ inpManual.style.display='none'; inpManual.value=''; }
+  }
+  updateLineItem(cid, idx, 'descripcion', item.descripcion);
+  const subtotalEl = document.getElementById(cid+'_subtotal_'+idx);
+  if(subtotalEl) subtotalEl.textContent = formatCurrency(item.cantidad*item.precio);
+};
+
+// Al cambiar el tipo de una línea: vacía la descripción y repinta el datalist con artículos de ese tipo
+window.onLineTipoChange = function(cid, idx, tipoId){
+  if(!window.__lineItems[cid]) return;
+  const item = window.__lineItems[cid][idx];
+  if(!item) return;
+  const anterior = String(item.tipoId||'');
+  item.tipoId = tipoId;
+  if(tipoId && anterior !== tipoId){
+    // Sugerir el primer artículo de ese tipo, si lo hay
+    const arts = (window.__almacenPres||[]).filter(a=>String(a.categoria||a.tipoPuerta||'')===String(tipoId));
+    if(arts.length){
+      item.descripcion = arts[0].nombre;
+      item.precio = Number(arts[0].precioVenta)||0;
+    } else if(!item.descripcion){
+      item.descripcion = '';
+    }
+  }
+  renderLineItems(cid, window.__lineItems[cid]);
+  // Al cambiar tipo y precargarse descripción/precio, recalcar
+  const inpPrecio = document.querySelector('tr[data-idx="'+idx+'"] [data-field="precio"]');
+  if(inpPrecio) inpPrecio.value = item.precio||0;
+  const inpDesc = document.querySelector('tr[data-idx="'+idx+'"] [data-field="descripcion"]');
+  if(inpDesc) inpDesc.value = item.descripcion||'';
+};
 
 window.updateLineItem = function(cid,idx,field,val){
   if(!window.__lineItems[cid]) return;
@@ -648,7 +973,8 @@ function calcTotals(prefix){
 
 window.showPresupuestoForm = async function(id, tpl){
   id = id ? String(id) : null;
-  await dbGetAll('tiposPuerta').then(r=>{window.__tipos=r});
+  await window.TiposPuerta.cargar().catch(()=>{}); window.__tipos=window.TiposPuerta.filas({servicios:true});   // catálogo único
+  await dbGetAll('almacen').then(r=>{window.__almacenPres=r});
   window.__lineItems = {};
   const importado = !id && !tpl ? window.__presupuestoImportado : null;
   window.__presupuestoImportado = null;
@@ -703,8 +1029,7 @@ window.showPresupuestoForm = async function(id, tpl){
   '<div class="pf-medidas-row" style="margin:12px 0;display:flex;gap:10px;align-items:center;flex-wrap:wrap">'+
     '<label style="font-weight:600">Tipo de puerta:</label>'+
     '<select id="pf_tipo_hoja" style="padding:8px 10px;border:1px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);font-size:14px">'+
-      '<option value="">— Elegir tipo —</option>'+
-      (window.__tipos||[]).map(t=>'<option value="'+escapeHtml(t.nombre)+'" '+(p.medidasPlanta?.tipoNombre===t.nombre?'selected':'')+'>'+escapeHtml(t.nombre)+'</option>').join('')+
+      window.TiposPuerta.opciones(p.medidasPlanta?.tipoNombre,{por:'nombre',vacio:'— Elegir tipo —'})+
     '</select>'+
     '<button class="btn btn-outline btn-sm" id="pf_btn_hoja" onclick="abrirHojaMedidasPresupuesto(\''+lid+'\')"><i class="fas fa-ruler-combined"></i> Abrir hoja de medidas</button>'+
     '<span id="'+lid+'_medidas_info" class="pf-medidas-info" style="font-size:13px;color:var(--text-muted)">'+
@@ -712,7 +1037,7 @@ window.showPresupuestoForm = async function(id, tpl){
     '</span>'+
   '</div>'+
   '<h3 style="margin:20px 0 10px">Conceptos</h3>'+
-  '<div class="table-wrapper"><table><thead><tr><th>Descripción</th><th>Tipo</th><th>Cant.</th><th>Precio</th><th>Subtotal</th><th></th></tr></thead><tbody id="'+lid+'_items"></tbody></table></div>'+
+  '<div class="table-wrapper"><table><thead><tr><th>Tipo</th><th>Descripción</th><th>Cant.</th><th>Precio</th><th>Subtotal</th><th></th></tr></thead><tbody id="'+lid+'_items"></tbody></table></div>'+
   '<button class="btn btn-primary btn-sm" style="margin-top:10px" onclick="addLineItem(\''+lid+'\')"><i class="fas fa-plus"></i> Añadir línea</button>'+
   '<div class="totals-box" id="'+lid+'_totals" style="display:none">'+
     '<div class="row"><span>Subtotal:</span><span id="'+lid+'_subtotal">0,00 ,</span></div>'+
@@ -757,17 +1082,38 @@ window.showPresupuestoForm = async function(id, tpl){
 };
 
 // Abre la hoja de medidas asociada al tipo de puerta elegido en el presupuesto.
-window.abrirHojaMedidasPresupuesto = function(lid){
+window.abrirHojaMedidasPresupuesto = async function(lid){
   const tipo = document.getElementById('pf_tipo_hoja')?.value;
   if(!tipo){ showToast('Elige primero el tipo de puerta','error'); return; }
   const p = window.__pfDatosActuales || {};
-  const previos = p.medidasPlanta?.sistema==='hoja-v1' && p.medidasPlanta.tipoNombre===tipo ? p.medidasPlanta.valores : {};
-  window.HOJA_MEDIDAS.abrirHoja(tipo, null, previos, (datos)=>{
-    datos.tipoId = tipo;
-    window.__presupuestoMedidas = datos;
-    const info=document.getElementById(lid+'_medidas_info');
-    if(info) info.innerHTML='<i class="fas fa-check-circle" style="color:#16a34a"></i> Hoja de medidas adjunta ('+escapeHtml(tipo)+')';
-    showToast('Hoja de medidas lista: se adjuntará al guardar el presupuesto');
+  const mismoTipo = window.TiposPuerta.resolver(p.medidasPlanta?.tipoNombre)?.key === window.TiposPuerta.resolver(tipo)?.key;
+  const previos = p.medidasPlanta?.sistema==='hoja-v1' && mismoTipo ? p.medidasPlanta.valores : {};
+  const clientes = await dbGetAll('clientes');
+  window.MEDICIONES.abrir({
+    clientes,
+    clienteId: document.getElementById('pf_cliente')?.value || '',
+    plantillaId: tipo,
+    titulo: 'Hoja de medidas — ' + tipo,
+    valoresPrevios: previos,
+    onGuardar: (datos) => {
+      // La hoja ya sale en el formato hoja-v1 que espera el presupuesto (con casillas, repeticiones y marcas)
+      window.__presupuestoMedidas = {
+        sistema: 'hoja-v1',
+        tipoId: datos.plantillaId || tipo,
+        tipoNombre: datos.tipoNombre || tipo,
+        plantillaNombre: datos.plantillaNombre || tipo,
+        imagenUrl: datos.imagenUrl || datos.plantillaImagenUrl || '',
+        svg: '',
+        campos: datos.campos || [],
+        valores: datos.valores || {},
+        fecha: datos.fecha || getToday(),
+        tecnico: datos.tecnico || window.authState?.employee?.nombre || window.authState?.user?.email || '',
+        notas: datos.notas || ''
+      };
+      const info=document.getElementById(lid+'_medidas_info');
+      if(info) info.innerHTML='<i class="fas fa-check-circle" style="color:#16a34a"></i> Hoja de medidas adjunta ('+escapeHtml(tipo)+')';
+      showToast('Hoja de medidas lista: se adjuntará al guardar el presupuesto');
+    }
   });
 };
 
@@ -999,6 +1345,9 @@ window.borrarPlantillaPresupuesto = function(tid){
   setPlantillasPresupuesto(getPlantillasPresupuesto().filter(x=>x.id!==tid));
   showPlantillasPresupuesto();
 };
+// Acceso desde Configuración → Plantillas
+window.getPlantillasPresupuestoPublic = getPlantillasPresupuesto;
+window.setPlantillasPresupuestoPublic = setPlantillasPresupuesto;
 
 // Enviar presupuesto por email / compartir
 window.sendPresupuesto = async function(id){
@@ -1039,46 +1388,72 @@ window.sendPresupuesto = async function(id){
 window.render_partesTrabajo = async function(el){
   el.innerHTML =
     '<div class="page-header"><div><h2>Partes de Trabajo</h2><p>Seguimiento de instalaciones y reparaciones</p></div>'+
-    '<div class="header-actions"><button class="btn btn-primary" onclick="showParteForm()"><i class="fas fa-plus"></i> Nuevo Parte</button></div></div>'+
-    '<div class="search-bar">'+
-      '<input type="text" placeholder="Buscar..." id="searchParte" oninput="renderPartes()">'+
-      '<select id="filterClienteParte" onchange="renderPartes()"><option value="">Todos los clientes</option></select>'+
-      '<input type="date" id="filterFechaDesde" onchange="renderPartes()" title="Desde">'+
-      '<input type="date" id="filterFechaHasta" onchange="renderPartes()" title="Hasta">'+
+    '<div class="header-actions"><button class="btn btn-primary" onclick="showParteForm()"><i class="fas fa-plus"></i> Nuevo Parte</button>'+
+      (window.isAdmin&&window.isAdmin()?'<button class="btn btn-secondary" onclick="exportarPartesSage()" title="CSV de los partes de clientes para Sage 50 (respeta cliente, técnico y fechas)">      <i class="fas fa-file-csv"></i> Exportar a Sage</button>':'')+'</div></div>'+
+          '<div class="search-bar">'+
+            '<input type="text" placeholder="Buscar..." id="searchParte" oninput="window.__partesPagina=0;renderPartes()">'+
+            '<select id="filterClienteParte" onchange="window.__partesPagina=0;renderPartes()"><option value="">Todos los clientes</option></select>'+
+      '<select id="filterTecnicoParte" onchange="window.__partesPagina=0;renderPartes()"><option value="">Todos los técnicos</option></select>'+
+      '<input type="date" id="filterFechaDesde" onchange="window.__partesPagina=0;renderPartes()" title="Desde">'+
+      '<input type="date" id="filterFechaHasta" onchange="window.__partesPagina=0;renderPartes()" title="Hasta">'+
     '</div>'+
     '<div class="card"><div  class="table-wrapper"><table><thead>'+
-            '<tr><th>ID</th><th>Cliente</th><th>Ubicación</th><th>Puertas</th><th>Técnico</th><th>Tipo Puerta</th><th>Kms</th><th>Horas</th><th>Fotos</th><th>Fecha</th><th>Acciones</th></tr>'+
-    '</thead><tbody id="parteBody"></tbody></table></div></div>';
+            '<tr><th>ID</th><th>Cliente</th><th>Ubicación</th><th>Puertas</th><th>Técnico</th><th>Tipo Puerta</th><th>Kms</th><th>Horas</th><th>Fotos</th><th>Fecha</th></tr>'+
+    '</thead><tbody id="parteBody"></tbody></table></div></div>'+
+    '<div id="navPartes" style="display:none;text-align:center;margin-top:12px">'+
+      '<button class="btn btn-outline btn-sm" id="btnParPrev" style="display:none"><i class="fas fa-chevron-up"></i> Mostrar menos</button> '+
+      '<button class="btn btn-outline btn-sm" id="btnParMore">Mostrar más</button>'+
+    '</div>'+
+    '<div style="margin-top:10px"><small id="partesContador" style="color:var(--text-muted)"></small></div>';
 
   // La tabla se pinta ya; el desplegable de clientes se rellena en paralelo
   renderPartes();
+  const moreP = document.getElementById('btnParMore');
+  const prevP = document.getElementById('btnParPrev');
+  if(moreP && !moreP.__bound){ moreP.__bound = true; moreP.addEventListener('click', window.partesMostrarMas); }
+  if(prevP && !prevP.__bound){ prevP.__bound = true; prevP.addEventListener('click', window.partesMostrarMenos); }
   const clientes = await dbGetAll('clientes');
+  const empleados = await dbGetAll('empleados').catch(()=>[]);
   const selCli = document.getElementById('filterClienteParte');
   if(!selCli) return;
   selCli.innerHTML = '<option value="">Todos los clientes</option>' +
     clientes.slice().sort((a,b)=>(a.nombre||'').localeCompare(b.nombre||''))
       .map(c=>'<option value="'+escapeHtml(c.id)+'">'+escapeHtml(c.nombre)+'</option>').join('');
+  const selTec = document.getElementById('filterTecnicoParte');
+  if(selTec){
+    selTec.innerHTML = '<option value="">Todos los técnicos</option>' +
+      empleados.slice().sort((a,b)=>(a.nombre||'').localeCompare(b.nombre||''))
+        .map(e=>'<option value="'+escapeHtml(e.id)+'">'+escapeHtml(e.nombre)+'</option>').join('');
+  }
 };
 
 window.renderPartes = async function(){
   const [partes, puertas] = await Promise.all([dbGetAll('partesTrabajo'), dbGetAll('puertas')]);
   const mapPuertas = Object.fromEntries(puertas.map(p => [p.id, p.nombre]));
+  mapPuertasCache = mapPuertas;
 
   const q = (document.getElementById('searchParte')?.value||'').toLowerCase();
   const clienteId = document.getElementById('filterClienteParte')?.value||'';
+  const tecnicoId = document.getElementById('filterTecnicoParte')?.value||'';
   const desde = document.getElementById('filterFechaDesde')?.value||'';
   const hasta = document.getElementById('filterFechaHasta')?.value||'';
 
   const filtered = partes.filter(p=>{
     if(q && !JSON.stringify(p,(key,value)=>(key==='fotos'||key.startsWith('firma'))?undefined:value).toLowerCase().includes(q)) return false;
     if(clienteId && p.clienteId!==clienteId) return false;
+    if(tecnicoId && String(p.empleadoId||'')!==String(tecnicoId)) return false;
     if(desde && p.fecha < desde) return false;
     if(hasta && p.fecha > hasta) return false;
     return true;
   });
 
-  renderPaginatedRows(document.getElementById('parteBody'), filtered, p=>
-    '<tr><td><strong>'+escapeHtml(p.id)+'</strong></td><td>'+(p.interno ? '<span class="badge badge-orange" title="Desplazamiento interno: '+escapeHtml(p.motivoInterno||'')+'">🔧 Interno</span>' : escapeHtml(p.clienteNombre))+'</td>'+
+  const POR_PAG_PAR = 20;
+  window.__partesPagina = Math.max(0, Math.min(window.__partesPagina||0, Math.floor(Math.max(filtered.length-1,0)/POR_PAG_PAR)));
+  const inicioPar = window.__partesPagina * POR_PAG_PAR;
+  const visiblesPar = filtered.slice(inicioPar, inicioPar + POR_PAG_PAR);
+  const tbodyPar = document.getElementById('parteBody');
+  tbodyPar.innerHTML = visiblesPar.map(p=>
+    '<tr data-parte-row="'+escapeHtml(String(p.id))+'" style="cursor:pointer"><td><strong>'+escapeHtml(p.id)+'</strong></td><td>'+(p.interno ? '<span class="badge badge-orange" title="Desplazamiento interno: '+escapeHtml(p.motivoInterno||'')+'">🔧 Interno</span>' : escapeHtml(p.clienteNombre))+'</td>'+
     '<td>'+(p.ubicacionNombre ? escapeHtml(p.ubicacionNombre)+'<br><small style="color:#666">'+escapeHtml(p.ubicacionDireccion||'')+'</small>' : '—')+'</td>'+
     '<td>' + ((p.puertaIds && p.puertaIds.length)
       ? p.puertaIds.map(id => '<span class="badge badge-blue" style="margin:1px">' + escapeHtml(mapPuertas[id] || id) + '</span>').join('')
@@ -1094,13 +1469,141 @@ window.renderPartes = async function(){
     (p.fotoscount > (p.fotosurls?.length || 0) ? '<span class="badge badge-blue" title="Fotos antiguas: ábrelas al editar o en el PDF">+'+(p.fotoscount-(p.fotosurls?.length||0))+'</span>' : '')
   : (p.fotoscount ? '<span class="badge badge-blue" title="🔍 Ábrelas al editar o en el PDF">📸 '+p.fotoscount+'</span>' : '—')) + '</td>' +
     '<td>'+formatDate(p.fecha)+'</td>'+
-    '<td class="actions-cell">'+
-      '<button class="btn btn-outline btn-sm btn-icon" title="Editar" data-action="edit-parte" data-id="'+escapeHtml(p.id)+'"><i class="fas fa-pen"></i></button>'+
-      '<button class="btn btn-outline btn-sm btn-icon" title="PDF" onclick="generatePDF_partes(\''+p.id+'\')"><i class="fas fa-file-pdf"></i></button>'+
-      '<button class="btn btn-outline btn-sm btn-icon" title="Eliminar" onclick="confirmDelete(\'Parte '+escapeHtml(p.id)+'\', ()=>deleteParte('+p.id+'))"><i class="fas fa-trash"></i></button>'+
-    '</td></tr>'
-  , {colspan:11, empty:'<tr><td colspan="11" style="text-align:center;padding:30px;color:var(--text-muted)">Sin partes de trabajo</td></tr>'});
+    '</tr>'
+  ).join('') || '<tr><td colspan="10" style="text-align:center;padding:30px;color:var(--text-muted)">Sin partes de trabajo</td></tr>';
+
+  // Botones mostrar más / menos
+  const navPar = document.getElementById('navPartes');
+  if(navPar){
+    navPar.style.display = filtered.length > POR_PAG_PAR ? 'block' : 'none';
+    document.getElementById('btnParMore').style.display = (inicioPar+POR_PAG_PAR < filtered.length) ? '' : 'none';
+    document.getElementById('btnParPrev').style.display = (inicioPar > 0) ? '' : 'none';
+  }
+  const contPar = document.getElementById('partesContador');
+  if(contPar) contPar.textContent = filtered.length ? ('Mostrando '+(inicioPar+1)+'–'+Math.min(inicioPar+POR_PAG_PAR, filtered.length)+' de '+filtered.length+' partes') : '';
+
+  if(!tbodyPar.__fichaBound){
+    tbodyPar.__fichaBound = true;
+    tbodyPar.addEventListener('click', e => {
+      if(e.target.closest('button') || e.target.closest('a')) return;
+      const row = e.target.closest('tr[data-parte-row]');
+      if(row) window.verFichaParte(row.dataset.parteRow);
+    });
+  }
 };
+
+window.partesMostrarMas = function(){ window.__partesPagina++; renderPartes(); };
+window.partesMostrarMenos = function(){ window.__partesPagina = Math.max(0,(window.__partesPagina||0)-1); renderPartes(); };
+
+// Ficha del parte de trabajo en modal (TODOS los campos, organizados por secciones; los vacíos no se muestran)
+window.verFichaParte = async function(id){
+  // Cargar SIEMPRE el parte completo (con firmas y DNIs): el listado ligero los excluye
+  let p = null;
+  try{ p = await dbGet('partesTrabajo', isNaN(Number(id)) ? id : Number(id)); }catch(e){ console.warn('[ficha parte] dbGet:', e); }
+  if(!p){
+    try{ p = (await dbGetAll('partesTrabajo')).find(x=>String(x.id)===String(id)) || null; }catch(_){ }
+  }
+  if(!p) return;
+  // Completar DNI del técnico desde la ficha del empleado si no vino en el registro
+  if(!p.empleadoDni && p.empleadoId){
+    try{
+      const emp = await dbGet('empleados', p.empleadoId);
+      if(emp?.dni) p.empleadoDni = emp.dni;
+    }catch(_){ }
+  }
+  const puertaNombres = (p.puertaIds||[]).map(pid => mapPuertasCache[pid] || pid);
+  const fotos = (p.fotosurls?.length ? p.fotosurls : (p.fotos||[]));
+  const materiales = (p.materiales||[]).filter(m=>(m.descripcion||'').trim());
+  const firmaTec = p.firmaTecnico || p.firma_tecnico || p.firmatecnico || null;
+  const firmaCli = p.firmaCliente || p.firma_cliente || p.firmacliente || null;
+  const selloCli = p.selloCliente || p.sellocliente || null;
+  const dniCli = p.clienteDni || p.clientedni || p.cliente_dni || '';
+  const fotosAlb = Array.isArray(p.fotosAlbaran) ? p.fotosAlbaran : [];
+  const horaEntrada = (p.horaEntrada ?? p.hora_entrada ?? '').toString().slice(0,5);
+  const horaSalida = (p.horaSalida ?? p.hora_salida ?? '').toString().slice(0,5);
+  const origen = p.origenNombre || (typeof p.origen === 'object' ? p.origen?.nombre : p.origen) || '';
+  const destino = p.destinoNombre || (typeof p.destino === 'object' ? p.destino?.nombre : p.destino) || '';
+
+  const campo = (etiqueta, valor) => (valor===undefined||valor===null||String(valor).trim()===''||valor==='—') ? '' :
+    '<div><small style="color:var(--text-muted);display:block">'+etiqueta+'</small><div style="font-weight:600">'+valor+'</div></div>';
+  const firmaImg = (data,titulo)=> data
+    ? '<div><small style="color:var(--text-muted);display:block">'+titulo+'</small><div><img src="'+escapeHtml(data)+'" style="max-width:220px;width:100%;background:#fff;border:1px solid var(--border);border-radius:8px"></div></div>' : '';
+  const fotosRow = (lista) => lista.length
+    ? '<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px">'+lista.map(f=>'<img src="'+escapeHtml(f)+'" loading="lazy" style="width:86px;height:86px;object-fit:cover;border-radius:8px;border:1px solid var(--border);cursor:zoom-in" onclick="window.open(this.src,\'_blank\')">').join('')+'</div>' : '';
+  const seccion = (icono, titulo, contenido) => contenido
+    ? '<div style="grid-column:1/-1;border-top:1px solid var(--border);padding-top:12px;margin-top:4px">'+
+        '<div style="font-size:11.5px;font-weight:800;text-transform:uppercase;letter-spacing:.5px;color:var(--primary,#16a34a);margin-bottom:10px"><i class="fas '+icono+'" style="margin-right:6px"></i>'+titulo+'</div>'+
+        '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px">'+contenido+'</div></div>' : '';
+
+  // ── Identificación ──
+  const cabecera =
+      campo('Cliente', p.interno?'🔧 Desplazamiento interno':escapeHtml(p.clienteNombre||''))+
+      campo('Tipo de puerta', p.interno?'':escapeHtml(p.tipoPuerta||''))+
+      campo('Técnico', escapeHtml(p.empleadoNombre||''))+
+      campo('Fecha', formatDate(p.fecha))+
+      campo('Horario', horaEntrada? horaEntrada+(horaSalida?' – '+horaSalida:''):'')+
+      campo('Vehículo', p.matricula?'🚐 '+escapeHtml(p.matricula):'');
+
+  // ── Lugar / desplazamiento ──
+  const lugar =
+      campo('Ubicación', p.ubicacionNombre?escapeHtml(p.ubicacionNombre)+(p.ubicacionDireccion?'<br><small style="font-weight:400;color:var(--text-muted)">'+escapeHtml(p.ubicacionDireccion)+'</small>':''):'')+
+      campo('Kms', p.kms?p.kms+' km':'')+
+      campo('Horas', p.horas?p.horas+' h':'')+
+      campo('Salida (origen)', escapeHtml(origen))+
+      campo('Llegada (destino)', escapeHtml(destino));
+
+  // ── Trabajo realizado ──
+  const puertasHtml = puertaNombres.length
+    ? campo('Puertas revisadas', puertaNombres.map(n=>'<span class="badge badge-blue" style="margin:2px">'+escapeHtml(n)+'</span>').join('')) : '';
+  const trabajo =
+      campo('Descripción', escapeHtml(p.descripcion||''))+
+      campo('Motivo interno', p.interno?escapeHtml(p.motivoInterno||''):'')+
+      puertasHtml;
+
+  const materialHtml = materiales.length
+    ? '<div style="grid-column:1/-1"><small style="color:var(--text-muted);display:block;margin-bottom:4px">Material utilizado</small><ul style="margin:0;padding-left:18px">'+materiales.map(m=>'<li>'+escapeHtml(m.descripcion||'')+(m.cantidad?' — <strong>'+m.cantidad+'</strong> '+(m.unidad||'ud'):'')+'</li>').join('')+'</ul></div>' : '';
+
+  // ── Identificación / validación ──
+  // DNI del técnico: obligatorio al guardar; si no vino en el registro, se rescató de la ficha del empleado
+  const dniTecFinal = p.empleadoDni || p.empleadodni || '';
+  // Sello superpuesto sobre la firma del cliente (como en el PDF del presupuesto)
+  const firmaCliHtml = (firmaCli || selloCli)
+    ? '<div style="position:relative;display:inline-block">'+
+        (firmaCli?'<img src="'+escapeHtml(firmaCli)+'" style="width:220px;max-width:100%;background:#fff;border:1px solid var(--border);border-radius:8px;display:block">':'')+
+        (selloCli?'<img src="'+escapeHtml(selloCli)+'" style="position:absolute;right:2px;bottom:2px;width:82px;height:82px;object-fit:contain;opacity:.92;mix-blend-mode:multiply;border-radius:6px">':'')+
+      '</div>' : '';
+  const validacion =
+    '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:16px;grid-column:1/-1">'+
+      // Columna cliente: DNI justo encima de su firma
+      '<div style="display:flex;flex-direction:column;gap:8px">'+
+        (p.interno?'':campo('DNI / CIF cliente', escapeHtml(dniCli)))+
+        '<div><small style="color:var(--text-muted);display:block;margin-bottom:4px">Firma del cliente'+(selloCli?' (con sello)':'')+'</small>'+
+        (firmaCli||selloCli ? firmaCliHtml : '<div style="width:220px;max-width:100%;height:70px;background:#fff;border:1px dashed var(--border);border-radius:8px;display:flex;align-items:center;justify-content:center;color:var(--text-muted);font-size:12px">Sin firma</div>')+'</div>'+
+      '</div>'+
+      // Columna técnico: DNI justo encima de su firma
+      '<div style="display:flex;flex-direction:column;gap:8px">'+
+        campo('DNI del técnico', escapeHtml(dniTecFinal))+
+        '<div><small style="color:var(--text-muted);display:block;margin-bottom:4px">Firma del técnico</small>'+
+        (firmaTec?'<img src="'+escapeHtml(firmaTec)+'" style="width:220px;max-width:100%;background:#fff;border:1px solid var(--border);border-radius:8px;display:block">':'<div style="width:220px;max-width:100%;height:70px;background:#fff;border:1px dashed var(--border);border-radius:8px;display:flex;align-items:center;justify-content:center;color:var(--text-muted);font-size:12px">Sin firma</div>')+'</div>'+
+      '</div>'+
+      campo('Email secundario', escapeHtml(p.emailSecundario||''))+
+    '</div>';
+
+  openModal('🔧 '+(p.id||'Parte'),
+    '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px">'+cabecera+'</div>'+
+    seccion('fa-location-dot','Lugar y desplazamiento',lugar)+
+    seccion('fa-screwdriver-wrench','Trabajo realizado',trabajo)+
+    (materialHtml?'<div style="grid-column:1/-1;border-top:1px solid var(--border);padding-top:12px;margin-top:4px">'+materialHtml+'</div>':'')+
+    ((fotos.length||fotosAlb.length)?'<div style="grid-column:1/-1;border-top:1px solid var(--border);padding-top:12px;margin-top:4px">'+(fotos.length?'<small style="color:var(--text-muted)">Fotos del trabajo ('+fotos.length+')</small>'+fotosRow(fotos):'')+(fotosAlb.length?'<div style="margin-top:10px"><small style="color:var(--text-muted)">Albarán (desplazamiento interno)</small>'+fotosRow(fotosAlb)+'</div>':'')+'</div>':'')+
+    seccion('fa-id-card','Identificación y validación',validacion),
+    '<button class="btn btn-outline btn-sm" onclick="closeModal()">Cerrar</button>'+
+    '<button class="btn btn-primary btn-sm" onclick="closeModal();showParteForm(\''+escapeHtml(String(p.id))+'\')"><i class="fas fa-pen"></i> Editar</button>'+
+    '<button class="btn btn-primary btn-sm" onclick="generatePDF_partes(\''+escapeHtml(String(p.id))+'\')"><i class="fas fa-file-pdf"></i> PDF</button>'+
+    '<button class="btn btn-danger btn-sm" onclick="confirmDelete(\'Parte '+escapeHtml(String(p.id))+'\', ()=>deleteParte('+JSON.stringify(String(p.id))+'))"><i class="fas fa-trash"></i> Eliminar</button>');
+};
+// Caché de nombres de puertas para la ficha
+let mapPuertasCache = {};
+let tiposMapCache = new Map();
 const MATERIAL_UNIDADES = ['ud', 'l', 'kg', 'm', 'caja'];
 
 function materialesParteHtml() {
@@ -1109,8 +1612,13 @@ function materialesParteHtml() {
   const rows = st.lines.map((l, i) => {
     const art = l.articuloId ? st.almacen.find(a => String(a.id) === String(l.articuloId)) : null;
     const hint = art ? 'Stock en almacén: ' + (Number(art.stock) || 0) : '';
+    const artSel = art ? art.nombre : (l.descripcion || '');
     return '<div class="mat-row">' +
-      '<div class="mat-name"><input list="pt_mat_list" value="' + escapeHtml(l.descripcion || '') + '" placeholder="Material (ej: rueda puerta seccional)" oninput="updateMaterialParte(' + i + ',\'descripcion\',this.value)">' +
+      '<div class="mat-name"><select onchange="updateMaterialParteDeLista(' + i + ',this)" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;font-size:14px">' +
+        '<option value="">— Elegir artículo —</option>' +
+        (st.__almacenOrdenado || []).map(a => '<option value="' + escapeHtml(a.nombre) + '"' + (a.nombre === artSel ? ' selected' : '') + '>' + escapeHtml(a.nombre) + (a.referencia ? ' (' + escapeHtml(a.referencia) + ')' : '') + '</option>').join('') +
+        (artSel && !(st.__almacenOrdenado || []).some(a => a.nombre === artSel) ? '<option value="' + escapeHtml(artSel) + '" selected>' + escapeHtml(artSel) + ' (manual)</option>' : '') +
+      '</select>' +
         '<small id="pt_mat_hint_' + i + '" class="mat-hint">' + escapeHtml(hint) + '</small></div>' +
       '<input type="number" min="0" step="0.01" inputmode="decimal" value="' + (l.cantidad || '') + '" placeholder="Cant." oninput="updateMaterialParte(' + i + ',\'cantidad\',this.value)">' +
       '<select onchange="updateMaterialParte(' + i + ',\'unidad\',this.value)">' + optU(l.unidad || 'ud') + '</select>' +
@@ -1119,6 +1627,18 @@ function materialesParteHtml() {
   }).join('');
   return rows || '<small style="color:var(--text-muted)">Sin material. Pulsa «Añadir material» si has usado alguno.</small>';
 }
+
+// Al elegir un artículo del desplegable: fija descripción y articuloId
+window.updateMaterialParteDeLista = function(i, sel){
+  const st = window.__materialesParte;
+  const line = st?.lines[i];
+  if(!line) return;
+  line.descripcion = sel.value;
+  const art = (st.almacen || []).find(a => a.nombre === sel.value);
+  line.articuloId = art ? art.id : '';
+  const hint = document.getElementById('pt_mat_hint_' + i);
+  if(hint) hint.textContent = art ? 'Stock en almacén: ' + (Number(art.stock) || 0) : '';
+};
 
 window.addMaterialParte = function() {
   window.__materialesParte.lines.push({ articuloId: '', descripcion: '', cantidad: '', unidad: 'ud' });
@@ -1160,9 +1680,10 @@ window.showParteForm = async function(id, prefill) {
   const vehiculos = await dbGetAll('vehiculos');
   const almacenArticulos = await dbGetAll('almacen').catch(() => []);
   // Tipos de puerta para el select (mismo catálogo que Almacén/Manuales)
-  window.__tiposPuertaCache = await dbGetAll('tiposPuerta').catch(() => []);
+  window.__tiposPuertaCache = await window.TiposPuerta.filasDB();
   window.__materialesParte = {
     almacen: almacenArticulos,
+    __almacenOrdenado: [...almacenArticulos].sort((a, b) => String(a.nombre || '').localeCompare(String(b.nombre || ''), 'es', { sensitivity: 'base' })),
     lines: (Array.isArray(p.materiales) ? p.materiales : []).map(m => ({
       articuloId: m.articuloId || '', descripcion: m.descripcion || '', cantidad: m.cantidad ?? '', unidad: m.unidad || 'ud'
     }))
@@ -1206,21 +1727,21 @@ window.showParteForm = async function(id, prefill) {
       (clienteSinFicha ? '<option value="__incidencia__" data-nombre="' + escapeHtml(clienteNombrePrefill) + '" selected>' + escapeHtml(clienteNombrePrefill) + ' (incidencia)</option>' : '') +
       clientes.map(c => '<option value="' + c.id + '" data-nombre="' + escapeHtml(c.nombre) + '" ' + (String(clienteIdSeleccionado) === String(c.id) ? 'selected' : '') + '>' + escapeHtml(c.nombre) + '</option>').join('') +
     '</select></div>' +
-    '<div class="form-group normal-only"><label>Ubicación del trabajo</label><select id="pt_ubicacion"><option value="">-- Selecciona un cliente primero --</option></select></div>' +
-    '<div class="form-group full normal-only"><label>Puertas a revisar</label>' +
-      '<select id="pt_puertas" multiple style="height:140px">' +
-        '<option value="">-- Selecciona un cliente primero --</option>' +
-      '</select>' +
-      '<small style="color:var(--text-muted);display:block;margin-top:4px">Ctrl+Clic para seleccionar varias</small>' +
-    '</div>' +
-    '<div class="form-group"><label>Técnico asignado</label><select id="pt_empleado">' +
-      '<option value="">— Sin asignar</option>' +
-      empleados.map(e => '<option value="' + e.id + '" data-nombre="' + escapeHtml(e.nombre) + '" ' + (p.empleadoId === e.id ? 'selected' : '') + '>' + escapeHtml(e.nombre) + '</option>').join('') +
-    '</select></div>' +
     '<div class="form-group normal-only"><label>Tipo Puerta *</label><select id="pt_tipo">' +
       '<option value="">— Seleccionar tipo —</option>' +
       (window.__tiposPuertaCache || []).map(t => '<option value="' + escapeHtml(t.nombre) + '" ' + (String(p.tipoPuerta || '') === String(t.nombre) ? 'selected' : '') + '>' + escapeHtml(t.nombre) + '</option>').join('') +
     '</select></div>' +
+    '<div class="form-group"><label>Técnico asignado</label><select id="pt_empleado">' +
+      '<option value="">— Sin asignar</option>' +
+      empleados.map(e => '<option value="' + e.id + '" data-nombre="' + escapeHtml(e.nombre) + '" ' + (p.empleadoId === e.id ? 'selected' : '') + '>' + escapeHtml(e.nombre) + '</option>').join('') +
+    '</select></div>' +
+    '<div class="form-group full normal-only" id="pt_puertas_group"><label>Puertas a revisar</label>' +
+      '<div id="pt_puertas_lista" style="display:flex;flex-direction:column;gap:4px;max-height:220px;overflow:auto;border:1px solid var(--border);border-radius:8px;padding:8px">' +
+        '<small style="color:var(--text-muted)">Selecciona cliente, ubicación y tipo de puerta para ver las puertas</small>' +
+      '</div>' +
+      '<small style="color:var(--text-muted);display:block;margin-top:4px">Marca con el check ✔ la(s) puerta(s) con intervención: son las que aparecen destacadas en el PDF.</small>' +
+    '</div>' +
+    '<div class="form-group normal-only"><label>Ubicación del trabajo</label><select id="pt_ubicacion"><option value="">-- Selecciona un cliente primero --</option></select></div>' +
     '<div class="form-group full normal-only"><label>Descripción del trabajo *</label><textarea id="pt_desc" rows="3">' + escapeHtml(p.descripcion || '') + '</textarea></div>' +
     '<div class="form-group normal-only"><label>Kms (Ceuti — Cliente)</label>' +
       '<input id="pt_kms" class="only-num" value="' + (p.kms || '') + '" placeholder="Se calcula al elegir cliente">' +
@@ -1255,10 +1776,8 @@ window.showParteForm = async function(id, prefill) {
     '<div class="form-group"><label>Fecha</label><input id="pt_fecha" type="date" value="' + (p.fecha || getToday()) + '"></div>' +
     '<div class="form-group full normal-only"><label>Material utilizado</label>' +
       '<div id="pt_materiales">' + materialesParteHtml() + '</div>' +
-      '<datalist id="pt_mat_list">' + almacenArticulos.map(a => '<option value="' + escapeHtml(a.nombre) + '">' + escapeHtml(a.referencia || '') + '</option>').join('') + '</datalist>' +
       '<button type="button" class="btn btn-outline btn-sm" style="margin-top:6px" onclick="addMaterialParte()"><i class="fas fa-plus"></i> Añadir material</button>' +
     '</div>' +
-    '<div class="form-group full normal-only"><label>Notas</label><textarea id="pt_notas">' + escapeHtml(p.notas || '') + '</textarea></div>' +
     '<div class="form-group full normal-only"><label>Fotos (máx. ' + MAX_FOTOS_PARTE + ')</label>' +
       '<div id="pt_fotos_thumbs" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px">' +
         window.__fotosParte.form.map((f,i) => '<div style="position:relative;width:80px;height:80px;border-radius:8px;overflow:hidden;border:2px solid var(--primary)"><img class="inc-foto" src="' + f + '" style="width:100%;height:100%;object-fit:cover;cursor:zoom-in"><button type="button" onclick="eliminarFotoParte(' + i + ')" style="position:absolute;top:2px;right:2px;width:20px;height:20px;border-radius:50%;background:#dc2626;color:#fff;border:none;cursor:pointer;font-size:12px;">-</button></div>').join('') +
@@ -1276,7 +1795,8 @@ window.showParteForm = async function(id, prefill) {
           '<canvas id="pt_firma_tecnico" data-firma-titulo="Firma del técnico" style="display:block;width:100%"></canvas>' +
           '<div style="margin-top:8px"><small class="firma-hint" style="color:var(--text-muted)">Se carga automáticamente desde la ficha del empleado</small></div>' +
         '</div>' +
-        '<div class="form-group" style="margin-top:10px"><label>DNI Técnico</label><input id="pt_dni_tecnico" value="' + escapeHtml(p.empleadoDni || '') + '" placeholder="Se rellena con el técnico" readonly></div>' +
+        '<div style="margin-top:8px"><small style="color:var(--text-muted)">DNI del técnico:</small></div>' +
+        '<div class="form-group" style="margin-top:4px"><input id="pt_dni_tecnico" value="' + escapeHtml(p.empleadoDni || '') + '" placeholder="Se rellena con el técnico" readonly></div>' +
       '</div>' +
       '<div>' +
         '<label style="display:block;margin-bottom:6px;font-weight:600">Firma del Cliente</label>' +
@@ -1287,7 +1807,24 @@ window.showParteForm = async function(id, prefill) {
             '<small class="firma-hint" style="color:var(--text-muted)">Toca el recuadro para firmar</small>' +
           '</div>' +
         '</div>' +
-        '<div class="form-group" style="margin-top:10px"><label>DNI Cliente</label><input id="pt_dni_cliente" value="' + escapeHtml(clienteDni) + '" placeholder="12345678Z"></div>' +
+        '<div style="margin-top:8px"><small style="color:var(--text-muted)">DNI / CIF del cliente:</small></div>' +
+        '<div class="form-group" style="margin-top:4px"><input id="pt_dni_cliente" value="' + escapeHtml(clienteDni) + '" placeholder="12345678Z o B12345678"></div>' +
+        '<div class="form-group" style="margin-top:10px"><label>Email secundario</label>' +
+          '<input id="pt_email_sec" type="email" value="' + escapeHtml(p.emailSecundario || '') + '" placeholder="Vacío = email de la ficha">' +
+          '<small style="color:var(--text-muted);display:block;margin-top:2px">Si lo rellenas, se envía también a esta dirección.</small>' +
+        '</div>' +
+        '<div class="form-group" style="margin-top:10px">' +
+          '<label>Sello del cliente (hoy)</label>' +
+          '<div style="display:flex;gap:10px;align-items:center">' +
+            '<img id="pt_sello_thumb" src="' + (window.__selloClienteParte || '') + '" alt="" style="width:64px;height:64px;object-fit:contain;border-radius:8px;border:1px solid var(--border);' + (window.__selloClienteParte ? '' : 'display:none') + '">' +
+            '<div style="display:flex;gap:6px;flex-wrap:wrap">' +
+              '<button type="button" class="btn btn-primary btn-sm" onclick="document.getElementById(\'pt_sello_input\').click()"><i class="fas fa-camera"></i> ' + (window.__selloClienteParte ? 'Repetir foto' : 'Fotografiar sello') + '</button>' +
+              '<input type="file" id="pt_sello_input" accept="image/*" capture="environment" style="display:none">' +
+              '<button type="button" class="btn btn-outline btn-sm" id="pt_sello_borrar" style="' + (window.__selloClienteParte ? '' : 'display:none') + '"><i class="fas fa-trash"></i> Quitar</button>' +
+            '</div>' +
+          '</div>' +
+          '<small style="color:var(--text-muted);display:block;margin-top:4px">Pide al cliente que selle un folio en blanco y hazle una foto. Se imprime sobre su firma en el PDF.</small>' +
+        '</div>' +
       '</div>' +
     '</div>' +
   '</div>';
@@ -1297,13 +1834,65 @@ window.showParteForm = async function(id, prefill) {
 
   openModal(id ? 'Editar Parte' : 'Nuevo Parte', form, footer);
 
+  // --- Sello del cliente: foto en el momento (va con la fecha del día) ---
+  window.__selloClienteParte = p.selloCliente || null;
+  document.getElementById('pt_sello_input')?.addEventListener('change', function(){
+    const file = this.files?.[0]; this.value='';
+    if(!file) return;
+    const r = new FileReader();
+    r.onload = ev => {
+      // Comprimir y recuadrar: el sello debe verse nítido pero no pesar
+      const img = new Image();
+      img.onload = () => {
+        const c = document.createElement('canvas');
+        const lado = 320;
+        const escala = Math.max(lado / img.width, lado / img.height);
+        c.width = lado; c.height = lado;
+        const ctx = c.getContext('2d');
+        ctx.fillStyle = '#ffffff'; ctx.fillRect(0,0,lado,lado);
+        ctx.drawImage(img, (lado-img.width*escala)/2, (lado-img.height*escala)/2, img.width*escala, img.height*escala);
+        window.__selloClienteParte = c.toDataURL('image/jpeg', 0.75);
+        const th = document.getElementById('pt_sello_thumb');
+        th.src = window.__selloClienteParte; th.style.display='';
+        document.getElementById('pt_sello_borrar').style.display='';
+        showToast('Sello capturado','success');
+      };
+      img.src = ev.target.result;
+    };
+    r.readAsDataURL(file);
+  });
+  document.getElementById('pt_sello_borrar')?.addEventListener('click', function(){
+    window.__selloClienteParte = null;
+    document.getElementById('pt_sello_thumb').style.display = 'none';
+    this.style.display = 'none';
+  });
+
   // --- Toggle interno/normal: muestra u oculta campos según el tipo ---
   const aplicarModo = () => {
     const interno = document.getElementById('pt_tipo_interno')?.checked;
     document.querySelectorAll('.interno-only').forEach(el => el.style.display = interno ? 'block' : 'none');
     document.querySelectorAll('.normal-only').forEach(el => el.style.display = interno ? 'none' : '');
+    // Puertas a revisar: oculto en Mantenimiento/Reparación, visible en el resto
+    const grupoPuertas = document.getElementById('pt_puertas_group');
+    if(grupoPuertas && !interno){
+      const tipo = document.getElementById('pt_tipo')?.value || '';
+      const ocultarPuertas = /^(mantenimiento|reparaci[oó]n)$/i.test(tipo.trim());
+      grupoPuertas.style.display = ocultarPuertas ? 'none' : '';
+    }
   };
   document.querySelectorAll('input[name="pt_tipo_parte"]').forEach(r => r.addEventListener('change', aplicarModo));
+  document.getElementById('pt_tipo')?.addEventListener('change', async () => {
+    // Conservar marcas antes de repintar
+    p_prevPuertas = puertasIntervenidasActuales();
+    aplicarModo();
+    const selCli = document.getElementById('pt_cliente');
+    if(selCli?.value) window.pintarPuertasParte(selCli.value, null, p_prevPuertas);
+  });
+  document.getElementById('pt_ubicacion')?.addEventListener('change', async () => {
+    p_prevPuertas = puertasIntervenidasActuales();
+    const selCli = document.getElementById('pt_cliente');
+    if(selCli?.value) window.pintarPuertasParte(selCli.value, null, p_prevPuertas);
+  });
   aplicarModo();
 
   // --- Desplazamiento interno: origen/destino (oficina, proveedores y clientes) + kms automáticos ---
@@ -1410,17 +1999,8 @@ window.showParteForm = async function(id, prefill) {
             }
           }
         }
-        // --- Puertas dinámicas ---
-        const selPuertas = document.getElementById('pt_puertas');
-        if (selPuertas && sel.value) {
-          const puertas = await dbGetByIndex('puertas', 'clienteId', sel.value);
-          selPuertas.innerHTML = puertas.map(pu => {
-            const checked = p.puertaIds && p.puertaIds.includes(pu.id) ? 'selected' : '';
-            return '<option value="' + pu.id + '" ' + checked + '>' + escapeHtml(pu.nombre) + ' (' + pu.tipo + ')</option>';
-          }).join('');
-        } else if (selPuertas) {
-          selPuertas.innerHTML = '<option value="">-- Selecciona un cliente primero --</option>';
-        }
+        // --- Puertas dinámicas (checkboxes) ---
+        pintarPuertasParte(sel.value, null, p.puertaIntervenidas);
       });
     }
     const empSel = document.getElementById('pt_empleado');
@@ -1469,17 +2049,46 @@ window.showParteForm = async function(id, prefill) {
         }
       }
       // --- Cargar puertas si hay cliente preseleccionado (edición) ---
-      const selPuertas = document.getElementById('pt_puertas');
-      if (selPuertas) {
-        const puertas = await dbGetByIndex('puertas', 'clienteId', clienteIdSeleccionado);
-        selPuertas.innerHTML = puertas.map(pu => {
-          const checked = p.puertaIds && p.puertaIds.includes(pu.id) ? 'selected' : '';
-          return '<option value="' + pu.id + '" ' + checked + '>' + escapeHtml(pu.nombre) + ' (' + pu.tipo + ')</option>';
-        }).join('');
-      }
+      pintarPuertasParte(clienteIdSeleccionado, null, p.puertaIntervenidas);
     }
   }, 200);
 };
+
+// ═══ Puertas del parte: lista con checkbox de intervención ═══
+// Las marcadas (intervenidas) son las que van al PDF destacadas.
+function puertasIntervenidasActuales(){
+  return [...document.querySelectorAll('#pt_puertas_lista .pt-puerta-chk:checked')].map(chk => chk.dataset.pid);
+}
+window.pintarPuertasParte = async function(clienteId, _unused, intervenidasPrev){
+  const lista = document.getElementById('pt_puertas_lista');
+  if(!lista) return;
+  const selUbic = document.getElementById('pt_ubicacion');
+  const tipoPuerta = document.getElementById('pt_tipo')?.value || '';
+  const ubicacionId = selUbic?.value || '';
+  if(!clienteId || clienteId === '__incidencia__'){
+    lista.innerHTML = '<small style="color:var(--text-muted)">Selecciona un cliente para ver sus puertas</small>';
+    return;
+  }
+  let puertas = [];
+  try{ puertas = await dbGetByIndex('puertas', 'clienteId', clienteId); }catch(_){ }
+  // Filtrar por ubicación (si está elegida) y por tipo de puerta
+  if(ubicacionId) puertas = puertas.filter(pu => !pu.ubicacionId || String(pu.ubicacionId) === String(ubicacionId));
+  if(tipoPuerta) puertas = puertas.filter(pu => String(pu.tipo || '') === String(tipoPuerta));
+  if(!puertas.length){
+    lista.innerHTML = '<small style="color:var(--text-muted)">' +
+      (tipoPuerta ? 'Este cliente no tiene puertas de tipo "' + escapeHtml(tipoPuerta) + '"' : 'Este cliente no tiene puertas dadas de alta') + '</small>';
+    return;
+  }
+  const prev = intervenidasPrev || p_prevPuertas || [];
+  lista.innerHTML = puertas.map(pu => {
+    const marcada = prev.includes(pu.id);
+    return '<label style="display:flex;align-items:center;gap:8px;padding:4px 2px;font-size:14px">' +
+      '<input type="checkbox" class="pt-puerta-chk" data-pid="' + escapeHtml(pu.id) + '" ' + (marcada ? 'checked' : '') + '> ' +
+      '<span>' + escapeHtml(pu.nombre) + (pu.tipo ? ' <small style="color:var(--text-muted)">(' + escapeHtml(pu.tipo) + ')</small>' : '') + '</span>' +
+    '</label>';
+  }).join('');
+};
+let p_prevPuertas = null; // puertas marcadas antes de repintar (para no perder marcas al cambiar tipo)
 window.saveParte = async function(id){
   id = id ? String(id) : null;
   try {
@@ -1497,9 +2106,8 @@ window.saveParte = async function(id){
     const ubicacionNombre = selUbic?.options[selUbic.selectedIndex]?.dataset.nombre || '';
     const ubicacionDireccion = selUbic?.options[selUbic.selectedIndex]?.dataset.direccion || '';
 
-    // --- PUERTAS (Paso 7) ---
-    const puertaIds = Array.from(document.getElementById('pt_puertas')?.selectedOptions || [])
-      .map(opt => opt.value);
+    // --- PUERTAS: checkboxes de intervención ---
+    const puertaIds = [...document.querySelectorAll('#pt_puertas_lista .pt-puerta-chk:checked')].map(chk => chk.dataset.pid);
 
     const dniCliente = document.getElementById('pt_dni_cliente').value.trim();
     const dniTecnico = document.getElementById('pt_dni_tecnico').value.trim();
@@ -1575,6 +2183,14 @@ window.saveParte = async function(id){
       clearFieldError('pt_dni_cliente');
     }
 
+    // Email secundario (si se rellena, debe ser válido)
+    const emailSec = document.getElementById('pt_email_sec')?.value.trim() || '';
+    if(emailSec){
+      ok = setFieldError('pt_email_sec', !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailSec) ? 'Email no válido' : '') && ok;
+    } else {
+      clearFieldError('pt_email_sec');
+    }
+
     // Material utilizado: las líneas vacías se descartan; con material debe haber cantidad > 0
     const materialesParte = [];
     for (const [index, line] of (window.__materialesParte?.lines || []).entries()) {
@@ -1626,12 +2242,14 @@ window.saveParte = async function(id){
       firmaCliente: firmaCliente,
       estado: 'completado',
       fecha: document.getElementById('pt_fecha').value,
-      notas: document.getElementById('pt_notas').value.trim(),
+      notas: (existingPart?.notas) || '', // campo retirado del formulario; se conserva lo guardado
       materiales: materialesParte,
       ubicacionId,
       ubicacionNombre,
       ubicacionDireccion,
-      puertaIds: puertaIds.length > 0 ? puertaIds : null
+      puertaIds: puertaIds.length > 0 ? puertaIds : null,
+      emailSecundario: emailSec || null,
+      selloCliente: window.__selloClienteParte || null
     };
 
     // 1. Guardar fotos PRIMERO
@@ -1652,9 +2270,10 @@ window.saveParte = async function(id){
       }
       parteData.fotosAlbaran = subidas;
     } else if(!esInterno) {
-      parteData.fotosAlbaran = null;
+      parteData.fotosAlbaran = []; // nunca null: la columna es NOT NULL en Supabase
     }
     window.__fotosAlbaran = [];
+    window.__selloClienteParte = null;
 
     // 2. Persistir en DB
     let parteGuardado;
@@ -1673,6 +2292,28 @@ window.saveParte = async function(id){
     closeModal();
     showToast('Parte guardado');
     navigateTo('partesTrabajo');
+
+    // 5. Envío por email: siempre al email de la ficha del cliente (si tiene);
+    //    si hay email secundario, también a él.
+    if(!esInterno){
+      let emailFicha = '';
+      try{ emailFicha = (await dbGet('clientes', clienteId))?.email || ''; }catch(_){ }
+      const destinos = [...new Set([emailFicha, emailSec].map(e => String(e || '').trim()).filter(Boolean))];
+      if(destinos.length){
+        const asunto = 'Parte de trabajo ' + (parteGuardado.id || '') + ' — ' + clienteNombre;
+        const cuerpo =
+          'Buenos días:\n\n' +
+          'Le adjuntamos / le remitimos el detalle del parte de trabajo realizado el ' + parteGuardado.fecha + '.\n\n' +
+          'Cliente: ' + clienteNombre + '\n' +
+          'Tipo de puerta: ' + parteGuardado.tipoPuerta + '\n' +
+          'Técnico: ' + parteGuardado.empleadoNombre + '\n' +
+          'Descripción: ' + parteGuardado.descripcion + '\n\n' +
+          'Un saludo.\n';
+        for(const dest of destinos){
+          try{ await window.enviarCorreo(dest, asunto, cuerpo); }catch(e){ console.warn('Email a ' + dest + ':', e); }
+        }
+      }
+    }
   } catch(err){
     console.error('Error al guardar parte:', err);
     showToast('Error al guardar: ' + err.message, 'error');
@@ -1711,14 +2352,15 @@ window.render_vehiculos = async function(el){
       '<div class="stat-card"><div class="stat-icon" style="background:#ffedd5;color:#ea580c"><i class="fas fa-route"></i></div><div class="stat-info"><h3>'+vehiculos.filter(v=>v.estado==='en_ruta').length+'</h3><p>En ruta</p></div></div>'+
     '</div>'+
     '<div class="card"><div  class="table-wrapper"><table><thead>'+
-      '<tr><th>ID</th><th>Matrícula</th><th>Marca</th><th>Modelo</th><th>Año</th><th>Km</th><th>Estado</th><th>Acciones</th></tr>'+
+      '<tr><th>Matrícula</th><th>Marca</th><th>Modelo</th><th>Año</th><th>Km</th><th>ITV</th><th>Estado</th></tr>'+
     '</thead><tbody id="vehBody"></tbody></table></div></div>';
   renderVehiculos();
 };
 
 window.renderVehiculos = async function(){
   const vehiculos = await dbGetAll('vehiculos');
-  document.getElementById('vehBody').innerHTML = vehiculos.map(v=>{
+  const tbody = document.getElementById('vehBody');
+  tbody.innerHTML = vehiculos.map(v=>{
     let itvClass = 'badge-gray';
     let itvLabel = '—';
     if(v.itv && v.itv !== ''){
@@ -1739,17 +2381,45 @@ window.renderVehiculos = async function(){
         itvLabel = formatDate(v.itv);
       }
     }
-    return '<tr><td>'+escapeHtml(v.id)+'</td><td><strong>'+escapeHtml(v.matricula)+'</strong></td><td>'+escapeHtml(v.marca)+'</td>'+
+    return '<tr data-veh-row="'+escapeHtml(String(v.id))+'" style="cursor:pointer"><td><strong>'+escapeHtml(v.matricula)+'</strong></td><td>'+escapeHtml(v.marca)+'</td>'+
       '<td>'+escapeHtml(v.modelo)+'</td><td>'+v.anno+'</td><td>'+v.km.toLocaleString('es-ES')+'</td>'+
       '<td><span class="badge '+(itvClass)+'">'+itvLabel+'</span></td>'+
       '<td><span class="badge badge-gray">'+getStatusLabel(v.estado)+'</span></td>'+
-      '<td class="actions-cell">'+
-        '<button class="btn btn-outline btn-sm btn-icon" title="Editar" data-action="edit-vehiculo" data-id="'+escapeHtml(v.id)+'"><i class="fas fa-pen"></i></button>'+
-        '<button class="btn btn-outline btn-sm btn-icon btn-action-success" title="ITV realizada" onclick="showConfirmITV(\''+v.id+'\')"><i class="fas fa-calendar-check"></i></button>'+
-        '<button class="btn btn-outline btn-sm btn-icon" title="Cambiar estado" onclick="toggleVehiculoEstado(\''+v.id+'\')"><i class="fas fa-right-left"></i></button>'+
-        '<button class="btn btn-outline btn-sm btn-icon" title="Eliminar" onclick="confirmDelete(\'Vehículo '+escapeHtml(v.matricula)+'\', ()=>deleteVehiculo(\''+v.id+'\'))"><i class="fas fa-trash"></i></button>'+
-      '</td></tr>';
-  }).join('') || '<tr><td colspan="9" style="text-align:center;padding:30px;color:var(--text-muted)">Sin vehículos</td></tr>';
+    '</tr>';
+  }).join('') || '<tr><td colspan="7" style="text-align:center;padding:30px;color:var(--text-muted)">Sin vehículos</td></tr>';
+  if(!tbody.__fichaBound){
+    tbody.__fichaBound = true;
+    tbody.addEventListener('click', e => {
+      if(e.target.closest('button') || e.target.closest('a')) return;
+      const row = e.target.closest('tr[data-veh-row]');
+      if(row) window.verFichaVehiculo(row.dataset.vehRow);
+    });
+  }
+};
+
+// Ficha del vehículo en modal (datos + acciones)
+window.verFichaVehiculo = async function(id){
+  const v = await dbGet('vehiculos', id);
+  if(!v) return;
+  const campo = (etiqueta, valor) => (valor===undefined||valor===null||String(valor).trim()==='') ? '' :
+    '<div><small style="color:var(--text-muted);display:block">'+etiqueta+'</small><div style="font-weight:600">'+valor+'</div></div>';
+  openModal('🚚 '+(v.matricula||v.id),
+    '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px">'+
+      campo('ID', escapeHtml(String(v.id)))+
+      campo('Matrícula', '<strong>'+escapeHtml(v.matricula)+'</strong>')+
+      campo('Marca', escapeHtml(v.marca||''))+
+      campo('Modelo', escapeHtml(v.modelo||''))+
+      campo('Año', v.anno||'')+
+      campo('Kilómetros', (v.km||0).toLocaleString('es-ES'))+
+      campo('Próxima ITV', v.itv?formatDate(v.itv):'—')+
+      campo('Estado', '<span class="badge badge-gray">'+getStatusLabel(v.estado)+'</span>')+
+      (v.notas ? '<div style="grid-column:1/-1"><small style="color:var(--text-muted);display:block">Notas</small><div>'+escapeHtml(v.notas)+'</div></div>' : '')+
+    '</div>',
+    '<button class="btn btn-outline btn-sm" onclick="closeModal()">Cerrar</button>'+
+    '<button class="btn btn-primary btn-sm" onclick="closeModal();showVehiculoForm(\''+escapeHtml(String(v.id))+'\')"><i class="fas fa-pen"></i> Editar</button>'+
+    '<button class="btn btn-primary btn-sm" onclick="showConfirmITV(\''+escapeHtml(String(v.id))+'\')"><i class="fas fa-calendar-check"></i> ITV realizada</button>'+
+    '<button class="btn btn-primary btn-sm" onclick="toggleVehiculoEstado(\''+escapeHtml(String(v.id))+'\')"><i class="fas fa-right-left"></i> Cambiar estado</button>'+
+    '<button class="btn btn-danger btn-sm" onclick="confirmDelete(\'Vehículo '+escapeHtml(v.matricula)+'\', ()=>deleteVehiculo(\''+escapeHtml(String(v.id))+'\'))"><i class="fas fa-trash"></i> Eliminar</button>');
 };
 
 window.deleteVehiculo = async function(id){
@@ -1850,27 +2520,28 @@ window.toggleVehiculoEstado = async function(id){
 
 //  ALMAC?N
 window.render_almacen = async function(el){
-  const tipos = await dbGetAll('tiposPuerta');
+  const tipos = await window.TiposPuerta.filasDB();
   const tiposOptions = tipos.map(t => `<option value="${t.id}">${escapeHtml(t.nombre)}</option>`).join('');
   
   el.innerHTML =
     '<div class="page-header"><div><h2>Almacén</h2><p>Control de stock y artículos</p></div>'+
     '<div class="header-actions">'+
       '<button class="btn btn-primary" onclick="showArticuloForm()"><i class="fas fa-plus"></i> Nuevo Artículo</button>'+
-      '<button class="btn btn-outline" onclick="generatePDF_almacen()"><i class="fas fa-file-pdf"></i> PDF</button></div></div>'+
+      '<button class="btn btn-secondary" onclick="generatePDF_almacen()"><i class="fas fa-file-pdf"></i> PDF</button></div></div>'+
     '<div class="search-bar">'+
       '<input type="text" placeholder="Buscar artículo..." id="searchArt" oninput="renderAlmacen()">'+
       '<select id="filterCatArt" onchange="renderAlmacen()"><option value="">Todas las categorías</option>'+
       tiposOptions+'</select></div>'+
     '<div class="card"><div  class="table-wrapper"><table><thead>'+
-      '<tr><th></th><th>Referencia</th><th>Nombre</th><th>Categoría</th><th>Stock</th><th>Mín.</th><th>P. Venta</th><th>Estado</th><th>Acciones</th></tr>'+
+      '<tr><th></th><th>Referencia</th><th>Nombre</th><th>Categoría</th><th>Stock</th><th>Mín.</th><th>P. Venta</th><th>Estado</th></tr>'+
     '</thead><tbody id="artBody"></tbody></table></div></div>';
   renderAlmacen();
 };
 
 window.renderAlmacen = async function(){
-  const [items, tipos] = await Promise.all([dbGetAll('almacen'), dbGetAll('tiposPuerta')]);
+  const [items, tipos] = await Promise.all([dbGetAll('almacen'), window.TiposPuerta.filasDB()]);
   const tiposMap = new Map(tipos.map(t => [t.id, t.nombre]));
+  tiposMapCache = tiposMap;
   const q = (document.getElementById('searchArt')?.value||'').toLowerCase();
   const cat = document.getElementById('filterCatArt')?.value||'';
   const filtered = items.filter(a=>{
@@ -1878,23 +2549,57 @@ window.renderAlmacen = async function(){
     // Filtrar por categoria o tipoPuerta (para compatibilidad)
     if(cat && a.categoria!==cat && a.tipoPuerta!==cat) return false;
     return true;
-  });
-  document.getElementById('artBody').innerHTML = filtered.map(a=>{
+  }).sort((a,b)=>String(a.nombre||'').localeCompare(String(b.nombre||''),'es',{sensitivity:'base'}));
+  const tbody = document.getElementById('artBody');
+  tbody.innerHTML = filtered.map(a=>{
     const bajo = a.stock <= a.stockMinimo;
+    const cat = a.categoria || a.tipoPuerta || ''; // compatibilidad con registros antiguos
     const catId = a.categoria || a.tipoPuerta;
     const catNombre = catId ? tiposMap.get(catId) || a.categoria || '—' : '—';
-    return '<tr><td>'+((window.__articuloFoto||a.foto)?'<img src="'+escapeHtml(a.foto)+'" style="width:40px;height:40px;object-fit:cover;border-radius:6px;border:1px solid var(--border)">':'<div style="width:40px;height:40px;border-radius:6px;border:1px dashed var(--border);display:flex;align-items:center;justify-content:center;color:var(--text-muted)"><i class="fas fa-image"></i></div>')+'</td>'+ // foto
+    return '<tr data-art-row="'+escapeHtml(String(a.id))+'" style="cursor:pointer"><td>'+((window.__articuloFoto||a.foto)?'<img src="'+escapeHtml(a.foto)+'" style="width:40px;height:40px;object-fit:cover;border-radius:6px;border:1px solid var(--border)">':'<div style="width:40px;height:40px;border-radius:6px;border:1px dashed var(--border);display:flex;align-items:center;justify-content:center;color:var(--text-muted)"><i class="fas fa-image"></i></div>')+'</td>'+ // foto
       '<td><strong>'+escapeHtml(a.referencia)+'</strong></td><td>'+escapeHtml(a.nombre)+'</td>'+
       '<td><span class="badge badge-blue">'+escapeHtml(catNombre)+'</span></td>'+
       '<td style="font-weight:700;color:'+(bajo?'var(--danger)':'var(--text)')+'">'+a.stock+'</td>'+
       '<td>'+a.stockMinimo+'</td><td>'+formatCurrency(a.precioVenta)+'</td>'+
       '<td><span class="badge '+(bajo?'badge-red':'badge-green')+'">'+(bajo?'Stock bajo':'OK')+'</span></td>'+
-      '<td class="actions-cell">'+
-        '<button class="btn btn-outline btn-sm btn-icon" title="Editar" data-action="edit-articulo" data-id="'+escapeHtml(a.id)+'"><i class="fas fa-pen"></i></button>'+
-        '<button class="btn btn-outline btn-sm btn-icon" title="Ajustar stock" onclick="ajustarStock(\''+a.id+'\')"><i class="fas fa-arrows-rotate"></i></button>'+
-        '<button class="btn btn-outline btn-sm btn-icon" title="Eliminar" onclick="confirmDelete(\'Artículo '+escapeHtml(a.nombre)+'\', ()=>deleteArticulo(\''+a.id+'\'))"><i class="fas fa-trash"></i></button>'+
-      '</td></tr>';
+    '</tr>';
   }).join('') || '<tr><td colspan="8" style="text-align:center;padding:30px;color:var(--text-muted)">Sin artículos</td></tr>';
+  if(!tbody.__fichaBound){
+    tbody.__fichaBound = true;
+    tbody.addEventListener('click', e => {
+      if(e.target.closest('button') || e.target.closest('a')) return;
+      const row = e.target.closest('tr[data-art-row]');
+      if(row) window.verFichaArticulo(row.dataset.artRow);
+    });
+  }
+};
+
+// Ficha del artículo en modal (datos + acciones)
+window.verFichaArticulo = async function(id){
+  const a = await dbGet('almacen', id);
+  if(!a) return;
+  const bajo = a.stock <= a.stockMinimo;
+  const campo = (etiqueta, valor) => (valor===undefined||valor===null||String(valor).trim()==='') ? '' :
+    '<div><small style="color:var(--text-muted);display:block">'+etiqueta+'</small><div style="font-weight:600">'+valor+'</div></div>';
+  const fotoHtml = a.foto
+    ? '<div style="grid-column:1/-1"><img src="'+escapeHtml(a.foto)+'" style="max-width:220px;max-height:220px;object-fit:contain;border-radius:10px;border:1px solid var(--border);background:#fff"></div>' : '';
+  openModal('📦 '+(a.nombre||a.id),
+    '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px">'+
+      fotoHtml+
+      campo('Referencia / ID', escapeHtml(String(a.id)))+
+      campo('Categoría', (a.categoria||a.tipoPuerta)?escapeHtml(tiposMapCache.get(a.categoria||a.tipoPuerta)||a.categoria||''):'')+
+      campo('Stock', '<span style="color:'+(bajo?'var(--danger)':'var(--text)')+'">'+a.stock+'</span>')+
+      campo('Stock mínimo', a.stockMinimo)+
+      campo('Precio compra', formatCurrency(a.precioCompra))+
+      campo('Precio venta', formatCurrency(a.precioVenta))+
+      campo('Proveedor', escapeHtml(a.proveedor||''))+
+      campo('Unidad', escapeHtml(a.unidad||''))+
+      campo('Estado', '<span class="badge '+(bajo?'badge-red':'badge-green')+'">'+(bajo?'Stock bajo':'OK')+'</span>')+
+    '</div>',
+    '<button class="btn btn-outline btn-sm" onclick="closeModal()">Cerrar</button>'+
+    '<button class="btn btn-primary btn-sm" onclick="closeModal();showArticuloForm(\''+escapeHtml(String(a.id))+'\')"><i class="fas fa-pen"></i> Editar</button>'+
+    '<button class="btn btn-primary btn-sm" onclick="ajustarStock(\''+escapeHtml(String(a.id))+'\')"><i class="fas fa-arrows-rotate"></i> Ajustar stock</button>'+
+    '<button class="btn btn-danger btn-sm" onclick="confirmDelete(\'Artículo '+escapeHtml(a.nombre)+'\', ()=>deleteArticulo(\''+escapeHtml(String(a.id))+'\'))"><i class="fas fa-trash"></i> Eliminar</button>');
 };
 
 window.deleteArticulo = async function(id){
@@ -1908,7 +2613,7 @@ window.showArticuloForm = async function(id){
   const nextId = a.id || window.db.nextId('ART');
   
   // Cargar tipos de puerta
-  const tipos = await dbGetAll('tiposPuerta');
+  const tipos = await window.TiposPuerta.filasDB();
   const catId = a.categoria || a.tipoPuerta; // Usar categoria o tipoPuerta para compatibilidad
   const tiposOptions = tipos.map(t => `<option value="${t.id}" ${String(catId)===String(t.id)?'selected':''}>${escapeHtml(t.nombre)}</option>`).join('');
 
@@ -1922,8 +2627,8 @@ window.showArticuloForm = async function(id){
     '<div class="form-group"><label>Unidad</label><input id="ar_unid" value="'+escapeHtml(a.unidad||'unidad')+'"></div>'+
     '<div class="form-group"><label>Stock</label><input id="ar_stock" type="number" class="only-num" value="'+(a.stock||0)+'"></div>'+
     '<div class="form-group"><label>Stock mínimo</label><input id="ar_min" type="number" class="only-num" value="'+(a.stockMinimo||0)+'"></div>'+
-   '<div class="form-group"><label>Precio compra</label><input id="ar_pc" type="number" class="only-num-dec" step="0.01" value="'+formatoPrecioES(a.precioCompra)+'"></div>'+
-'<div class="form-group"><label>Precio venta</label><input id="ar_pv" type="number" class="only-num-dec" step="0.01" value="'+formatoPrecioES(a.precioVenta)+'"></div>'+
+   '<div class="form-group"><label>Precio compra</label><input id="ar_pc" type="number" class="only-num-dec" step="0.01" value="'+(Number(a.precioCompra)||0)+'"></div>'+
+'<div class="form-group"><label>Precio venta</label><input id="ar_pv" type="number" class="only-num-dec" step="0.01" value="'+(Number(a.precioVenta)||0)+'"></div>'+
     '<div class="form-group"><label>Proveedor</label><input id="ar_prov" value="'+escapeHtml(a.proveedor||'')+'"></div>'+
     '<div class="form-group full"><label>Foto del artículo</label>'+
       '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">'+
@@ -1971,7 +2676,6 @@ window.saveArticulo = async function(id){
       nombre: document.getElementById('ar_nom').value.trim(),
       unidad: document.getElementById('ar_unid').value.trim(),
       categoria: document.getElementById('ar_tipo').value, // Guardar en categoria para compatibilidad
-      tipoPuerta: document.getElementById('ar_tipo').value,
       stock: parseInt(document.getElementById('ar_stock').value)||0,
       stockMinimo: parseInt(document.getElementById('ar_min').value)||0,
       precioCompra: parseFloat(document.getElementById('ar_pc').value)||0,
@@ -2099,6 +2803,14 @@ window.render_configuracion = async function(el){
         '</div>'+
         '<div class="config-menu-arrow"><i class="fas fa-chevron-right"></i></div>'+
       '</div>'+
+      '<div class="config-menu-item" draggable="true" onclick="openConfigAprobacionOnline()">'+
+        '<div class="config-menu-icon"><i class="fas fa-file-circle-check"></i></div>'+
+        '<div class="config-menu-content">'+
+          '<h3>Aprobación online de presupuestos</h3>'+
+          '<p>El cliente acepta desde su móvil y se genera el albarán y el material a pedir</p>'+
+        '</div>'+
+        '<div class="config-menu-arrow"><i class="fas fa-chevron-right"></i></div>'+
+      '</div>'+
       '<div class="config-menu-item" draggable="true" onclick="openConfigFactorCarretera()">'+
         '<div class="config-menu-icon"><i class="fas fa-road"></i></div>'+
         '<div class="config-menu-content">'+
@@ -2112,6 +2824,14 @@ window.render_configuracion = async function(el){
         '<div class="config-menu-content">'+
           '<h3>Sincronización de Datos</h3>'+
           '<p>Exportar, importar y borrar datos</p>'+
+        '</div>'+
+        '<div class="config-menu-arrow"><i class="fas fa-chevron-right"></i></div>'+
+      '</div>'+
+      '<div class="config-menu-item" draggable="true" onclick="openConfigPlantillasMedidas()">'+
+        '<div class="config-menu-icon"><i class="fas fa-ruler-combined"></i></div>'+
+        '<div class="config-menu-content">'+
+          '<h3>Plantillas de medidas</h3>'+
+          '<p>Plantillas para anotar mediciones (incl. lonas puertas rápidas) y añadir las tuyas</p>'+
         '</div>'+
         '<div class="config-menu-arrow"><i class="fas fa-chevron-right"></i></div>'+
       '</div>'+
@@ -2719,6 +3439,18 @@ window.openConfigApariencia = function(){
     <div class="ap-textpalette" style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:18px"></div>
 
     <div class="ap-preview-wrap">${previewHTML()}</div>
+
+    <h3 style="margin:18px 0 8px;font-size:1rem">Icono de la aplicación</h3>
+    <p style="font-size:12px;color:var(--text-muted);margin-bottom:10px">Sube una foto o logo: se redimensiona automáticamente a los tamaños necesarios (192/512 px, cuadrado) y sustituye al actual.</p>
+    <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap">
+      <img id="apIconPreview" src="" alt="" style="display:none;width:72px;height:72px;border-radius:16px;object-fit:cover;border:1px solid var(--border);background:#fff">
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button type="button" class="btn btn-outline btn-sm" id="apIconUploadBtn"><i class="fas fa-image"></i> Subir icono</button>
+        <button type="button" class="btn btn-outline btn-sm" id="apIconResetBtn" style="display:none"><i class="fas fa-rotate-left"></i> Restaurar original</button>
+      </div>
+      <small id="apIconEstado" style="color:var(--text-muted)"></small>
+    </div>
+    <input type="file" id="apIconInput" accept="image/*" style="display:none">
   `,
   '<button class="btn btn-outline ap-close">Cerrar</button>');
 
@@ -2795,6 +3527,81 @@ window.openConfigApariencia = function(){
 
   // Aplicar el estado guardado al abrir
   applyPreview();
+
+  // ── Icono de la aplicación ──
+  (function initIconUpload(){
+    const ICON_KEY = 'ap_custom_icon';
+    const ICON_ORIG = 'icons/icon-512.png';
+    const preview = document.getElementById('apIconPreview');
+    const resetBtn = document.getElementById('apIconResetBtn');
+    const estado = document.getElementById('apIconEstado');
+    const input = document.getElementById('apIconInput');
+    const custom = localStorage.getItem(ICON_KEY);
+    const activo = custom || ICON_ORIG + '?v=' + Date.now();
+    if (preview) {
+      preview.src = custom || ICON_ORIG;
+      preview.style.display = '';
+    }
+    if (resetBtn) resetBtn.style.display = custom ? '' : 'none';
+
+    function dibujarCentrado(img, lado){
+      const c = document.createElement('canvas');
+      c.width = lado; c.height = lado;
+      const ctx = c.getContext('2d');
+      ctx.fillStyle = '#ffffff'; ctx.fillRect(0,0,lado,lado);
+      const esc = Math.max(lado/img.width, lado/img.height);
+      const w = img.width*esc, h = img.height*esc;
+      ctx.drawImage(img, (lado-w)/2, (lado-h)/2, w, h);
+      return c.toDataURL('image/png');
+    }
+
+    async function aplicarIcono(dataUrl){
+      estado.textContent = 'Procesando…';
+      const img = await new Promise((res,rej)=>{ const i=new Image(); i.onload=()=>res(i); i.onerror=rej; i.src=dataUrl; });
+      const d512 = dibujarCentrado(img, 512);
+      const d192 = dibujarCentrado(img, 192);
+      localStorage.setItem(ICON_KEY, d512);
+      localStorage.setItem(ICON_KEY+'_192', d192);
+      // Aplicar en vivo a todos los <img> de icono y favicons
+      document.querySelectorAll('.logo img').forEach(el=>{ el.src = d512; });
+      let link = document.querySelector('link[rel="icon"]');
+      if(!link){ link=document.createElement('link'); link.rel='icon'; document.head.appendChild(link); }
+      link.href = d192;
+      const apple = document.querySelector('link[rel="apple-touch-icon"]');
+      if(apple) apple.href = d192;
+      if (preview){ preview.src = d512; }
+      if (resetBtn) resetBtn.style.display = '';
+      estado.textContent = '✅ Icono actualizado. En Android/instalada, reinstala o espera a que la PWA refresque para verlo en el launcher.';
+      showToast('Icono actualizado','success');
+    }
+
+    document.getElementById('apIconUploadBtn')?.addEventListener('click', ()=> input.click());
+    input?.addEventListener('change', async ()=>{
+      const f = input.files?.[0]; input.value='';
+      if(!f) return;
+      try{
+        const dataUrl = await new Promise((res,rej)=>{ const r=new FileReader(); r.onload=()=>res(r.result); r.onerror=rej; r.readAsDataURL(f); });
+        await aplicarIcono(dataUrl);
+      }catch(e){
+        console.error('[Icono]', e);
+        estado.textContent = 'No se pudo procesar la imagen';
+        showToast('Error al procesar el icono','error');
+      }
+    });
+    resetBtn?.addEventListener('click', ()=>{
+      localStorage.removeItem(ICON_KEY);
+      localStorage.removeItem(ICON_KEY+'_192');
+      document.querySelectorAll('.logo img').forEach(el=>{ el.src = ICON_ORIG; });
+      let link = document.querySelector('link[rel="icon"]');
+      if(link) link.href = ICON_ORIG;
+      const apple = document.querySelector('link[rel="apple-touch-icon"]');
+      if(apple) apple.href = 'icons/apple-touch-icon.png';
+      if (preview){ preview.src = ICON_ORIG; }
+      resetBtn.style.display = 'none';
+      estado.textContent = 'Icono original restaurado';
+      showToast('Icono restaurado','success');
+    });
+  })();
 };
 
 window.openConfigCorreo = function(){
@@ -2873,6 +3680,75 @@ window.openConfigInfo = function(){
     <p><strong>Valgom</strong> v1.0</p>
     <p style="color:var(--text-muted);margin-top:4px">PWA · IndexedDB · Funciona offline · Exporta PDF</p>`,
     '<button class="btn btn-outline" onclick="closeModal()">Cerrar</button>');
+};
+
+// ═══ Plantillas de medidas/presupuesto (Configuración → submenu) ═══
+// Usa las MISMAS plantillas que la pantalla de Presupuestos (icono marcador)
+window.openConfigPlantillasMedidas = async function(){
+  let listaHtml = '';
+  let total = 0;
+  try {
+    const list = window.getPlantillasPresupuestoPublic ? window.getPlantillasPresupuestoPublic() : [];
+    total = list.length;
+    listaHtml = list.map(t=>
+      '<div style="display:flex;align-items:center;gap:10px;justify-content:space-between;padding:10px;border:1px solid var(--border);border-radius:8px">'+
+        '<div><strong>'+escapeHtml(t.nombre)+'</strong>'+
+        '<div style="font-size:12px;color:var(--text-muted)">'+((t.lineItems||[]).length)+' conceptos</div></div>'+
+        '<div style="display:flex;gap:6px">'+
+          '<button class="btn btn-primary btn-sm" onclick="usarPlantillaMedida(\''+escapeHtml(String(t.id))+'\')"><i class="fas fa-ruler"></i> Usar</button>'+
+          '<button class="btn btn-outline btn-sm btn-icon" title="Eliminar" onclick="borrarPlantillaDesdeConfig(\''+escapeHtml(String(t.id))+'\')"><i class="fas fa-trash"></i></button>'+
+        '</div>'+
+      '</div>'
+    ).join('') || '<p style="color:var(--text-muted)">No hay plantillas todavía. Crea una desde Presupuestos con el icono de marcador, o pulsa "Nueva plantilla".</p>';
+  } catch(e){
+    console.error('[Plantillas] listado:', e);
+    listaHtml = '<p style="color:var(--text-muted)">No se pudieron cargar las plantillas: '+escapeHtml(e.message||'')+'</p>';
+  }
+  openModal('📏 Plantillas ('+total+')',
+    '<div style="display:flex;flex-direction:column;gap:8px;max-height:55vh;overflow:auto">'+listaHtml+'</div>'+
+    '<p style="margin-top:10px;font-size:12px;color:var(--text-muted)">Son las mismas plantillas de la pantalla de Presupuestos: sirven para crear un presupuesto rápido o para tomar mediciones.</p>',
+    '<button class="btn btn-outline" onclick="closeModal()">Cerrar</button>'+
+    '<button class="btn btn-primary" onclick="showPresupuestoForm()"><i class="fas fa-plus"></i> Nueva plantilla</button>'+
+    '<button class="btn btn-primary" onclick="usarPlantillaMedida()"><i class="fas fa-ruler"></i> Tomar medidas</button>'+
+    '<button class="btn btn-primary" onclick="MEDICIONES.registro()"><i class="fas fa-clipboard-list"></i> Mediciones</button>');
+};
+
+window.borrarPlantillaDesdeConfig = function(tid){
+  if(window.setPlantillasPresupuestoPublic){
+    window.setPlantillasPresupuestoPublic((window.getPlantillasPresupuestoPublic?window.getPlantillasPresupuestoPublic():[]).filter(x=>x.id!==tid));
+    openConfigPlantillasMedidas();
+  }
+};
+
+window.usarPlantillaMedida = async function(idPlantilla){
+  closeModal();
+  try{
+    if(idPlantilla){
+      const t = (window.getPlantillasPresupuestoPublic?window.getPlantillasPresupuestoPublic():[]).find(x=>String(x.id)===String(idPlantilla));
+      if(t){ showPresupuestoForm(null, t); return; }
+    }
+    // Tomar medidas: SIEMPRE el sistema unificado MEDICIONES (v3), igual que la hoja de presupuestos
+    if(window.MEDICIONES && typeof window.MEDICIONES.abrir === 'function'){
+      const clientes = await dbGetAll('clientes');
+      await window.MEDICIONES.abrir({ clientes });
+    } else {
+      showToast('El sistema de mediciones no está disponible','error');
+    }
+  }catch(e){
+    console.error('[Plantillas] usar:', e);
+    showToast('No disponible: '+ (e.message||e), 'error');
+  }
+};
+
+// Página «Tomar medidas»: la usan los técnicos (no tienen acceso a Configuración)
+window.render_medidas = async function(el){
+  el.innerHTML =
+    '<div class="page-header"><div><h2><i class="fas fa-ruler-combined"></i> Tomar medidas</h2>'+
+    '<p>Elige el tipo de puerta, rellena la hoja sobre el esquema y se envía a administración.</p></div></div>'+
+    '<div class="card"><div class="card-body" style="display:flex;gap:12px;flex-wrap:wrap">'+
+      '<button class="btn btn-primary" style="flex:1;min-width:220px;padding:18px 16px;font-size:16px" onclick="usarPlantillaMedida()"><i class="fas fa-ruler"></i> Nueva medición</button>'+
+      '<button class="btn btn-outline" style="flex:1;min-width:220px;padding:18px 16px;font-size:16px" onclick="MEDICIONES.registro()"><i class="fas fa-clipboard-list"></i> Ver mediciones</button>'+
+    '</div></div>';
 };
 
 // Funciones para configuración de correo
@@ -3568,8 +4444,9 @@ window.recalcVehicleKms = async function(matricula, silent) {
       await dbPut('vehiculos', vehiculo);
     }
 
-    if (diasSinCoord > 0) {
-      console.warn(`[recalcVehicleKms] ${matricula}: ${diasSinCoord} jornada(s) sin coordenadas -> suma directa redondeada.`);
+    if (diasSinCoord > 0 && !silent) {
+      // Solo informativo en depuración (con conexión se auto-corrige al relocalizar); no satura la consola en producción
+      console.log(`[recalcVehicleKms] ${matricula}: ${diasSinCoord} jornada(s) sin coordenadas -> suma directa redondeada.`);
     }
 
     return vehiculo;
@@ -4214,7 +5091,7 @@ window.render_revisiones_tiendas = async function(rutaId, rutaNombre, cadenaId, 
         </div>
         <div class="header-actions">
           <button class="btn btn-primary btn-sm" onclick="window.optimizarRutaTiendas('${escapeAttr(rutaId)}', '${escapeAttr(cadenaId)}', '${escapeAttr(rutaNombre)}', '${escapeAttr(cadenaNombre)}')"><i class="fas fa-route"></i> Optimizar ruta</button>
-          <button class="btn btn-primary btn-sm" onclick="window.abrirFormularioRevisionRuta('${escapeAttr(rutaId)}', '${escapeAttr(rutaNombre)}', '${escapeAttr(cadenaId)}', '${escapeAttr(cadenaNombre)}')"><i class="fas fa-clipboard-check"></i> Formulario de revisión</button>
+          <button class="btn btn-success btn-sm" onclick="window.abrirFormularioRevisionRuta('${escapeAttr(rutaId)}', '${escapeAttr(rutaNombre)}', '${escapeAttr(cadenaId)}', '${escapeAttr(cadenaNombre)}')"><i class="fas fa-clipboard-check"></i> Formulario de revisión</button>
         </div>
       </div>
       <div id="tiendas-container" class="stats-grid"></div>
@@ -4919,8 +5796,9 @@ window.openDoticsMaintenanceForm = async function(chainId, doorId=null, fechaPre
     ? (window.authState.employee ? [window.authState.employee] : [])
     : await dbGetAll('empleados');
   const id=window.db.nextId('REV');
-  const productTypes=['SECCIONAL','RAPIDA','RAPIDA PLEGABLE','BARRERA','BASCULANTE','CORREDERA','CORREDERA CRISTAL'];
-  const doorType=String(door?.tipoPuerta||door?.tipo||'').trim().toLocaleUpperCase();
+  await window.TiposPuerta.cargar().catch(()=>{});
+  const productTypes=window.TiposPuerta.lista().map(t=>t.codigo);   // mismos tipos que en plantillas y puertas
+  const doorType=window.TiposPuerta.resolver(door?.tipoPuerta||door?.tipo)?.codigo||'';
   window.__doticsVisitDraft={
     id,chainId:String(chain.id),chainName:chain.nombre,doorId:door?.id||null,productTypes,
     lines:[{
@@ -5361,8 +6239,8 @@ async function render_rutas(mainOrChainId, requestedChainId) {
         <h2>🚗 Rutas</h2>
       </div>
       <div class="header-actions">
-        ${esDotics?'<button class="btn btn-outline" id="btn-dotics-visit"><i class="fas fa-clipboard-check"></i> Formulario de revisión</button>':''}
-        ${esHiperber?'<button class="btn btn-outline" id="btn-hiperber-review"><i class="fas fa-clipboard-check"></i> Formulario de revisión</button>':''}
+        ${esDotics?'<button class="btn btn-primary" id="btn-dotics-visit"><i class="fas fa-clipboard-check"></i> Formulario de revisión</button>':''}
+        ${esHiperber?'<button class="btn btn-primary" id="btn-hiperber-review"><i class="fas fa-clipboard-check"></i> Formulario de revisión</button>':''}
         <button class="btn btn-primary" id="btn-nueva-ruta">+ Nueva Ruta</button>
       </div>
     </div>
@@ -5385,7 +6263,7 @@ async function render_rutas(mainOrChainId, requestedChainId) {
       <div class="empty-state">
         <i class="fas fa-route"></i>
         <p>No hay rutas para esta cadena.</p>
-        <button class="btn btn-primary" id="btn-primera-ruta" style="margin-top:16px;">+ Crear primera ruta</button>
+        <button class="btn btn-outline" id="btn-primera-ruta" style="margin-top:16px;">+ Crear primera ruta</button>
       </div>`;
     document.getElementById('btn-primera-ruta').onclick = () => showRutaForm(null, cadenaId);
     return;
@@ -5614,8 +6492,8 @@ window.showImportFolioModal = async function() {
         <div id="import-results" style="display:none;"></div>
 
         <div id="import-actions" style="display:none;margin-top:16px;text-align:right;">
-          <button id="import-cancel" class="btn btn-primary" style="margin-right:8px;">Cancelar</button>
-          <button id="import-import-btn" style="background:var(--primary);color:#fff;border:none;padding:8px 16px;border-radius:8px;font-weight:600;cursor:pointer;">Importar todo</button>
+          <button id="import-cancel" class="btn btn-outline" style="margin-right:8px;">Cancelar</button>
+          <button id="import-import-btn" class="btn btn-primary">Importar todo</button>
         </div>
       </div>
     </div>
@@ -5870,14 +6748,7 @@ window.render_importFolio = function(main) {
 
 //  MANUALES
 window.getTiposManuales = async function(){
-  const tipos = await dbGetAll('tiposPuerta');
-  const norm = s => String(s||'').toLowerCase().replace(/^puerta\s+/,'').trim();
-  if(!tipos.some(t => norm(t.nombre)==='corredera cristal')){
-    const nuevo = {id:'TP-CORREDERA-CRISTAL', nombre:'Corredera Cristal', descripcion:'Puerta corredera de cristal', checklist:[]};
-    try{ await dbPut('tiposPuerta', nuevo); tipos.push(nuevo); }
-    catch(e){ console.warn('No se pudo crear el tipo Corredera Cristal', e); tipos.push(nuevo); }
-  }
-  return tipos;
+  return window.TiposPuerta.filasDB();   // catálogo único: ya incluye Corredera Cristal y el resto
 };
 
 window.render_manuales = async function(el){
@@ -5888,7 +6759,7 @@ window.render_manuales = async function(el){
   
   el.innerHTML =
     '<div class="page-header"><div><h2>Manuales</h2><p>Manuales técnicos por tipo de puerta y avería</p></div>'+
-    '<div class="header-actions"><button class="btn btn-primary" onclick="showSubirManualModal()"><i class="fas fa-upload"></i> Subir Manual</button></div></div>'+
+    '<div class="header-actions"><button class="btn btn-primary" onclick="showSubirManualModal()"><i class="fas fa-upload"></i> Subir Manual</button><button class="btn btn-secondary" onclick="navigateTo(\'configuracion\')"><i class="fas fa-xmark"></i> Cerrar</button></div></div>'+
     '<div class="search-bar">'+
       '<input type="text" placeholder="Buscar manual..." id="searchManual" oninput="renderManualesList()">'+
       '<select id="filterTipoManual" onchange="renderManualesList()"><option value="">Todos los tipos</option>'+
@@ -6011,7 +6882,12 @@ const IMPORT_CLIENTES_CAMPOS = [
   { norm: 'direccion',              alias: ['direccion','dirección','dir','direccion completa'],                                                     oblig: false, campo: 'direccion' },
   { norm: 'tipo',                   alias: ['tipo','tipocliente','tipo cliente'],                                                                    oblig: false, campo: 'tipo' },
   { norm: 'dni',                    alias: ['dni','nif','cif','dni/cif','dninif'],                                                                   oblig: false, campo: 'dni' },
-  { norm: 'nota',                   alias: ['nota','notas','observaciones','comentarios'],                                                           oblig: false, campo: 'nota' }
+  { norm: 'nota',                   alias: ['nota','notas','observaciones','comentarios'],                                                           oblig: false, campo: 'nota' },
+  // Cabeceras del INFORME.xlsx (Sage) — se guardan en campos dedicados
+  { norm: 'codigo',                 alias: ['codigo','código','codigo cliente','código cliente'],                                                    oblig: false, campo: 'codigo' },
+  { norm: 'cpostal',                alias: ['c postal','cpostal','código postal','código postal','codigo postal','cp','c postal'],                  oblig: false, campo: 'cpostal' },
+  { norm: 'poblacion',              alias: ['poblacion','población','ciudad','municipio'],                                                           oblig: false, campo: 'poblacion' },
+  { norm: 'provincia',              alias: ['provincia'],                                                                                            oblig: false, campo: 'provincia' }
 ];
 
 function importNormHeader(s){
@@ -6023,7 +6899,8 @@ function importNormHeader(s){
 window.showImportClientesModal = function(){
   window.__importClientesFilas = null;
   openModal('Importar clientes (Excel / CSV)',
-    '<p style="color:var(--text-muted);margin-bottom:12px">Sube un archivo <strong>.xlsx/.xls</strong> o <strong>.csv</strong>. La primera fila deben ser los nombres de los campos: <strong>Nombre</strong> (obligatorio) y, opcionales, Contacto, Teléfono, Email, Dirección, Tipo (empresa/particular), DNI y Notas.</p>'+
+    '<p style="color:var(--text-muted);margin-bottom:12px">Sube un archivo <strong>.xlsx/.xls</strong> o <strong>.csv</strong>. La primera fila deben ser los nombres de los campos: <strong>Nombre</strong> (obligatorio) y, opcionales, Contacto, Teléfono, Email, Dirección, C.Postal, Población, Provincia, NIF/CIF, Código y Notas.</p>'+
+    '<label style="display:flex;align-items:center;gap:8px;margin-bottom:12px;font-size:13.5px"><input type="checkbox" id="ic_geo" checked> <i class="fas fa-map-marker-alt" style="color:#16a34a"></i> Geolocalizar direcciones automáticamente durante la importación (≈1 dirección/segundo)</label>'+
     '<div id="ic_drop" style="border:2px dashed var(--border);border-radius:10px;padding:26px;text-align:center;cursor:pointer;background:var(--surface-alt)">'+
       '<input type="file" id="ic_file" accept=".xlsx,.xls,.csv" style="display:none">'+
       '<i class="fas fa-file-excel" style="font-size:28px;color:#16a34a"></i>'+
@@ -6104,9 +6981,35 @@ window.__procesarArchivoClientes = async function(file){
 
     if(!filas.length) throw new Error('No se encontró ninguna fila con datos válidos (¿falta la columna Nombre?).');
 
-    window.__importClientesFilas = filas;
+    // ── Componer dirección completa (dirección + CP + población + provincia) y dedup por código ──
+    const compDir = f => {
+      const partes = [f.direccion, [f.cpostal, f.poblacion].filter(Boolean).join(' '), f.provincia].filter(Boolean).map(p => String(p).trim());
+      const vistos = new Set();
+      const unicos = [];
+      for(const p of partes){ const k = p.toLowerCase(); if(!vistos.has(k)){ vistos.add(k); unicos.push(p); } }
+      return unicos.join(', ');
+    };
+    filas.forEach(f => {
+      if(f.cpostal || f.poblacion || f.provincia) f.direccion = compDir(f);
+      delete f.cpostal; delete f.poblacion; delete f.provincia;
+    });
+    // Dedup por código (Sage): misma ficha que aparece dos veces con datos distintos
+    const porCodigo = new Map();
+    const sinCodigo = [];
+    for(const f of filas){
+      if(f.codigo){
+        const prev = porCodigo.get(f.codigo);
+        if(prev){ for(const k of Object.keys(f)){ if(f[k] && !prev[k]) prev[k] = f[k]; } }
+        else porCodigo.set(f.codigo, f);
+      } else sinCodigo.push(f);
+    }
+    const filasFinal = [...porCodigo.values(), ...sinCodigo];
+    filasFinal.forEach(f => { f.sageCodigo = f.codigo || null; delete f.codigo; });
 
-    status.innerHTML = '<span style="color:#16a34a">✅ ' + filas.length + ' fila(s) válidas' +
+    window.__importClientesFilas = filasFinal;
+
+    status.innerHTML = '<span style="color:#16a34a">✅ ' + filasFinal.length + ' fila(s) válidas' +
+      (filasFinal.length !== filas.length ? ' (de ' + filas.length + ' leídas — duplicadas por código fusionadas)' : '') + ' · ' +
       (errores.length ? ' · ' + errores.length + ' ignorada(s)' : '') + '</span>';
     if(errores.length){
       status.innerHTML += '<br><small style="color:#f59e0b">' + escapeHtml(errores.slice(0,5).join(' · ')) +
@@ -6188,15 +7091,17 @@ window.__guardarClientesImportados = async function(){
   const filas = window.__importClientesFilas;
   if(!filas || !filas.length){ showToast('No hay datos para importar','error'); return; }
   const btn = document.getElementById('ic_import');
+  const geolocalizar = document.getElementById('ic_geo')?.checked !== false;
   btn.disabled = true;
 
   try{
     const existentes = await dbGetAll('clientes');
     const norm = s => String(s||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').trim();
-    let creados = 0, actualizados = 0, saltados = 0;
+    let creados = 0, actualizados = 0, saltados = 0, geolocalizados = 0, sinGeo = 0;
     const errores = [];
 
-    for(const fila of filas){
+    for(let fi=0; fi<filas.length; fi++){
+      const fila = filas[fi];
       try{
         // Validación de email si viene
         if(fila.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(fila.email)){
@@ -6204,6 +7109,16 @@ window.__guardarClientesImportados = async function(){
           delete fila.email;
         }
         const dup = existentes.find(c => norm(c.nombre) === norm(fila.nombre));
+        let coords = null;
+        if(geolocalizar && fila.direccion){
+          // Marcador de progreso en el botón
+          btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Geolocalizando ' + (fi+1) + '/' + filas.length + '…';
+          try{ coords = await geocodificar(fila.direccion); }catch(_){ }
+          if(coords){ geolocalizados++; }
+          else sinGeo++;
+          // Nominatim: cortesía de ~1.1 s entre peticiones para no saturar el servicio
+          await new Promise(r => setTimeout(r, 1100));
+        }
         if(dup){
           // Actualizar datos de la ficha existente sin perder los que ya tenía
           await dbPut('clientes', {
@@ -6214,6 +7129,10 @@ window.__guardarClientesImportados = async function(){
             direccion: fila.direccion || dup.direccion,
             tipo: fila.tipo || dup.tipo,
             nota: fila.nota || dup.nota,
+            dni: fila.dni || dup.dni,
+            sageCodigo: fila.sageCodigo || dup.sageCodigo || null,
+            lat: (coords ? coords.lat : (dup.lat || null)),
+            lng: (coords ? coords.lng : (dup.lng || null)),
             updatedAt: new Date().toISOString()
           });
           actualizados++;
@@ -6227,6 +7146,10 @@ window.__guardarClientesImportados = async function(){
             direccion: fila.direccion || '',
             tipo: fila.tipo,
             nota: fila.nota || '',
+            dni: fila.dni || '',
+            sageCodigo: fila.sageCodigo || null,
+            lat: coords ? coords.lat : null,
+            lng: coords ? coords.lng : null,
             esCadena: false,
             updatedAt: new Date().toISOString()
           });
@@ -6241,6 +7164,7 @@ window.__guardarClientesImportados = async function(){
     window.__importClientesFilas = null;
     closeModal();
     showToast('Importación completada: ' + creados + ' creados · ' + actualizados + ' actualizados' +
+      (geolocalizar ? ' · 📍 ' + geolocalizados + ' geolocalizados' + (sinGeo ? ' (' + sinGeo + ' sin coordenadas, revisa su ficha)' : '') : '') +
       (saltados ? ' · ' + saltados + ' con error' : ''), saltados ? 'warning' : 'success');
     if(window.currentPage === 'clientes') renderClientes();
   }catch(err){

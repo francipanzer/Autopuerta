@@ -1,6 +1,6 @@
-// ═══════════════════════════════════════════════════════════
+// �.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.�
 //  Helpers globales
-// ═══════════════════════════════════════════════════════════
+// �.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.�
 
 // Carga de librerías externas pesadas solo cuando se necesitan
 const _scriptLoads = {};
@@ -24,13 +24,14 @@ window.ensureTesseract = async function(){
   if(window.Tesseract) return;
   await loadScriptOnce('https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js');
 };
+
 window.ensurePdfLibs = async function(){
   if(!window.jspdf) await loadScriptOnce('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js');
   // autotable debe cargarse después de jsPDF
   if(!window.jspdf.jsPDF.API.autoTable) await loadScriptOnce('https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js');
 };
 
-// ── Scripts propios de pantallas/funciones no iniciales (URLs y versiones en index.html) ──
+// �"?�"? Scripts propios de pantallas/funciones no iniciales (URLs y versiones en index.html) �"?�"?
 // Cada función global se registra como "stub": la primera llamada carga el script,
 // que sobrescribe el stub con la función real, y entonces se reenvía la llamada.
 (function registerLazyScripts(){
@@ -38,9 +39,19 @@ window.ensurePdfLibs = async function(){
   const groups = [
     ['tableros', ['render_tableros']],
     ['informesKms', ['render_informesKms']],
+    // Módulos de pages.js troceado (carga diferida)
+    ['pagesPartes', ['render_partesTrabajo', 'renderPartes', 'showParteForm', 'saveParte', 'deleteParte', 'verFichaParte', 'addMaterialParte', 'removeMaterialParte', 'updateMaterialParte', 'updateMaterialParteDeLista', 'pintarPuertasParte']],
+    ['pagesPresupuestos', ['render_presupuestos', 'renderPresupuestos', 'showPresupuestoForm', 'savePresupuesto', 'deletePresupuesto', 'duplicatePresupuesto', 'verFichaPresupuesto', 'sendPresupuesto', 'addLineItem', 'removeLineItem', 'updateLineItem', 'onLineDescChange', 'onLineTipoChange', 'importarPresupuestoFoto', 'abrirHojaMedidasPresupuesto', 'savePresupuestoAsTemplate', 'showPlantillasPresupuesto', 'usarPlantillaPresupuesto', 'borrarPlantillaPresupuesto']],
+    ['pagesConfiguracion', ['render_configuracion', 'openConfigEmpresa', 'openProveedores', 'editProveedor', 'deleteProveedor', 'openConfigApariencia', 'openConfigCorreo', 'openConfigFactorCarretera', 'guardarFactorCarretera', 'openConfigSync', 'openConfigAndroid', 'openAndroidNavigationHelp', 'openConfigInfo', 'openConfigPlantillasMedidas', 'borrarPlantillaDesdeConfig', 'usarPlantillaMedida', 'getCompanySettings', 'isValidCifCif', 'guardarConfigCorreo', 'cargarConfigCorreo', 'probarConexionCorreo', 'exportAllData', 'importAllData', 'clearAllData']],
+    ['pagesGestion', ['render_estadisticas', 'pintarEstadisticas', 'render_daily_report', 'generateDailyReport', 'exportReportCSV', 'render_revisionesProgramadas', 'render_revisiones_rutas', 'render_revisiones_tiendas', 'render_rutas', 'showRutaForm', 'saveRuta', 'deleteRuta', 'deleteCadena', 'deleteRutaDb', 'showRutasForCadena', 'renderCadenasList', 'optimizarRutaTiendas', 'abrirFormularioRevisionRuta', 'abrirFormularioRevisionCliente', 'abrirInformeRevisionRuta', 'buscarHistorialRevisiones', 'openHiperberReviewForm', 'cerrarFormularioRevision', 'updateHiperberDoor', 'updateHiperberDoorDecision', 'openHiperberFindingCamera', 'addHiperberFindingPhoto', 'removeHiperberFindingPhoto', 'addHiperberDoor', 'saveHiperberReviewForm', 'openDoticsMaintenanceForm', 'updateDoticsVisitLine', 'updateDoticsVisitState', 'openDoticsCamera', 'selectDoticsPhotoFile', 'addDoticsVisitLine', 'removeDoticsVisitLine', 'addDoticsVisitPhoto', 'removeDoticsVisitPhoto', 'saveDoticsMaintenanceForm', 'generarPDFRutaCompleta', 'abrirGoogleMaps', 'volverARevisionesCadena']],
+    ['pagesImport', ['render_importFolio', 'showImportFolioModal', 'showImportClientesModal']],
+    ['almacenEntradas', ['showEntradaMaterial', 'showHistorialEntradas']],
+    ['historicoPuertas', ['verHistoricoPuerta', 'mostrarBuscadorPuertas', 'renderBuscadorPuertas']],
+    // NOTA: funciones de fotos/correo/recalculo de kms están en pages_core.js (carga síncrona).
+    // NO registrarlas aquí como stubs: pisarían las funciones reales y buscarían un módulo inexistente.
     ['pdf', ['generatePDF_clientes','generatePDF_presupuesto','generatePDF_partes','generatePDF_revision',
-             'generatePDF_almacen','generatePDF_presupuestos','generatePDF_ruta','seedDemoPDFData','generateDemoPDFPack'],
-    ['informeRevisionesCliente', ['render_revisionesCliente','generatePDF_informeCliente']]]
+             'generatePDF_almacen','generatePDF_presupuestos','generatePDF_ruta','seedDemoPDFData','generateDemoPDFPack']],
+    ['informeRevisionesCliente', ['render_revisionesCliente','generatePDF_informeCliente']]
   ];
   groups.forEach(([key, names]) => {
     if(!urls[key]) return;
@@ -49,11 +60,41 @@ window.ensurePdfLibs = async function(){
         await loadScriptOnce(urls[key]);
         const real = window[name];
         if(typeof real !== 'function' || real === stub) throw new Error('No se pudo cargar el módulo de ' + key);
-        return real.apply(this, args);
+        // El módulo cargado pudo pisar wrappers de auth.js: restáuralos.
+        if (typeof window.rewrapAfterModuleLoad === 'function') { try { window.rewrapAfterModuleLoad(); } catch(e) {} }
+        // tras la re-instalación, la función real puede haberse movido a __base
+        const final = (typeof window[name] === 'function' && window[name].__isWrapper) ? (window[name + '__base'] || real) : real;
+        if (typeof final !== 'function') throw new Error('No se pudo resolver ' + name + ' tras la carga de ' + key);
+        return final.apply(this, args);
       };
+      stub.__isStub = true;
+      stub.__lazyKey = key;
+      (window.LAZY_STUBS = window.LAZY_STUBS || {})[name] = stub;
       window[name] = stub;
     });
   });
+
+  // Módulos que exponen un OBJETO global (no una función): MEDICIONES y HOJA_MEDIDAS.
+  // Cada método del stub carga js/medidas.js (que reemplaza estos objetos por los reales) y reenvía la llamada.
+  const objetosLazy = {
+    MEDICIONES: ['abrir', 'cerrar', 'registro', 'listarPlantillas'],
+    HOJA_MEDIDAS: ['abrirVista', 'abrirHoja', 'abrirEditor', 'cerrar', 'renderizar', 'cargarPlantillaDeTipo']
+  };
+  if(urls.medidas){
+    Object.entries(objetosLazy).forEach(([objName, metodos]) => {
+      const stub = {};
+      metodos.forEach(m => {
+        stub[m] = async function(...args){
+          if(urls.medidasDatos) await loadScriptOnce(urls.medidasDatos);
+          await loadScriptOnce(urls.medidas);
+          const real = window[objName];
+          if(!real || real === stub || typeof real[m] !== 'function') throw new Error('No se pudo cargar el módulo de medidas');
+          return real[m](...args);
+        };
+      });
+      window[objName] = stub;
+    });
+  }
 
   // Precarga en segundo plano tras el arranque (y para que funcione sin conexión después)
   const preload = () => {
@@ -78,22 +119,23 @@ function formatCurrency(n){
 }
 
 function formatDate(d){
-  if(!d) return '—';
+  if(!d) return '�?"';
   return new Date(d).toLocaleDateString('es-ES',{day:'2-digit',month:'2-digit',year:'numeric'});
 }
 
 function formatDateTime(d){
-  if(!d) return '—';
+  if(!d) return '�?"';
   return new Date(d).toLocaleString('es-ES',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'});
 }
 
-// utils.js — escapeHtml (si no existe ya)
+// escapeHtml �?" �sNICA definición del proyecto (antes había otra en revision-forms.js y copias locales
+// "esc" en varios módulos; la última cargada pisaba a las demás). Acepta números (el 0 se muestra),
+// ignora null/undefined y escapa también comillas, así sirve para texto y para atributos.
 function escapeHtml(text) {
-  if (!text) return '';
-  const div = document.createElement('div');
-  div.textContent = text;
-  return div.innerHTML;
+  if (text === null || text === undefined) return '';
+  return String(text).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
+window.escapeHtml = escapeHtml;
 
 // Escapa un valor para usarlo dentro de un atributo HTML delimitado por comillas simples
 // (ej.: onclick="fn('${escapeAttr(valor)}')"). Escapa comillas simples, dobles,
@@ -149,23 +191,23 @@ function downloadJSON(data,filename){
   URL.revokeObjectURL(blob);
 }
 
-// ═══════════════════════════════════════════════════════════
-//  FILTRO DE CAMPOS NUMÉRICOS
-// ═══════════════════════════════════════════════════════════
-// Clase .only-num → solo dígitos (teléfono, km, stock, año, cantidad…)
-// Clase .only-num-dec → dígitos + coma/punto decimal (precios)
+// �.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.�
+//  FILTRO DE CAMPOS NUM�?RICOS
+// �.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.�
+// Clase .only-num �?' solo dígitos (teléfono, km, stock, año, cantidad�?�)
+// Clase .only-num-dec �?' dígitos + coma/punto decimal (precios)
 document.addEventListener('input', function(e){
   const el = e.target;
   if(el.tagName !== 'INPUT') return;
 
-  // ── Solo números enteros ──
+  // �"?�"? Solo números enteros �"?�"?
   if(el.classList.contains('only-num')){
     const val = el.value.replace(/[^\d]/g,'');
     if(val !== el.value) el.value = val;
     return;
   }
 
-  // ── Solo decimales ──
+  // �"?�"? Solo decimales �"?�"?
   if(el.classList.contains('only-num-dec')){
     let s = el.value.replace(',', '.').replace(/[^\d.]/g,'');
     // Solo un punto decimal
@@ -179,7 +221,7 @@ document.addEventListener('input', function(e){
   }
 });
 
-// ── Formatear precio a formato español (coma decimal) ──
+// �"?�"? Formatear precio a formato español (coma decimal) �"?�"?
 function formatoPrecioES(num){
   if(num == null || isNaN(num)) return '0,00';
   return parseFloat(num).toFixed(2).replace('.', ',');
@@ -205,15 +247,15 @@ document.addEventListener('click', function(e){
     case 'confirm-itv':       window.marcarITVPasada(id); return;
   }
   }); 
-// ═══════════════════════════════════════════════════════════
-//  GEOLOCALIZACIÓN — Ceuti como punto base
-// ═══════════════════════════════════════════════════════════
+// �.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.�
+//  GEOLOCALIZACI�"N �?" Ceuti como punto base
+// �.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.�
 
 /** Punto base: oficina/taller en C. Chapí, Ceutí */
 const BASE_CEUTI = { lat: 38.0858, lng: -1.2741 };
 const FACTOR_CARETERA = 1.3;
 
-/** Factor carretera configurable (Configuración → Factor carretera). Ajusta los kms estimados
+/** Factor carretera configurable (Configuración �?' Factor carretera). Ajusta los kms estimados
  *  cuando la geolocalización/ruta real falla. Multiplica la distancia en línea recta. */
 function getFactorCarretera(){
   const v = parseFloat(localStorage.getItem('autopuerta_factor_carretera'));
@@ -221,13 +263,13 @@ function getFactorCarretera(){
 }
 window.getFactorCarretera = getFactorCarretera;
 
-/** Geocodificar dirección → coordenadas (Nominatim, gratis) */
+/** Geocodificar dirección �?' coordenadas (Nominatim, gratis) */
 /**
  * Geocodificación robusta con degradación progresiva:
  *  1. La dirección tal cual (con número de portal).
  *  2. Sin número de portal (si Nominatim no tiene ese portal, busca la vía entera).
  *  3. Sin acentos ni signos (los usuarios escriben "Avda", sin tildes, etc.).
- *  4. Solo la parte municipal ("... Petrer, Alicante") → centro del pueblo.
+ *  4. Solo la parte municipal ("... Petrer, Alicante") �?' centro del pueblo.
  * Devuelve {lat, lng, nombreCompleto, precisión} o null si nada funcionó.
  */
 async function geocodificar(direccion){
@@ -257,26 +299,50 @@ async function geocodificar(direccion){
   for (let i = 0; i < orden.length; i++) {
     const q = orden[i];
     if (!q) continue;
-    const url = 'https://nominatim.openstreetmap.org/search?format=json&limit=5&addressdetails=1&countrycodes=es&q=' + encodeURIComponent(q);
+    // Pasar por el proxy local (server.py): Nominatim no permite CORS desde el navegador
+    let data = null;
     try {
-      const res = await fetch(url, { headers: { 'Accept-Language': 'es' } });
-      const data = await res.json();
-      if (data && data.length) {
-        // Preferir resultados con calle/portal sobre "solo pueblo"
-        const mejor = data.find(d => d.address && (d.address.road || d.address.house_number)) || data[0];
-        return { lat: parseFloat(mejor.lat), lng: parseFloat(mejor.lon),
-                 nombreCompleto: mejor.display_name,
-                 precision: i === 0 ? 'exacta' : (mejor.address && mejor.address.road ? 'calle' : 'municipio') };
+      const res = await fetch('/geocode?q=' + encodeURIComponent(q), { headers: { 'Accept-Language': 'es' } });
+      if(res.ok) data = await res.json();
+      else {
+        // Proxy no disponible (server.py sin reiniciar) �?' intento directo como respaldo
+        const durl = 'https://nominatim.openstreetmap.org/search?format=json&limit=5&addressdetails=1&countrycodes=es&q=' + encodeURIComponent(q);
+        try{
+          const dres = await fetch(durl, { headers: { 'Accept-Language': 'es' } });
+          if(dres.ok) data = await dres.json();
+        }catch(_){ /* CORS bloqueado: seguirá con el siguiente candidato */ }
       }
     } catch (e) {
-      console.error('Error geocodificar:', e);
-      return null; // fallo de red: no insistir, dejará escribir a mano
+      console.warn('geocodificar fallo (' + q + '):', e.message || e);
     }
+    if (!data || !data.length) continue; // siguiente candidato
+    // Preferir resultados con calle/portal sobre "solo pueblo"
+    const mejor = data.find(d => d.address && (d.address.road || d.address.house_number)) || data[0];
+    return { lat: parseFloat(mejor.lat), lng: parseFloat(mejor.lon),
+             nombreCompleto: mejor.display_name,
+             precision: i === 0 ? 'exacta' : (mejor.address && mejor.address.road ? 'calle' : 'municipio') };
   }
+  // �"?�"? Respaldo: Photon (Komoot), gratuito y sin límites agresivos �"?�"?
+  try {
+    const q = orden[0];
+    if (q) {
+      const res = await fetch('https://photon.komoot.io/api/?limit=5&lang=es&q=' + encodeURIComponent(q));
+      if (res.ok) {
+        const j = await res.json();
+        const f = (j.features || [])[0];
+        if (f && f.geometry?.coordinates) {
+          const p = f.properties || {};
+          const dir = [p.street, p.housenumber, p.postcode, p.city, p.state].filter(Boolean).join(', ');
+          return { lat: f.geometry.coordinates[1], lng: f.geometry.coordinates[0],
+                   nombreCompleto: dir || q, precision: p.street ? 'calle' : 'municipio' };
+        }
+      }
+    }
+  } catch(_) { }
   return null;
 }
 
-/** Coordenadas → dirección (Nominatim) */
+/** Coordenadas �?' dirección (Nominatim) */
 async function geocodificarInverso(lat, lng){
   const url = 'https://nominatim.openstreetmap.org/reverse?format=json&addressdetails=1&zoom=18&lat='
     + lat + '&lon=' + lng;
@@ -307,7 +373,7 @@ function calcularKmLineal(origen, destino){
   return 2 * R * Math.asin(Math.sqrt(a));
 }
 
-/** Distancia por carretera: OSRM online → fallback Haversine × FACTOR_CARETERA */
+/** Distancia por carretera: OSRM online �?' fallback Haversine �- FACTOR_CARETERA */
 async function calcularKm(origen, destino){
   const ruta = await kmRutaReal(origen.lat, origen.lng, destino.lat, destino.lng).catch(() => null);
   if (ruta != null) return Math.round(ruta);
@@ -317,7 +383,7 @@ async function calcularKm(origen, destino){
 /**
  * Distancia REAL por carretera entre dos coordenadas usando OSRM (OpenStreetMap).
  * Gratuita y sin API key. Devuelve km (ida) o null si no hay conexión/queda fuera de servicio,
- * en cuyo caso el llamador debe usar el fallback haversine × FACTOR_CARETERA.
+ * en cuyo caso el llamador debe usar el fallback haversine �- FACTOR_CARETERA.
  */
 let __osrmDown = 0; // timestamp hasta el que no reintentamos tras un fallo
 async function kmRutaReal(lat1, lng1, lat2, lng2){
@@ -346,10 +412,10 @@ async function kmIdaVuelta(destino){
   const idaVuelta = Math.round(lineal * getFactorCarretera() * 2);  // ida + vuelta carretera
   return Math.ceil(idaVuelta / 10) * 10;                  // 58 -> 60
 }
-// Dictado por voz — versión robusta con MutationObserver
-// ═══════════════════════════════════════════════════════════
+// Dictado por voz �?" versión robusta con MutationObserver
+// �.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.�
 //  DICTADO POR VOZ
-// ═══════════════════════════════════════════════════════════
+// �.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.�
 (function(){
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
   if(!SR){
@@ -440,12 +506,15 @@ async function kmIdaVuelta(destino){
   voiceObserver.observe(document.body, {childList:true, subtree:true});
   injectVoiceButtons();
 })();
-// ═══════════════════════════════════════════════════════════
+// �.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.�
 //  VALIDAR DNI/NIE (formato + letra de control)
-// ═══════════════════════════════════════════════════════════
+// �.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.�
 function validarDNI(input){
   if(!input) return false;
   let v = String(input).trim().toUpperCase().replace(/[ -]/g,'');
+  // CIF de empresa: letra + 7-8 dígitos/caracteres (B12345678, A12345674...)
+  // (verificación del dígito de control omitida a propósito: aceptamos el CIF tal cual)
+  if(/^[ABCDEFGHJNPQRSUVW]\d{7}[0-9A-J]$/.test(v) || /^[ABCDEFGHJNPQRSUVW]\d{8}$/.test(v)) return true;
   // 8 dígitos + letra, o NIE X/Y/Z + 7 dígitos + letra
   const re = /^([XYZ]?)(\d{7,8})([A-Z])$/;
   const m = v.match(re);
@@ -465,9 +534,9 @@ function validarDNI(input){
   
   return letraReal === letraEsperada;
 }
-// ═══════════════════════════════════════════════════════════
+// �.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.�
 //  FIRMA DIGITAL (canvas mouse + touch)
-// ═══════════════════════════════════════════════════════════
+// �.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.�
 // Las firmas se guardan siempre en un lienzo lógico fijo (proporción 5:2), sea cual
 // sea el tamaño en pantalla, para que se vean igual en el móvil, el PDF y el escritorio.
 const FIRMA_W = 600, FIRMA_H = 240;
@@ -537,7 +606,7 @@ function abrirPadFirma(titulo){
       '<div id="padWrap" style="flex:1 1 0;min-height:0;position:relative;background:' + padBg + ';border-radius:12px;overflow:hidden;border:1px solid #334155">' +
         '<canvas id="padCanvas" style="position:absolute;inset:0;width:100%;height:100%;touch-action:none;display:block"></canvas>' +
         '<div style="position:absolute;left:5%;right:5%;bottom:22%;border-bottom:2px dashed #64748b;pointer-events:none"></div>' +
-        '<div style="position:absolute;left:5%;bottom:calc(22% + 6px);color:#64748b;font-size:20px;pointer-events:none">✕</div>' +
+        '<div style="position:absolute;left:5%;bottom:calc(22% + 6px);color:#64748b;font-size:20px;pointer-events:none">�o.</div>' +
       '</div>' +
       '<div style="display:flex;gap:10px;flex:0 0 auto">' +
         '<button type="button" id="padClear" style="flex:1;min-height:52px;border:1px solid #64748b;border-radius:10px;background:transparent;color:#fff;font:inherit;font-size:15px">Borrar</button>' +
@@ -754,7 +823,7 @@ function pintarFirmaEnCanvas(canvasId, dataURL){
   img.src = dataURL;
 }
 
-// ── Confirmación universal antes de eliminar ──
+// �"?�"? Confirmación universal antes de eliminar �"?�"?
 window.confirmDelete = function(itemName, callback){
   const overlay = document.getElementById('modalOverlay');
   const title = document.getElementById('modalTitle');
@@ -779,7 +848,7 @@ window.confirmDelete = function(itemName, callback){
     callback();
   };
 };
-// ── Cerrar modal ──
+// �"?�"? Cerrar modal �"?�"?
 if (typeof window.closeModal !== 'function') {
   window.closeModal = function(){
     const overlay = document.getElementById('modalOverlay');
@@ -788,9 +857,9 @@ if (typeof window.closeModal !== 'function') {
     overlay.style.display = '';
   };
 }
-// ═══════════════════════════════════════════════════════════
-//  VALIDACIÓN DE FORMULARIOS EN LÍNEA
-// ═══════════════════════════════════════════════════════════
+// �.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.�
+//  VALIDACI�"N DE FORMULARIOS EN LÍNEA
+// �.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.�
 // Muestra u oculta el error debajo de un campo concreto
 function setFieldError(fieldId, msg){
   const field = document.getElementById(fieldId);
@@ -841,90 +910,40 @@ document.addEventListener('input', function(e){
 
 /**
  * Devuelve la fecha de hoy en formato ISO 'YYYY-MM-DD'.
- * Ordenable lexicográficamente → compatible con IDBKeyRange.
+ * Ordenable lexicográficamente �?' compatible con IDBKeyRange.
  */
 const todayStr = () => new Date().toISOString().slice(0, 10);
 
-// ── Catálogo de tipos de puerta (fijo, no editable por ahora) ──
-const TIPOS_PUERTA = {
-  corredera: {
-    nombre: 'Corredera',
-    diasRevision: 180,
-    checklist: [
-      'Células fotoeléctricas',
-      'Banda de seguridad',
-      'Motor / reductora',
-      'Guías y rodillos',
-      'Estructura',
-      'Muelle contrapeso'
-    ]
-  },
-  corredera_cristal: {
-    nombre: 'Corredera Cristal',
-    diasRevision: 180,
-    checklist: [
-      'Células fotoeléctricas',
-      'Banda de seguridad',
-      'Motor / reductora',
-      'Guías y rodillos',
-      'Cristales y marcos',
-      'Estructura'
-    ]
-  },
-  batiente: {
-    nombre: 'Batiente',
-    diasRevision: 180,
-    checklist: [
-      'Cerradura / maneta',
-      'Bisagras / eje',
-      'Cierres / seguros',
-      'Juntas',
-      'Automatizador'
-    ]
-  },
-  seccional: {
-    nombre: 'Seccional',
-    diasRevision: 365,
-    checklist: [
-      'Paneles / juntas',
-      'Guías / rodillos',
-      'Muelles de torsión',
-      'Motor',
-      'Células',
-      'Cierre manual'
-    ]
-  },
-  rapida: {
-    nombre: 'Rápida de lona',
-    diasRevision: 90,
-    checklist: [
-      'Lona / estructura',
-      'Motor / mandos',
-      'Sensores',
-      'Borde de seguridad',
-      'Guías laterales'
-    ]
-  },
-  cortafuegos: {
-    nombre: 'Cortafuegos',
-    diasRevision: 365,
-    checklist: [
-      'Hojas / marco',
-      'Cierre automático',
-      'Manija antipánico',
-      'Juntas de dilatación',
-      'Documentación'
-    ]
-  }
-};
+// �"?�"? Catálogo de tipos de puerta �"?�"?
+// Sale del catálogo único (js/tipos-puerta.js): las mismas claves de siempre (seccional, rapida,
+// corredera, corredera_cristal, batiente, cortafuegos�?�) más basculante, enrollable, barrera, etc.
+const TIPOS_PUERTA = {};
+(window.TiposPuerta?.BASE || []).filter(t => !t.servicio).forEach(t => {
+  TIPOS_PUERTA[t.key] = { nombre: t.nombre, diasRevision: t.diasRevision, checklist: t.checklist };
+});
 
-// ── Helpers del catálogo ──
+// �"?�"? Helpers del catálogo �"?�"?
 function getTipoPuerta(tipo) {
-  return TIPOS_PUERTA[tipo] || null;
+  if (TIPOS_PUERTA[tipo]) return TIPOS_PUERTA[tipo];
+  const t = window.TiposPuerta?.resolver(tipo);   // acepta nombre, código antiguo o alias
+  return t && TIPOS_PUERTA[t.key] ? TIPOS_PUERTA[t.key] : null;
 }
 
+// Compara dos valores de tipo de puerta aunque estén en formatos distintos
+// (key "seccional", nombre "Puerta Seccional", id de tabla "TP001"�?�).
+// Es la �sNICA comparación que deben usar buscadores y filtros: antes cada
+// pantalla comparaba con un formato distinto y nunca encontraba nada.
+window.mismoTipoPuerta = function (a, b) {
+  if (!a || !b) return false;
+  const A = window.TiposPuerta?.resolver?.(a);
+  const B = window.TiposPuerta?.resolver?.(b);
+  const ka = A ? A.key : String(a).trim().toLowerCase();
+  const kb = B ? B.key : String(b).trim().toLowerCase();
+  return ka === kb || String(a) === String(b);
+};
+
 function getDiasRevisionByTipo(tipo) {
-  return TIPOS_PUERTA[tipo]?.diasRevision || 365; // fallback conservador
+  return getTipoPuerta(tipo)?.diasRevision || 365; // fallback conservador
 }
 
 // Calcular próxima revisión para PUERTAS según tipo
@@ -953,7 +972,7 @@ window.calcularProximaRevision = calcularProximaRevisionRuta;
 // ==================== RUTAS: Guardar / Actualizar ====================
 
 /**
- * window.saveRuta() → Promise<boolean>
+ * window.saveRuta() �?' Promise<boolean>
  * Lee inputs del modal, valida, upserta Supabase + IndexedDB.
  */
 window.saveRuta = async function () {
@@ -1009,9 +1028,9 @@ window.saveRuta = async function () {
   }
   return true;
 };
-// ═══════════════════════════════════════════════════════════
-//  PENDIENTES DE REVISIÓN (Rutas y Clientes)
-// ═══════════════════════════════════════════════════════════
+// �.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.�
+//  PENDIENTES DE REVISI�"N (Rutas y Clientes)
+// �.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.�
 
 async function getPendientesRevision() {
   const hoy = new Date(); hoy.setHours(0,0,0,0);
@@ -1109,7 +1128,7 @@ async function getPendientesRevision() {
 
   return pendientes.sort((a, b) => a.dias - b.dias);
 }
-// ── Helpers de cadenas y rutas ──
+// �"?�"? Helpers de cadenas y rutas �"?�"?
 async function getAllCadenas() {
   return await dbGetAll('cadenas');
 }
@@ -1129,7 +1148,7 @@ async function getRutasByCadena(cadenaId) {
     }))
     .filter(r => String(r.cadenaId ?? r.cadenaid) === String(cadenaId));
 }
-// ── Parser de folio OCR → estructura rutas/clientes ──────
+// �"?�"? Parser de folio OCR �?' estructura rutas/clientes �"?�"?�"?�"?�"?�"?
 function parseFolioTexto(texto) {
   const rutaRegex = /(?:ruta|RUTA)\s*(?:nº?\.?\s*)?(\d+)/i;
   // Nombre de tienda: "H." o "H-" seguido de nombre (acepta HEDA sin separador)
@@ -1149,8 +1168,8 @@ function parseFolioTexto(texto) {
     let linea = lineas[i];
 
     // Quitar bordes de tabla y basura suelta
-    linea = linea.replace(/[|¦ǀ]/g, ' ')
-                 .replace(/—+/g, ' ')
+    linea = linea.replace(/[|¦�?]/g, ' ')
+                 .replace(/�?"+/g, ' ')
                  .replace(/\s{2,}/g, ' ').trim();
     if (!linea || /^[-=]+$/.test(linea)) continue;
 
@@ -1219,9 +1238,9 @@ function parseFolioTexto(texto) {
 
 window.parseFolioTexto = parseFolioTexto;
 
-// ═══════════════════════════════════════════════════════════
+// �.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.�
 //  FUNCIONES DE ITV (para auth.js y pages.js)
-// ═══════════════════════════════════════════════════════════
+// �.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.�
 window.diasHastaFechaITV = function(value){
   const match=String(value||'').slice(0,10).match(/^(\d{4})-(\d{2})-(\d{2})$/);
   if(!match) return null;
@@ -1240,7 +1259,7 @@ window.textoCuentaAtrasITV = function(days){
   return `Caduca en <strong>${days}</strong> día${days===1?'':'s'}`;
 };
 
-// ── Tiendas de una ruta (fuente única de verdad) ────────────
+// �"?�"? Tiendas de una ruta (fuente única de verdad) �"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?
 // Mismo criterio que el formulario HIPERBER: el cliente pertenece a la ruta
 // (rutaId/rutaid) o a la cadena (cadenaId/padreId). Así el panel, las vistas
 // de rutas y el formulario ven exactamente las mismas tiendas.

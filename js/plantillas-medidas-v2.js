@@ -40,6 +40,13 @@ window.PLANTILLAS_MEDIDAS_V2 = (function () {
     const basicas = Object.entries(window.PLANTILLAS_MEDIDAS?.PLANTILLAS || {}).map(([k, p]) => ({
       id: 'basica_' + k, nombre: p.nombre, tipoPuerta: p.nombre, campos: p.campos, svgFn: p.svg, esBasica: true
     }));
+    // Plantillas de imagen de la carpeta plantillas/ (hojas de medidas con campos sobre imagen)
+    const deCarpeta = Object.entries(window.HOJA_MEDIDAS?.PLANTILLAS_INCLUIDAS || {})
+      .filter(([k, p]) => !basicas.some(b => b.nombre === k))
+      .map(([k, p]) => ({
+        id: 'carpeta_' + k, nombre: k, tipoPuerta: k, campos: (p.campos || []).map(c => ({ id: c.id, etiqueta: c.etiqueta, defecto: '', min: '', max: '' })),
+        imagenUrl: p.imagenUrl, esBasica: true
+      }));
     let remota = [];
     try {
       const { data, error } = await supa().from(T_PLANTILLAS).select('*').order('createdat', { ascending: false });
@@ -50,7 +57,7 @@ window.PLANTILLAS_MEDIDAS_V2 = (function () {
         }));
       }
     } catch (e) { console.warn('[Plantillas V2] sin conexión, uso solo básicas:', e.message || e); }
-    cachePlantillas = [...remota, ...basicas];
+    cachePlantillas = [...remota, ...basicas, ...deCarpeta];
     return cachePlantillas;
   }
 
@@ -131,6 +138,16 @@ window.PLANTILLAS_MEDIDAS_V2 = (function () {
 
   // ── Dibujo SVG de una plantilla con los valores actuales ──
   function dibujarPlantilla(p, valores) {
+    // Plantilla con imagen de fondo (hoja de la carpeta plantillas/): muestra la imagen con los valores superpuestos
+    if (p.imagenUrl) {
+      const caps = (p.campos || []).map(c => {
+        const v = String(valores?.[c.id] ?? '').trim();
+        if (!v) return '';
+        const pos = (window.HOJA_MEDIDAS?.PLANTILLAS_INCLUIDAS?.[p.nombre]?.campos || []).find(x => x.id === c.id) || c;
+        return `<div style="position:absolute;left:${pos.x ?? 70}%;top:${pos.y ?? 10}%;width:${pos.w ?? 16}%;height:${pos.h ?? 6}%;font-size:clamp(10px,1.6vw,14px);font-weight:800;color:#0f172a;text-align:center;display:flex;align-items:center;justify-content:center;text-shadow:0 0 3px #fff,0 0 3px #fff;box-sizing:border-box">${_esc(v)}</div>`;
+      }).join('');
+      return `<div style="position:relative;width:100%;max-width:860px;margin:0 auto;background:#fff;border-radius:10px;box-shadow:0 2px 12px rgba(0,0,0,.15)"><img src="${_esc(p.imagenUrl)}" style="width:100%;display:block;border-radius:10px">${caps}</div>`;
+    }
     // Plantilla básica: usa su propio renderizador
     if (p.svgFn) return p.svgFn(valores);
     if (p.svg) return p.svg; // SVG guardado por el editor
@@ -181,7 +198,7 @@ window.PLANTILLAS_MEDIDAS_V2 = (function () {
             <button id="pmv2-btn-guardar-med" class="btn btn-primary" style="margin-top:6px"><i class="fas fa-paper-plane"></i> Guardar y enviar a administración</button>
           </div>
           <div class="plantillas-der">
-            <div class="plantillas-toolbar"><span style="font-size:12px;color:var(--text-muted)">Vista previa en vivo — los valores se reflejan al escribir</span></div>
+            <div class="plantillas-toolbar"><span style="font-size:12px;color:var(--text-muted)">Vista previa en vivo — los valores se reflejan al escribir</span><button type="button" id="pmv2-btn-zoom" class="btn btn-outline btn-sm" onclick="PLANTILLAS_MEDIDAS_V2.pantallaCompleta()"><i class="fas fa-magnifying-glass-plus"></i> Ampliar</button></div>
             <div id="pmv2-visor" class="plantillas-visor"></div>
             <div id="pmv2-ayuda" class="plantillas-ayuda"></div>
           </div>
@@ -227,6 +244,10 @@ window.PLANTILLAS_MEDIDAS_V2 = { abrirMedicion(){}, abrirEditor(){}, abrirRegist
     selCli.innerHTML = '<option value="">— Sin cliente (medición libre) —</option>' +
       clientes.map(c => `<option value="${_esc(c.id)}">${_esc(c.nombre)}</option>`).join('');
     if (opts.clienteId) selCli.value = opts.clienteId;
+    if (opts.plantillaId && plantillas.some(p => String(p.id) === String(opts.plantillaId))) {
+      sel.value = opts.plantillaId;
+      cargarPlantillaEnForm(sel.value);
+    }
     document.getElementById('pmv2-tecnico').value = window.authState?.employee?.nombre || window.authState?.user?.email || '';
     document.getElementById('pmv2-fecha').value = hoy();
     document.getElementById('pmv2-notas').value = '';
@@ -247,8 +268,8 @@ window.PLANTILLAS_MEDIDAS_V2 = { abrirMedicion(){}, abrirEditor(){}, abrirRegist
         (p.campos || []).map(c => `
           <div>
             <label style="font-size:12px;color:var(--text-muted);margin-bottom:2px">${_esc(c.etiqueta)}</label>
-            <input type="number" inputmode="decimal" class="only-num-dec pmv2-campo" data-cid="${_esc(c.id)}"
-              value="${_esc(c.defecto ?? '')}" min="${_esc(c.min ?? '')}" max="${_esc(c.max ?? '')}"
+            <input type="text" inputmode="text" class="pmv2-campo" data-cid="${_esc(c.id)}"
+              value="${_esc(c.defecto ?? '')}"
               placeholder="${_esc(c.defecto ?? '')}" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:8px">
           </div>`).join('') + '</div>';
       cont.querySelectorAll('.pmv2-campo').forEach(inp => {
@@ -279,12 +300,6 @@ window.PLANTILLAS_MEDIDAS_V2 = { abrirMedicion(){}, abrirEditor(){}, abrirRegist
       const inp = document.querySelector(`.pmv2-campo[data-cid="${CSS.escape(c.id)}"]`);
       const val = (inp?.value ?? '').trim();
       if (val === '' && (c.defecto ?? '') === '') { showToast('Rellena "' + c.etiqueta + '"', 'error'); inp?.focus(); return; }
-      if (val !== '' && !isNaN(parseFloat(c.defecto))) {
-        const n = parseFloat(val);
-        if (isNaN(n)) { showToast('"' + c.etiqueta + '" debe ser un número', 'error'); inp?.focus(); return; }
-        if (c.min != null && n < parseFloat(c.min)) { showToast('"' + c.etiqueta + '" no puede ser menor que ' + c.min, 'error'); inp?.focus(); return; }
-        if (c.max != null && n > parseFloat(c.max)) { showToast('"' + c.etiqueta + '" no puede ser mayor que ' + c.max, 'error'); inp?.focus(); return; }
-      }
     }
     const v = {};
     (p.campos || []).forEach(c => { v[c.id] = document.querySelector(`.pmv2-campo[data-cid="${CSS.escape(c.id)}"]`)?.value ?? c.defecto ?? ''; });
@@ -606,11 +621,51 @@ window.PLANTILLAS_MEDIDAS_V2 = { abrirMedicion(){}, abrirEditor(){}, abrirRegist
 
   function cerrarRegistro() { const m = document.getElementById('pmv2-reg-modal'); if (m) m.style.display = 'none'; }
 
+  // Pantalla completa del visor de plantilla (para móvil: ver la hoja grande e introducir datos ahí)
+  function pantallaCompleta() {
+    const p = estadoMed.plantilla;
+    if (!p) { showToast('Elige primero una plantilla', 'info'); return; }
+    // Cerrar el visor pequeño y reabrir en grande con inputs sobre la imagen
+    const fs = document.createElement('div');
+    fs.id = 'pmv2-fullscreen';
+    const camposHtml = (p.campos || []).map(c => {
+      const pos = (window.HOJA_MEDIDAS?.PLANTILLAS_INCLUIDAS?.[p.nombre]?.campos || []).find(x => x.id === c.id) || c;
+      return `<div style="position:absolute;left:${pos.x ?? 70}%;top:${pos.y ?? 10}%;width:${pos.w ?? 16}%;height:${pos.h ?? 6}%;box-sizing:border-box"><input data-fscid="${_esc(c.id)}" value="${_esc(estadoMed.valores[c.id] ?? c.defecto ?? '')}" placeholder="${_esc(c.etiqueta || '')}" style="width:100%;height:100%;font-size:clamp(12px,2.4vw,16px);font-weight:700;color:#0f172a;background:rgba(56,189,248,.20);border:1.5px solid rgba(14,165,233,.55);border-radius:4px;padding:2px 6px;text-align:center;outline:none"></div>`;
+    }).join('');
+    const cuerpo = (p.imagenUrl)
+      ? `<div style="position:relative;width:100%;max-width:1100px;margin:0 auto"><img src="${_esc(p.imagenUrl)}" style="width:100%;display:block;border-radius:10px">${camposHtml}</div>`
+      : dibujarPlantilla(p, { ...Object.fromEntries((p.campos||[]).map(c => [c.id, estadoMed.valores[c.id] ?? c.defecto ?? ''])) });
+    fs.innerHTML = `
+      <div class="pmv2-fs-head">
+        <strong style="font-size:15px">${_esc(p.nombre || 'Plantilla')}</strong>
+        <div style="display:flex;gap:8px">
+          <button type="button" id="pmv2-fs-listo" class="btn btn-primary btn-sm"><i class="fas fa-check"></i> Listo</button>
+          <button type="button" id="pmv2-fs-salir" class="btn btn-outline btn-sm"><i class="fas fa-xmark"></i> Salir</button>
+        </div>
+      </div>
+      <div class="pmv2-fs-body">${cuerpo}</div>`;
+    document.body.appendChild(fs);
+    fs.querySelectorAll('[data-fscid]').forEach(inp => {
+      inp.addEventListener('input', () => {
+        estadoMed.valores[inp.dataset.fscid] = inp.value;
+        const mini = document.querySelector(`#pmv2-campos .pmv2-campo[data-cid="${CSS.escape(inp.dataset.fscid)}"]`);
+        if (mini) mini.value = inp.value;
+      });
+    });
+    fs.querySelector('#pmv2-fs-salir').onclick = () => fs.remove();
+    fs.querySelector('#pmv2-fs-listo').onclick = () => {
+      // Sincronizar de vuelta y cerrar
+      pintarPreviewMed();
+      fs.remove();
+      showToast('Medidas sincronizadas con el formulario', 'success');
+    };
+  }
+
   // API pública
   Object.assign(window.PLANTILLAS_MEDIDAS_V2, {
     abrirMedicion, abrirEditor, abrirRegistro, pdfMedicion, marcar,
     quitarFotoMed, cerrarMedicion, cerrarEditor, cerrarRegistro,
-    dibujarPlantilla, listarPlantillas
+    dibujarPlantilla, listarPlantillas, pantallaCompleta
   });
   return window.PLANTILLAS_MEDIDAS_V2;
 })();

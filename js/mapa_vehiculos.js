@@ -50,7 +50,7 @@ async function sendPosition() {
         }, { onConflict: 'matricula' });
       if (error) console.warn('[tracking] error:', error.message);
     } catch (e) { /* silencioso: el tracking nunca molesta */ }
-  }, () => {}, { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 });
+  }, () => { }, { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 });
 }
 
 function startTracking() {
@@ -152,8 +152,8 @@ async function refreshMarkers() {
         <strong style="color:${color}">🚐 ${mat}</strong><br>
         ${veh ? `${veh.marca || ''} ${veh.modelo || ''}<br>` : ''}
         ${stale
-          ? `<span style="color:#ef4444">⚫ Sin señal (${minutos == null ? '?' : minutos} min)</span><br>`
-          : `<span style="color:#16a34a">🟢 En movimiento ahora</span><br>`}
+        ? `<span style="color:#ef4444">⚫ Sin señal (${minutos == null ? '?' : minutos} min)</span><br>`
+        : `<span style="color:#16a34a">🟢 En movimiento ahora</span><br>`}
         ${p.velocidad != null ? `Velocidad: ${p.velocidad} km/h<br>` : ''}
         Última posición: ${p.actualizado_en ? new Date(p.actualizado_en).toLocaleTimeString('es-ES') : '?'}<br>
         <a href="https://www.google.com/maps?q=${p.lat},${p.lng}" target="_blank" style="color:#3b82f6">Abrir en Google Maps</a>
@@ -189,7 +189,7 @@ async function refreshMarkers() {
   }
 }
 
-window.render_mapaVehiculos = async function(el) {
+window.render_mapaVehiculos = async function (el) {
   el.innerHTML = `
     <section class="mapa-page">
       <div class="page-header">

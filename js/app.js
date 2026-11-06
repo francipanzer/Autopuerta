@@ -34,12 +34,18 @@ window.__onStoreChanged = (store, payload) => {
       String(payload.new?.empleadoid) === String(me.employee.id) && String(payload.new?.createdby) !== String(me.user?.id)) {
     window.showToast?.('Tienes un nuevo parte de trabajo asignado');
   }
+  if (store === 'albaranes' && window.isTechnician?.() && me?.employee &&
+      (payload?.eventType === 'INSERT' || (payload?.eventType === 'UPDATE' && payload.new?.estado === 'pendiente')) &&
+      (payload.new?.tecnicoids || []).map(String).includes(String(me.employee.id))) {
+    window.showToast?.('Tienes un nuevo albarán asignado');
+  }
   if (store === 'incidencias') window.refreshIncidenciasBadge?.();
   const page = document.querySelector('.nav-item.active')?.dataset.page || currentPage || 'dashboard';
   const storeToPage = {
     'empleados': 'empleados',
     'clientes': 'clientes',
     'partesTrabajo': 'partesTrabajo',
+    'albaranes': 'albaranes',
     'tableros': 'tableros',
     'tarjetasTablero': 'tableros',
     'incidencias': 'incidencias',
@@ -260,36 +266,21 @@ function setupMobileMenu() {
   document.body.appendChild(backdrop);
 }
 
-// ── Indicador de estado de sincronización ─────────────────────────────
-function updateSyncStatus() {
-  const statusEl = document.getElementById('syncStatus');
-  if (!statusEl) return;
-
-  try {
-    const queue = JSON.parse(localStorage.getItem('autopuerta_sync_queue') || '[]');
-    const pending = Array.isArray(queue) ? queue.length : 0;
-    const online = navigator.onLine;
-
-    statusEl.className = 'sync-status ' + (online ? 'online' : 'offline');
-
-    if (!online) {
-      statusEl.innerHTML = '<i class="fas fa-circle"></i><span>🔴 Sin conexión</span>';
-    } else if (pending === 0) {
-      statusEl.innerHTML = '<i class="fas fa-circle"></i><span>🟢 Sincronizado</span>';
-    } else {
-      statusEl.innerHTML = `<i class="fas fa-circle"></i><span>🟡 ${pending} pendiente${pending !== 1 ? 's' : ''}</span>`;
-    }
-  } catch (e) {
-    console.error('Error updating sync status:', e);
-  }
-}
-
-// Escuchar eventos de sincronización
+// Estado de sincronización inicial (los listeners online/offline se registran una sola vez más abajo)
 window.addEventListener('load', () => {
   updateSyncStatus();
-  window.addEventListener('online', updateSyncStatus);
-  window.addEventListener('offline', updateSyncStatus);
-  window.addEventListener('autopuerta:sync-state', updateSyncStatus);
+  // Icono personalizado guardado en Apariencia
+  try {
+    const icon = localStorage.getItem('ap_custom_icon');
+    const icon192 = localStorage.getItem('ap_custom_icon_192') || icon;
+    if (icon) {
+      document.querySelectorAll('.logo img').forEach(el => { el.src = icon; });
+      let link = document.querySelector('link[rel="icon"]');
+      if (link) link.href = icon192;
+      const apple = document.querySelector('link[rel="apple-touch-icon"]');
+      if (apple) apple.href = icon192;
+    }
+  } catch (_) {}
 });
 
 let valgomNavStack = [{ page: 'dashboard', arg: null }];
@@ -330,6 +321,8 @@ function closeTransientUi() {
     revisionModal.remove();
     return true;
   }
+  // Hoja de medidas (toma de medidas, vista de solo lectura o editor)
+  if (window.MEDICIONES?.cerrarSuperior?.()) return true;
   if (document.getElementById('overlayRevision')) {
     window.cerrarRevision?.();
     return true;
@@ -429,6 +422,8 @@ function setupBackNavigation() {
 }
 
 function navigateTo(page, arg) {
+  // «Tomar medidas» solo para técnicos, aunque se llame por URL o teclado
+  if (page === 'medidas' && !window.isTechnician?.()) page = 'dashboard';
   if (window.SUPABASE_AUTH_REQUIRED && !window.canAccessPage?.(page)) {
     if (window.isTechnician?.() && page !== 'dashboard') return navigateTo('dashboard');
     const main = document.getElementById('mainContent');
@@ -510,7 +505,8 @@ async function actualizarBadgeRevisiones() {
 function openModal(title, bodyHTML, footerHTML) {
   document.getElementById('modalTitle').textContent = title;
   document.getElementById('modalBody').innerHTML = bodyHTML;
-  document.getElementById('modalFooter').innerHTML = footerHTML || '';
+  // Pie del modal: envolver en contenedor flexible para que los botones se adapten (móvil incluido)
+  document.getElementById('modalFooter').innerHTML = '<div style="display:flex;flex-wrap:wrap;gap:8px;justify-content:flex-end;width:100%">'+(footerHTML || '')+'</div>';
   document.getElementById('modalOverlay').classList.remove('confirm-mode');
   document.getElementById('modalOverlay').classList.add('open');
 }
@@ -676,15 +672,25 @@ window.addEventListener('online', updateSyncStatus);
 window.addEventListener('offline', updateSyncStatus);
 window.addEventListener('autopuerta:sync-state', updateSyncStatus);
 
+// Única definición de updateSyncStatus (antes había dos y la segunda pisaba a la primera)
 function updateSyncStatus() {
   const el = document.getElementById('syncStatus');
-  if (!el) return;
-  let pending = 0;
-  try {
-    const queue = JSON.parse(localStorage.getItem('autopuerta_sync_queue') || '[]');
-    pending = Array.isArray(queue) ? queue.length : 0;
+  if (!el || !el.querySelector('span')) return;
+  const me = (window.authState && window.authState.user && window.authState.user.id) || undefined;
+  let pending = 0, failed = 0;
+  try {      // cola de db.js (solo la del usuario actual)
+    const info = window.dbSyncInfo ? window.dbSyncInfo() : null;
+    if (info) { pending += info.pending.length; failed += info.failed.length; }
   } catch (e) {}
-  if (!navigator.onLine) {
+  try {      // mediciones hechas sin cobertura
+    const c = window.MedicionesOutbox ? window.MedicionesOutbox.counts(me) : null;
+    if (c) { pending += c.pending; failed += c.failed; }
+  } catch (e) {}
+  el.setAttribute('role', 'button'); el.setAttribute('tabindex', '0'); el.title = 'Ver estado de sincronización';
+  if (failed) {
+    el.className = 'sync-status error';
+    el.querySelector('span').textContent = `⚠ ${failed} sin enviar · revisar`;
+  } else if (!navigator.onLine) {
     el.className = 'sync-status offline';
     el.querySelector('span').textContent = pending ? `Sin conexión · ${pending} pendiente(s)` : 'Sin conexión';
   } else if (pending) {
@@ -695,6 +701,38 @@ function updateSyncStatus() {
     el.querySelector('span').textContent = 'Conectado';
   }
 }
+
+// ── Centro de sincronización: ver lo pendiente/rechazado y reintentar o descartar ──
+function openSyncCenter() {
+  const info = window.dbSyncInfo ? window.dbSyncInfo() : { pending: [], failed: [] };
+  const me = (window.authState && window.authState.user && window.authState.user.id) || undefined;
+  const med = window.MedicionesOutbox ? window.MedicionesOutbox.counts(me) : { pending: 0, failed: 0 };
+  const label = it => (it.action === 'delete' ? 'Borrar' : 'Guardar') + ' · ' + it.store + (it.recordId ? ' · ' + it.recordId : '');
+  const failedRows = info.failed.map(it =>
+    '<div style="padding:8px 0;border-bottom:1px solid var(--border,#e2e8f0)"><strong>' + escapeHtml(label(it)) + '</strong>' +
+    '<div style="font-size:12px;color:var(--danger,#dc2626)">' + escapeHtml(it.error || '') + '</div>' +
+    '<div style="margin-top:6px;display:flex;gap:6px"><button class="btn btn-outline btn-sm" onclick="__syncCenter.retry(\'' + escapeHtml(it.queueId) + '\')">Reintentar</button>' +
+    '<button class="btn btn-danger btn-sm" onclick="__syncCenter.discard(\'' + escapeHtml(it.queueId) + '\')">Descartar</button></div></div>').join('');
+  const parts = [];
+  if (info.pending.length) parts.push('<p><i class="fas fa-cloud-arrow-up"></i> <strong>' + info.pending.length + '</strong> cambio(s) esperando conexión. Se enviarán solos al volver la señal.</p>');
+  if (failedRows) parts.push('<p><i class="fas fa-triangle-exclamation"></i> <strong>' + info.failed.length + '</strong> cambio(s) rechazados por el servidor:</p>' + failedRows);
+  if (med.pending || med.failed) parts.push('<p><i class="fas fa-ruler-combined"></i> Mediciones: <strong>' + med.pending + '</strong> pendientes' + (med.failed ? ', <strong>' + med.failed + '</strong> sin enviar' : '') +
+    '. <button class="btn btn-outline btn-sm" onclick="closeModal();MEDICIONES.registro()">Ver mediciones</button></p>');
+  if (!parts.length) parts.push('<p><i class="fas fa-circle-check" style="color:var(--success,#16a34a)"></i> Todo está sincronizado.</p>');
+  openModal('Estado de sincronización', parts.join(''),
+    '<button class="btn btn-outline" onclick="__syncCenter.now()"><i class="fas fa-rotate"></i> Reintentar ahora</button><button class="btn btn-primary" onclick="closeModal()">Cerrar</button>');
+}
+window.__syncCenter = {
+  retry: id => { window.dbSyncFailedRetry(id); setTimeout(openSyncCenter, 400); },
+  discard: id => window.confirmDelete('este cambio sin enviar (se perderá)', () => { window.dbSyncFailedDiscard(id); openSyncCenter(); }),
+  now: async () => {
+    try { await window.dbFlushSyncQueue?.(); await window.MedicionesOutbox?.run(); } catch (e) {}
+    openSyncCenter();
+  }
+};
+window.openSyncCenter = openSyncCenter;
+document.addEventListener('click', e => { if (e.target.closest && e.target.closest('#syncStatus')) openSyncCenter(); });
+document.addEventListener('keydown', e => { if ((e.key === 'Enter' || e.key === ' ') && e.target.id === 'syncStatus') { e.preventDefault(); openSyncCenter(); } });
 
 // Función para verificar ITV solo cuando el usuario ya haya concedido permisos
 async function checkVehiculoAlerts() {
@@ -786,6 +824,7 @@ function closeAllModals() {
     m.classList.remove('active', 'open');
     m.style.display = '';
   });
+  // La hoja de medidas gestiona su propio cierre (Esc / botón Atrás → MEDICIONES.cerrarSuperior)
   document.body.classList.remove('modal-open');
 }
 window.addEventListener('load', closeAllModals);
@@ -1029,6 +1068,7 @@ async function pintarListaPuertas() {
       </div>
       <div style="display:flex;gap:6px">
         <button class="btn btn-sm btn-primary" onclick="abrirRevision('${p.id}')">🔧 Revisar</button>
+        <button class="btn btn-sm btn-outline" onclick="verHistoricoPuerta('${p.id}')"><i class="fas fa-clock-rotate-left"></i> Histórico</button>
         <button class="btn btn-sm btn-danger" onclick="eliminarPuerta('${p.id}')">Eliminar</button>
       </div>
     </div>`;
@@ -1441,7 +1481,7 @@ async function renderNivel2Detalle(rutaId, puertas, clientes, hoy) {
           <td style="padding:8px 10px;color:#64748b;">${puerta.proximaRevision ? new Date(puerta.proximaRevision).toLocaleDateString('es-ES') : '—'}</td>
           <td style="padding:8px 10px;color:${estadoColor};font-weight:600;">${estadoTexto}</td>
           <td style="text-align:center;padding:8px 10px;">
-            <button onclick="abrirRevision('${puerta.id}')" style="padding:4px 12px;border:1px solid #3b82f6;border-radius:6px;background:#fff;color:#3b82f6;cursor:pointer;font-size:0.8rem;">
+            <button class="btn btn-outline btn-sm" onclick="abrirRevision('${puerta.id}')">
               Revisar
             </button>
           </td>

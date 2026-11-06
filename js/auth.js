@@ -1,12 +1,14 @@
-const TECH_PAGES = new Set(['dashboard', 'incidencias', 'partesTrabajo', 'presupuestos', 'informesKms', 'revisionesProgramadas', 'revisionesCliente', 'almacen', 'vehiculos', 'ayuda']);
+const TECH_PAGES = new Set(['dashboard', 'incidencias', 'partesTrabajo', 'albaranes', 'presupuestos', 'medidas', 'informesKms', 'revisionesProgramadas', 'revisionesCliente', 'almacen', 'vehiculos', 'ayuda']);
 const HELP_GUIDES = [
   { page: 'dashboard', title: 'Panel de control', roles: ['admin', 'technician'], text: 'Consulta el resumen general. Los técnicos ven sus partes recientes y avisos operativos; administración ve los indicadores de toda la empresa.' },
   { page: 'partesTrabajo', title: 'Partes de trabajo', roles: ['admin', 'technician'], text: 'Crea un parte, elige cliente, ubicación, puerta y vehículo, completa el trabajo y guarda. Los técnicos pueden ver todos los partes, pero editar o eliminar solo los propios. DNI, firmas y fotos se muestran solo en los propios.' },
   { page: 'presupuestos', title: 'Solicitudes de material y presupuestos', roles: ['admin', 'technician'], text: 'Los técnicos envían solicitudes con cliente, artículos y cantidades; no ven precios. Oficina revisa cada solicitud y la convierte en presupuesto para completar precios y enviarlo al cliente.' },
   { page: 'informesKms', title: 'Informes KMs', roles: ['admin', 'technician'], text: 'El kilometraje se calcula a partir de los partes de trabajo. El informe permite consultar y exportar los kilómetros de los vehículos del equipo.' },
+  { page: 'medidas', title: 'Tomar medidas', roles: ['admin', 'technician'], text: 'Elige el tipo de puerta, rellena la hoja de medidas sobre el esquema, añade fotos si es necesario y guarda: la medición llega a administración. Solo administración puede eliminar mediciones.' },
   { page: 'revisionesProgramadas', title: 'Revisiones programadas', roles: ['admin', 'technician'], text: 'Consulta las revisiones por cadena, ruta y puerta. Los técnicos pueden registrar el resultado de una revisión; solo administración cambia la programación.' },
   { page: 'almacen', title: 'Almacén', roles: ['admin', 'technician'], text: 'Consulta artículos y existencias. A los técnicos se les ocultan precios, costes y controles de edición.' },
   { page: 'tableros', title: 'Tableros', roles: ['admin'], text: 'Organiza tareas en columnas. Crea tarjetas, asígnalas y muévelas entre estados arrastrándolas.' },
+  { page: 'albaranes', title: 'Albaranes', roles: ['admin', 'technician'], text: 'Administración crea y asigna albaranes sin importes a los técnicos responsables. Los técnicos solo consultan los que se les han asignado y pueden obtener el PDF para mostrarlo y recoger la firma del cliente al finalizar la obra.' },
   { page: 'configuracion', title: 'Configuración', roles: ['admin'], text: 'Administra cuentas y roles del equipo, además de las opciones generales de la aplicación.' }
 ];
 
@@ -21,16 +23,34 @@ window.canAccessPage = page => window.isAdmin() || (window.isTechnician() && TEC
 // cuando se ejecuta este archivo. lazyWrap resuelve la implementación base
 // EN EL MOMENTO DE LLAMAR, no en carga, evitando "originalX is not a function".
 function lazyWrap(name, wrapper) {
-  const captured = typeof window[name] === 'function' ? window[name] : null;
-  window[name] = function (...args) {
-    let base = captured;
-    if (!base) {
-      base = window[name + '__base']; // copia registrada por pages.js (ver final de este archivo)
-      if (typeof base !== 'function') base = null;
-    }
-    return wrapper(base, ...args);
+  // auth.js se carga tras utils.js: si hay stub de carga diferida, recordamos su clave
+  // para poder cargar el módulo real cuando se llame, sin capturar el stub como base.
+  const lazyKey = (window[name] && window[name].__isStub) ? window[name].__lazyKey : null;
+  const captured = (typeof window[name] === 'function' && !window[name].__isStub) ? window[name] : null;
+  const install = () => {
+    window[name] = async function (...args) {
+      let base = captured;
+      if (!base) {
+        base = window[name + '__base']; // copia registrada por pages_core.js (ver final de este archivo)
+        if (typeof base !== 'function') base = null;
+      }
+      if (!base) {
+        // La implementación real vive en un módulo diferido (pages_*.js): cárgalo y llama.
+        const key = lazyKey || window[name]?.__lazyKey || null;
+        if (key && window.LAZY_SCRIPTS && window.LAZY_SCRIPTS[key]) {
+          await loadScriptOnce(window.LAZY_SCRIPTS[key]);
+          base = window[name + '__base'] || (typeof window[name] === 'function' && !window[name].__isWrapper && !window[name].__isStub ? window[name] : null);
+          // el módulo acaba de pisar el wrapper: reinstálalo para no perder las restricciones
+          if (window[name] && !window[name].__isWrapper) install();
+        }
+      }
+      return wrapper(base, ...args);
+    };
+    window[name].__isWrapper = true;
+    window[name + '__wrapper'] = window[name];   // visible para rewrapAfterModuleLoad
+    if (lazyKey) window[name].__lazyKey = lazyKey; // preserva la clave tras recargar
   };
-  window[name].__isWrapper = true;
+  install();
 }
 function authEscape(value) {
   return escapeHtml(String(value ?? ''));
@@ -237,6 +257,8 @@ async function loadAuthProfile(user) {
 
 function updateAuthNavigation() {
   document.querySelectorAll('.nav-item').forEach(item => {
+    // «Tomar medidas» solo existe para técnicos: administración no está en campo
+    if (item.dataset.page === 'medidas' && !window.isTechnician()) { item.hidden = true; return; }
     item.hidden = !window.canAccessPage(item.dataset.page);
     if (item.dataset.page === 'dashboard') item.querySelector('span').textContent = 'Resumen';
     if (item.dataset.page === 'presupuestos') {
@@ -257,7 +279,7 @@ function updateAuthNavigation() {
     <button type="button" class="auth-link auth-account-email" id="changeAccountEmail">Cambiar correo</button>
     <button type="button" class="auth-link auth-push" id="pushToggle" hidden></button>
     <button type="button" class="auth-link auth-logout" id="logoutButton"><i class="fas fa-right-from-bracket"></i> Cerrar sesión</button>`;
-  account.querySelector('#logoutButton').addEventListener('click', () => window.supabaseDB.auth.signOut());
+  account.querySelector('#logoutButton').addEventListener('click', () => window.confirmedSignOut());
   account.querySelector('#changeAccountEmail').addEventListener('click', openChangeAccountEmail);
   window.initPushButton?.();
 }
@@ -325,7 +347,10 @@ async function initializeAuth() {
           const previousUser = window.authState.user?.id;
           if (previousUser && previousUser !== session.user.id) await window.clearAuthenticatedCache();
           await loadAuthProfile(session.user);
-          if (event === 'SIGNED_IN' || previousUser !== session.user.id) {
+          // SOLO en un login real (usuario distinto o no había sesión): el refresco
+          // automático del token de Supabase también dispara SIGNED_IN, y si aquí
+          // re-disparáramos el evento la app volvería al dashboard cada cierto tiempo.
+          if (previousUser !== session.user.id) {
             window.dispatchEvent(new CustomEvent('valgom:authenticated'));
           }
         } catch (error) {
@@ -394,7 +419,7 @@ window.renderTechnicianDashboard = async function(container) {
   const recent = ownParts.slice().sort((a, b) => String(b.fecha || '').localeCompare(String(a.fecha || ''))).slice(0, 6);
   const due = revisions.filter(door => door.proximaRevision && door.proximaRevision <= new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10));
   container.innerHTML = `
-    <div class="page-header"><div><h2>Hola, ${authEscape(window.authState.profile.full_name.split(' ')[0])}</h2><p>Tu resumen de trabajo</p></div></div>
+    <div class="page-header"><div><h2>Hola, ${authEscape(window.authState.profile.full_name.split(' ')[0])}</h2><p>Tu resumen de trabajo</p></div><button class="btn btn-primary" type="button" onclick="usarPlantillaMedida()"><i class="fas fa-ruler-combined"></i> Tomar medidas</button></div>
     <div class="stats-grid">
       <div class="stat-card"><div class="stat-icon"><i class="fas fa-clipboard-list"></i></div><div class="stat-info"><h3>${pendingParts.length}</h3><p>Mis partes pendientes</p></div></div>
       <div class="stat-card"><div class="stat-icon"><i class="fas fa-calendar-check"></i></div><div class="stat-info"><h3>${due.length}</h3><p>Revisiones próximas</p></div></div>
@@ -694,7 +719,7 @@ lazyWrap('render_presupuestos', async (base, container, arg) => {
     const header = container.querySelector('.page-header .header-actions');
     if (header) {
       const button = document.createElement('button');
-      button.className = 'btn btn-outline';
+      button.className = 'btn btn-secondary';
       button.type = 'button';
       button.innerHTML = '<i class="fas fa-box-open"></i> Solicitudes de material';
       button.addEventListener('click', window.openAdminMaterialRequests);
@@ -735,7 +760,7 @@ lazyWrap('render_dashboard', async (base, container, arg) => {
         <button type="button" class="btn btn-outline btn-sm" data-home-logout title="Cerrar sesión" aria-label="Cerrar sesión"><i class="fas fa-right-from-bracket"></i><span>Cerrar sesión</span></button>
       </div>`;
     footer.querySelector('[data-home-theme]').addEventListener('click', () => document.getElementById('themeToggle')?.click());
-    footer.querySelector('[data-home-logout]').addEventListener('click', () => window.supabaseDB.auth.signOut());
+    footer.querySelector('[data-home-logout]').addEventListener('click', () => window.confirmedSignOut());
     container.appendChild(footer);
   }
   window.initPushButton?.();
@@ -823,6 +848,21 @@ window.onValgomNavigate = function(page) {
   if (!NEW_SECTIONS[page] || !window.authState?.user) return;
   markSeen(page);
   setNavBadge(page, 0);
+};
+
+// Cerrar sesión con trabajo sin enviar: se avisa (no se pierde: queda en el móvil y se envía al volver a entrar)
+window.confirmedSignOut = function () {
+  const me = window.authState && window.authState.user && window.authState.user.id;
+  let n = 0;
+  try { const i = window.dbSyncInfo ? window.dbSyncInfo() : null; if (i) n += i.pending.length + i.failed.length; } catch (e) {}
+  try { const c = window.MedicionesOutbox ? window.MedicionesOutbox.counts(me) : null; if (c) n += c.pending + c.failed; } catch (e) {}
+  if (!n || typeof window.openModal !== 'function') return window.supabaseDB.auth.signOut();
+  window.openModal('Hay trabajo sin enviar',
+    '<p>Tienes <strong>' + n + '</strong> elemento(s) que aún no se han enviado a la nube.</p>' +
+    '<p style="font-size:13px;opacity:.85">Si cierras sesión no se pierden: se quedan guardados en este móvil y se enviarán cuando vuelvas a entrar con tu usuario. Mientras tanto nadie más los verá ni los enviará.</p>',
+    '<button class="btn btn-outline" onclick="closeModal()">Seguir con la sesión</button><button class="btn btn-danger" id="signOutAnyway">Cerrar sesión igualmente</button>');
+  const b = document.getElementById('signOutAnyway');
+  if (b) b.onclick = () => { window.closeModal(); window.supabaseDB.auth.signOut(); };
 };
 
 window.addEventListener('valgom:authenticated', () => {
@@ -983,19 +1023,25 @@ const WRAPPED_NAMES = ['render_vehiculos', 'render_presupuestos', 'render_almace
   'render_dashboard', 'render_configuracion', 'render_partesTrabajo',
   'showParteForm', 'saveParte', 'deleteParte'];
 
-document.addEventListener('DOMContentLoaded', () => {
+// Re-registro de bases de pages_*.js (también tras cada carga diferida):
+// si el módulo cargado pisó nuestro wrapper, restaura el wrapper y registra la base real.
+function rewrapAfterModuleLoad() {
   WRAPPED_NAMES.forEach(name => {
     const current = window[name];
     if (typeof current !== 'function') return;
     if (current.__isWrapper) return; // sigue nuestro wrapper: nada que hacer
-    // pages.js nos ha pisado: esa es la implementación base real
-    window[name + '__base'] = current;
-    // Re-envolvemos preservando la lógica del wrapper original guardada antes
-    const previousWrapper = current.__valgomPreviousWrapper || null;
-    if (previousWrapper) {
-      window[name] = previousWrapper;
-    } else {
-      console.warn(`[Auth] ${name} sobrescrita por pages.js sin wrapper previo; se usará la base directamente.`);
+    // El módulo diferido pisó el wrapper: esa es la implementación base real
+    const wrapper = window[name + '__wrapper'];
+    if (typeof wrapper !== 'function') {
+      console.warn(`[Auth] ${name} sobrescrita sin wrapper previo; se usará la base directamente.`);
+      return;
     }
+    window[name + '__base'] = current;
+    window[name] = wrapper;
   });
+}
+window.rewrapAfterModuleLoad = rewrapAfterModuleLoad;
+
+document.addEventListener('DOMContentLoaded', () => {
+  rewrapAfterModuleLoad();
 }, { once: true });

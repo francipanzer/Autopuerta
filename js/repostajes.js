@@ -12,7 +12,7 @@ window.REPOSTAJES = (function () {
   const OCR_CDN = 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js';
   let ocrWorker = null;
 
-  const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const esc = escapeHtml;   // única definición global (utils.js)
 
   function supa() {
     const db = window.supabaseDB || window.sb;

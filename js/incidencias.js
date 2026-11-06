@@ -19,6 +19,29 @@
       : '<span class="badge" style="background:#6b728022;color:#6b7280;border:1px solid #6b728055">Normal</span>';
   }
 
+  // Modal de cierre: nota de cierre + opción de crear el parte de trabajo asociado.
+  // Es el único punto por el que pasa una incidencia a «resuelta» (botón del técnico o edición).
+  function modalResolver(inc, alGuardar) {
+    const esTecnico = !(window.isAdmin && window.isAdmin());
+    openModal('✅ Resolver incidencia',
+      `<div class="form-grid">
+        <div class="form-group full"><label>Cliente</label><div style="font-weight:600">${esc(inc.clienteNombre)}</div></div>
+        <div class="form-group full"><label>Nota de cierre (¿qué se hizo?)</label><textarea id="inc_res_nota" rows="3" placeholder="Descripción del trabajo realizado…">${esc(inc.notaTecnico || '')}</textarea></div>
+        <div class="form-group full">
+          <small style="color:var(--text-muted)">Si guardas y creas el parte, se abrirá el formulario de parte de trabajo precargado con estos datos y quedará vinculado a la incidencia.</small>
+        </div>
+      </div>`,
+      '<button class="btn btn-outline" id="inc_res_solo">Solo cerrar</button>' +
+      '<button class="btn btn-primary" id="inc_res_parte"><i class="fas fa-clipboard-list"></i> Guardar y crear parte</button>');
+    const cerrar = async (crearParte) => {
+      const nota = document.getElementById('inc_res_nota')?.value?.trim() || '';
+      closeModal();
+      await alGuardar(nota, crearParte);
+    };
+    document.getElementById('inc_res_solo').onclick = () => cerrar(false);
+    document.getElementById('inc_res_parte').onclick = () => cerrar(true);
+  }
+
   function mapsUrl(inc) {
     if (inc.lat && inc.lng) return `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(inc.lat + ',' + inc.lng)}`;
     if (inc.direccion) return `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(inc.direccion)}`;
@@ -121,32 +144,66 @@
         <option value="activas" ${filter === 'activas' ? 'selected' : ''}>Activas</option>
         <option value="resueltas" ${filter === 'resueltas' ? 'selected' : ''}>Resueltas</option>
         <option value="todas" ${filter === 'todas' ? 'selected' : ''}>Todas</option></select></div>
-      <div class="card"><div class="table-wrapper"><table><thead><tr><th>Fecha</th><th>Cliente</th><th>Incidencia</th><th>Prioridad</th><th>Técnico</th><th>Estado</th><th>Acciones</th></tr></thead><tbody>
-        ${shown.map(i => `<tr>
+      <div class="card"><div class="table-wrapper"><table><thead><tr><th>Fecha</th><th>Cliente</th><th>Incidencia</th><th>Prioridad</th><th>Técnico</th><th>Estado</th></tr></thead><tbody>
+        ${shown.map(i => `<tr data-inc-row="${esc(i.id)}" style="cursor:pointer">
           <td>${esc(formatDate(String(i.createdAt || '').slice(0, 10)))}</td>
           <td><strong>${esc(i.clienteNombre)}</strong><div style="font-size:12px;color:var(--text-muted)">${esc(i.direccion)}</div></td>
-          <td style="max-width:280px">${esc(i.descripcion)}${i.notaTecnico ? `<div style="font-size:12px;color:var(--text-muted)">Técnico: ${esc(i.notaTecnico)}</div>` : ''}${fotosOf(i).length ? `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px">${fotosHtml(i, 48)}</div>` : ''}</td>
+          <td style="max-width:280px">${esc(i.descripcion)}</td>
           <td>${prioridadBadge(i.prioridad)}</td>
           <td>${i.empleadoNombre ? esc(i.empleadoNombre) : '<span style="color:#dc2626">Sin asignar</span>'}</td>
           <td>${estadoBadge(i.estado)}</td>
-          <td class="actions-cell">
-            <button class="btn btn-outline btn-sm btn-icon" title="Editar" data-inc-edit="${esc(i.id)}"><i class="fas fa-pen"></i></button>
-            ${mapsUrl(i) ? `<a class="btn btn-outline btn-sm btn-icon" title="Ver ubicación" target="_blank" rel="noopener" href="${esc(mapsUrl(i))}"><i class="fas fa-location-dot"></i></a>` : ''}
-            <button class="btn btn-outline btn-sm btn-icon" title="Eliminar" data-inc-del="${esc(i.id)}"><i class="fas fa-trash"></i></button>
-          </td></tr>`).join('') || '<tr><td colspan="7" style="text-align:center;padding:30px;color:var(--text-muted)">Sin incidencias</td></tr>'}
+        </tr>`).join('') || '<tr><td colspan="6" style="text-align:center;padding:30px;color:var(--text-muted)">Sin incidencias</td></tr>'}
       </tbody></table></div></div>`;
     container.querySelector('#incNew').onclick = () => showIncidenciaForm();
     container.querySelector('#incFilter').onchange = event => { container.dataset.incFilter = event.target.value; renderAdmin(container); };
-    container.querySelectorAll('[data-inc-edit]').forEach(btn => btn.onclick = () => showIncidenciaForm(btn.dataset.incEdit));
-    container.querySelectorAll('[data-inc-del]').forEach(btn => btn.onclick = () =>
-      confirmDelete('esta incidencia', async () => {
-        await dbDelete('incidencias', btn.dataset.incDel);
-        showToast('Incidencia eliminada');
-        renderAdmin(container);
-        window.refreshIncidenciasBadge();
-      }));
+    container.querySelector('tbody').addEventListener('click', e => {
+      if (e.target.closest('button') || e.target.closest('a')) return;
+      const row = e.target.closest('tr[data-inc-row]');
+      if (row) verFichaIncidencia(row.dataset.incRow, () => renderAdmin(container));
+    });
     window.refreshIncidenciasBadge();
   }
+
+  // Ficha completa de la incidencia en modal (datos + acciones)
+  window.verFichaIncidencia = function (id, refresh) {
+    loadIncidencias().then(async list => {
+      const i = list.find(x => String(x.id) === String(id));
+      if (!i) return;
+      // Parte de trabajo vinculado (creado al resolver la incidencia)
+      let parteVinculado = null;
+      try {
+        const partes = await dbGetAll('partesTrabajo');
+        parteVinculado = partes.find(pt => String(pt.incidenciaId || '') === String(i.id)) || null;
+      } catch (_) { }
+      const fila = (etiqueta, valor) => (valor === undefined || valor === null || String(valor).trim() === '') ? '' :
+        `<div><small style="color:var(--text-muted);display:block">${etiqueta}</small><div style="font-weight:600">${valor}</div></div>`;
+      const mapa = mapsUrl(i);
+      const tel = telHref(i.telefono);
+      const actions = [
+        '<button class="btn btn-outline btn-sm" onclick="closeModal()">Cerrar</button>',
+        '<button class="btn btn-primary btn-sm" onclick="closeModal();showIncidenciaForm(\'' + esc(i.id) + '\')"><i class="fas fa-pen"></i> Editar</button>'
+      ];
+      if (mapa) actions.push(`<a class="btn btn-primary btn-sm" target="_blank" rel="noopener" href="${esc(mapa)}"><i class="fas fa-location-dot"></i> Ver ubicación</a>`);
+      if (tel) actions.push(`<a class="btn btn-primary btn-sm" href="${esc(tel)}"><i class="fas fa-phone"></i> Llamar</a>`);
+      actions.push('<button class="btn btn-danger btn-sm" onclick="closeModal();confirmDelete(\'esta incidencia\', ()=>{ dbDelete(\'incidencias\', \'' + esc(i.id) + '\').then(()=>{ showToast(\'Incidencia eliminada\'); window.refreshIncidenciasBadge();' + (typeof refresh === 'function' ? ' (window.__incRefresh||function(){})();' : ' navigateTo(\'incidencias\');') + '}); })"><i class="fas fa-trash"></i> Eliminar</button>');
+      openModal('🔔 Incidencia · ' + esc(i.clienteNombre),
+        '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px">' +
+          fila('Fecha', esc(formatDate(String(i.createdAt || '').slice(0, 10)))) +
+          fila('Cliente', esc(i.clienteNombre)) +
+          fila('Teléfono', esc(i.telefono || '—')) +
+          fila('Dirección / ubicación', esc(i.direccion || '—')) +
+          fila('Prioridad', prioridadBadge(i.prioridad)) +
+          fila('Técnico', i.empleadoNombre ? esc(i.empleadoNombre) : '<span style="color:#dc2626">Sin asignar</span>') +
+          fila('Estado', estadoBadge(i.estado)) +
+          (i.resueltaAt ? fila('Resuelta', esc(formatDate(String(i.resueltaAt).slice(0, 10)))) : '') +
+          (parteVinculado ? fila('Parte de trabajo', '<span class="badge badge-blue" style="cursor:pointer" onclick="closeModal();verFichaParte(\'' + esc(parteVinculado.id) + '\')"><i class="fas fa-clipboard-list"></i> ' + esc(parteVinculado.id) + '</span>') : '') +
+          '<div style="grid-column:1/-1"><small style="color:var(--text-muted);display:block">Descripción</small><div>' + esc(i.descripcion) + '</div></div>' +
+          (i.notaTecnico ? '<div style="grid-column:1/-1"><small style="color:var(--text-muted);display:block">Nota del técnico</small><div>' + esc(i.notaTecnico) + '</div></div>' : '') +
+          (fotosOf(i).length ? '<div style="grid-column:1/-1"><small style="color:var(--text-muted);display:block">Fotos</small><div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px">' + fotosHtml(i, 84) + '</div></div>' : '') +
+        '</div>',
+        actions.join(''));
+    });
+  };
 
   async function getEmployeesWithAccess() {
     try {
@@ -254,6 +311,34 @@
       if (data.estado !== 'resuelta') data.resueltaAt = null;
       $('incSave').disabled = true;
       try {
+        const estabaResuelta = existing && existing.estado === 'resuelta';
+        if (data.estado === 'resuelta' && !estabaResuelta) {
+          // Primera vez que pasa a resuelta: ofrecer el parte de trabajo vinculado
+          closeModal();
+          modalResolver(data, async (nota, crearParte) => {
+            data.notaTecnico = nota || data.notaTecnico || '';
+            data.resueltaAt = new Date().toISOString();
+            try {
+              await dbPut('incidencias', data);
+              showToast('Incidencia marcada como resuelta');
+              if (crearParte) {
+                await navigateTo('partesTrabajo');
+                showParteForm(null, {
+                  clienteId: data.clienteId || '',
+                  clienteNombre: data.clienteNombre || '',
+                  descripcion: (data.descripcion || '') + (nota ? '\n— Resolución: ' + nota : ''),
+                  incidenciaId: data.id
+                });
+              } else {
+                navigateTo('incidencias');
+              }
+            } catch (error) {
+              console.error(error);
+              showToast('No se pudo guardar: ' + error.message, 'error');
+            }
+          });
+          return;
+        }
         await dbPut('incidencias', data);
         closeModal();
         showToast(empleado ? `Incidencia asignada a ${empleado.nombre}` : 'Incidencia guardada');
@@ -302,19 +387,26 @@
       <div class="page-header"><div><h2>Mis incidencias</h2><p>Avisos de clientes asignados a ti</p></div></div>
       ${active.map(techCard).join('') || '<div class="card"><div class="card-body">No tienes incidencias pendientes. 👌</div></div>'}
       ${done.length ? `<h3 style="margin:20px 0 10px">Resueltas recientes</h3>${done.map(techCard).join('')}` : ''}`;
-    container.querySelectorAll('[data-inc-next]').forEach(btn => btn.onclick = async () => {
+    container.querySelectorAll('[data-inc-next]').forEach(btn => btn.onclick = () => {
       const estado = btn.dataset.estado;
-      let nota = null;
-      if (estado === 'resuelta') {
-        nota = prompt('Nota de cierre (opcional): ¿qué se hizo?', '');
-        if (nota === null) return;
+      const inc = all.find(i => String(i.id) === btn.dataset.incNext);
+      if (estado !== 'resuelta') {
+        marcarEstado(inc.id, estado, null, container);
+        return;
       }
-      btn.disabled = true;
-      const { error } = await window.supabaseDB.rpc('update_incidencia_estado', { p_id: btn.dataset.incNext, p_estado: estado, p_nota: nota });
-      if (error) { showToast('No se pudo actualizar: ' + error.message, 'error'); btn.disabled = false; return; }
-      showToast('Estado actualizado');
-      renderTech(container);
-      window.refreshIncidenciasBadge();
+      // Cierre con modal: nota + opción de crear el parte de trabajo vinculado
+      modalResolver(inc, async (nota, crearParte) => {
+        const ok = await marcarEstado(inc.id, estado, nota, container);
+        if (ok && crearParte) {
+          await navigateTo('partesTrabajo');
+          showParteForm(null, {
+            clienteId: inc.clienteId || '',
+            clienteNombre: inc.clienteNombre || '',
+            descripcion: (inc.descripcion || '') + (nota ? '\n— Resolución: ' + nota : ''),
+            incidenciaId: inc.id
+          });
+        }
+      });
     });
     container.querySelectorAll('[data-inc-parte]').forEach(btn => btn.onclick = async () => {
       const inc = all.find(i => String(i.id) === btn.dataset.incParte);
@@ -322,10 +414,21 @@
       showParteForm(null, {
         clienteId: inc.clienteId || '',
         clienteNombre: inc.clienteNombre || '',
-        descripcion: inc.descripcion || ''
+        descripcion: inc.descripcion || '',
+        incidenciaId: inc.id
       });
     });
     window.refreshIncidenciasBadge();
+  }
+
+  // Actualiza el estado de una incidencia vía RPC del técnico. Devuelve true si fue bien.
+  async function marcarEstado(id, estado, nota, container) {
+    const { error } = await window.supabaseDB.rpc('update_incidencia_estado', { p_id: id, p_estado: estado, p_nota: nota });
+    if (error) { showToast('No se pudo actualizar: ' + error.message, 'error'); return false; }
+    showToast(estado === 'resuelta' ? 'Incidencia marcada como resuelta' : 'Estado actualizado');
+    if (container) renderTech(container);
+    window.refreshIncidenciasBadge();
+    return true;
   }
 
   window.render_incidencias = async function (container) {
