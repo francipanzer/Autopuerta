@@ -46,6 +46,39 @@ Deno.serve(async (request: Request) => {
         body: `${body.cliente || "Cliente"}: ${body.descripcion || ""}`,
         page: "partesTrabajo",
       };
+    } else if (kind === "albaran_asignado") {
+      const employeeIds = Array.isArray(body.tecnicoids)
+        ? body.tecnicoids.map((id: unknown) => String(id)).filter(Boolean)
+        : [];
+      if (employeeIds.length) {
+        const { data: techs } = await service.from("user_profiles")
+          .select("id").in("employee_id", employeeIds).eq("role", "technician").eq("is_active", true);
+        targetIds = (techs || []).map((t: { id: string }) => t.id);
+      }
+      payload = {
+        title: "Nuevo albarán asignado",
+        body: `${body.numero || "Albarán"} · ${body.cliente || "Cliente"}`,
+        page: "albaranes",
+      };
+    } else if (kind === "presupuesto_recordatorio") {
+      const { data: admins } = await service.from("user_profiles")
+        .select("id").eq("role", "admin").eq("is_active", true);
+      targetIds = (admins || []).map((a: { id: string }) => a.id);
+      payload = {
+        title: "Presupuesto sin respuesta del cliente",
+        body: `${body.presupuesto || "Presupuesto"} · ${body.cliente || "Cliente"}: reenvía el enlace.`,
+        page: "presupuestos",
+      };
+    } else if (kind === "presupuesto_respondido") {
+      const { data: admins } = await service.from("user_profiles")
+        .select("id").eq("role", "admin").eq("is_active", true);
+      targetIds = (admins || []).map((a: { id: string }) => a.id);
+      const aprobado = body.decision === "aprobado";
+      payload = {
+        title: aprobado ? "✅ Presupuesto aprobado por el cliente" : "Presupuesto rechazado por el cliente",
+        body: `${body.presupuesto || "Presupuesto"} · ${body.cliente || "Cliente"}`,
+        page: aprobado ? "albaranes" : "presupuestos",
+      };
     } else if (kind === "incidencia_asignada") {
       const { data: techs } = await service.from("user_profiles")
         .select("id").eq("employee_id", String(body.empleadoid || "")).eq("role", "technician").eq("is_active", true);
