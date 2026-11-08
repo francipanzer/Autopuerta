@@ -1,0 +1,1116 @@
+// �.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.�
+//  Helpers globales
+// �.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.�
+
+// Carga de librerías externas pesadas solo cuando se necesitan
+const _scriptLoads = {};
+function loadScriptOnce(src){
+  if(_scriptLoads[src]) return _scriptLoads[src];
+  _scriptLoads[src] = new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = src;
+    s.onload = () => {
+      // El módulo cargado pudo pisar wrappers de auth.js (p. ej. la precarga en segundo plano
+      // de pages_configuracion.js borraba la tarjeta «Gestionar usuarios»): restáuralos siempre.
+      if (typeof window.rewrapAfterModuleLoad === 'function') { try { window.rewrapAfterModuleLoad(); } catch(e) {} }
+      resolve();
+    };
+    s.onerror = () => { delete _scriptLoads[src]; s.remove(); reject(new Error('No se pudo cargar ' + src + '. Revisa tu conexión.')); };
+    document.head.appendChild(s);
+  });
+  return _scriptLoads[src];
+}
+window.loadScriptOnce = loadScriptOnce;
+window.ensureChart = async function(){
+  if(window.Chart) return;
+  await loadScriptOnce('https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js');
+};
+window.ensureTesseract = async function(){
+  if(window.Tesseract) return;
+  await loadScriptOnce('https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js');
+};
+
+window.ensurePdfLibs = async function(){
+  if(!window.jspdf) await loadScriptOnce('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js');
+  // autotable debe cargarse después de jsPDF
+  if(!window.jspdf.jsPDF.API.autoTable) await loadScriptOnce('https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js');
+};
+
+// �"?�"? Scripts propios de pantallas/funciones no iniciales (URLs y versiones en index.html) �"?�"?
+// Cada función global se registra como "stub": la primera llamada carga el script,
+// que sobrescribe el stub con la función real, y entonces se reenvía la llamada.
+(function registerLazyScripts(){
+  const urls = window.LAZY_SCRIPTS || {};
+  const groups = [
+    ['tableros', ['render_tableros']],
+    ['informesKms', ['render_informesKms']],
+    // Módulos de pages.js troceado (carga diferida)
+    ['pagesPartes', ['render_partesTrabajo', 'renderPartes', 'showParteForm', 'saveParte', 'deleteParte', 'verFichaParte', 'addMaterialParte', 'removeMaterialParte', 'updateMaterialParte', 'pintarPuertasParte']],
+    ['pagesPresupuestos', ['render_presupuestos', 'renderPresupuestos', 'showPresupuestoForm', 'savePresupuesto', 'deletePresupuesto', 'duplicatePresupuesto', 'verFichaPresupuesto', 'sendPresupuesto', 'addLineItem', 'removeLineItem', 'updateLineItem', 'onLineDescChange', 'onLineTipoChange', 'importarPresupuestoFoto', 'abrirHojaMedidasPresupuesto', 'savePresupuestoAsTemplate', 'showPlantillasPresupuesto', 'usarPlantillaPresupuesto', 'borrarPlantillaPresupuesto']],
+    ['pagesConfiguracion', ['render_configuracion', 'openConfigEmpresa', 'openProveedores', 'editProveedor', 'deleteProveedor', 'openConfigApariencia', 'openConfigCorreo', 'openConfigFactorCarretera', 'guardarFactorCarretera', 'openConfigSync', 'openConfigAndroid', 'openAndroidNavigationHelp', 'openConfigInfo', 'openConfigPlantillasMedidas', 'borrarPlantillaDesdeConfig', 'usarPlantillaMedida', 'getCompanySettings', 'isValidCifCif', 'guardarConfigCorreo', 'cargarConfigCorreo', 'probarConexionCorreo', 'exportAllData', 'importAllData', 'clearAllData']],
+    ['pagesGestion', ['render_estadisticas', 'pintarEstadisticas', 'render_daily_report', 'generateDailyReport', 'exportReportCSV', 'abrirFormularioRevision', 'cerrarFormularioRevision', 'revisionHistoryMetadata', 'updateHiperberDoor', 'updateHiperberDoorDecision', 'openHiperberFindingCamera', 'addHiperberFindingPhoto', 'removeHiperberFindingPhoto', 'addHiperberDoor', 'saveHiperberReviewForm', 'openDoticsMaintenanceForm', 'updateDoticsVisitLine', 'updateDoticsVisitState', 'openDoticsCamera', 'selectDoticsPhotoFile', 'addDoticsVisitLine', 'removeDoticsVisitLine', 'addDoticsVisitPhoto', 'removeDoticsVisitPhoto', 'saveDoticsMaintenanceForm', 'abrirRevisionDotics', 'marcarDoticsTodoBueno', 'abrirGoogleMaps']],
+    ['pagesImport', ['render_importFolio', 'showImportFolioModal', 'showImportClientesModal']],
+    ['almacenEntradas', ['showEntradaMaterial', 'showHistorialEntradas']],
+    ['almacenSage', ['showImportArticulosSage', 'showExportarSage']],
+    ['historicoPuertas', ['verHistoricoPuerta', 'mostrarBuscadorPuertas', 'renderBuscadorPuertas']],
+    // NOTA: funciones de fotos/correo/recalculo de kms están en pages_core.js (carga síncrona).
+    // NO registrarlas aquí como stubs: pisarían las funciones reales y buscarían un módulo inexistente.
+    ['pdf', ['generatePDF_clientes','generatePDF_presupuesto','generatePDF_partes','generatePDF_revision',
+             'generatePDF_almacen','generatePDF_presupuestos','generatePDF_ruta','seedDemoPDFData','generateDemoPDFPack']],
+    ['informeRevisionesCliente', ['render_revisionesCliente','render_revisionesProgramadas','generatePDF_informeCliente','verRutasDeCliente','verUbicacionesDeRuta','verPuertasDeCliente','abrirNuevaRevision']]
+  ];
+  groups.forEach(([key, names]) => {
+    if(!urls[key]) return;
+    names.forEach(name => {
+      const stub = async function(...args){
+        await loadScriptOnce(urls[key]);
+        const real = window[name];
+        if(typeof real !== 'function' || real === stub) throw new Error('No se pudo cargar el módulo de ' + key);
+        // El módulo cargado pudo pisar wrappers de auth.js: restáuralos.
+        if (typeof window.rewrapAfterModuleLoad === 'function') { try { window.rewrapAfterModuleLoad(); } catch(e) {} }
+        // tras la re-instalación, la función real puede haberse movido a __base
+        const final = (typeof window[name] === 'function' && window[name].__isWrapper) ? (window[name + '__base'] || real) : real;
+        if (typeof final !== 'function') throw new Error('No se pudo resolver ' + name + ' tras la carga de ' + key);
+        return final.apply(this, args);
+      };
+      stub.__isStub = true;
+      stub.__lazyKey = key;
+      (window.LAZY_STUBS = window.LAZY_STUBS || {})[name] = stub;
+      window[name] = stub;
+    });
+  });
+
+  // Módulos que exponen un OBJETO global (no una función): MEDICIONES y HOJA_MEDIDAS.
+  // Cada método del stub carga js/medidas.js (que reemplaza estos objetos por los reales) y reenvía la llamada.
+  const objetosLazy = {
+    MEDICIONES: ['abrir', 'cerrar', 'registro', 'listarPlantillas'],
+    HOJA_MEDIDAS: ['abrirVista', 'abrirHoja', 'abrirEditor', 'cerrar', 'renderizar', 'cargarPlantillaDeTipo']
+  };
+  if(urls.medidas){
+    Object.entries(objetosLazy).forEach(([objName, metodos]) => {
+      const stub = {};
+      metodos.forEach(m => {
+        stub[m] = async function(...args){
+          if(urls.medidasDatos) await loadScriptOnce(urls.medidasDatos);
+          await loadScriptOnce(urls.medidas);
+          const real = window[objName];
+          if(!real || real === stub || typeof real[m] !== 'function') throw new Error('No se pudo cargar el módulo de medidas');
+          return real[m](...args);
+        };
+      });
+      window[objName] = stub;
+    });
+  }
+
+  // Precarga en segundo plano tras el arranque (y para que funcione sin conexión después)
+  const preload = () => {
+    Object.values(urls).forEach(url => loadScriptOnce(url).catch(() => {}));
+    window.ensureChart().catch(() => {});
+    window.ensurePdfLibs().catch(() => {});
+  };
+  const schedule = () => setTimeout(() => {
+    if('requestIdleCallback' in window) requestIdleCallback(preload, { timeout: 5000 });
+    else preload();
+  }, 3000);
+  if(document.readyState === 'complete') schedule();
+  else window.addEventListener('load', schedule, { once: true });
+})();
+function uid(){
+  return Date.now().toString(36) + Math.random().toString(36).slice(2,8);
+}
+
+function formatCurrency(n){
+  if(n == null || isNaN(n)) n = 0;
+  return new Intl.NumberFormat('es-ES',{style:'currency',currency:'EUR'}).format(n);
+}
+
+function formatDate(d){
+  if(!d) return '�?"';
+  return new Date(d).toLocaleDateString('es-ES',{day:'2-digit',month:'2-digit',year:'numeric'});
+}
+
+function formatDateTime(d){
+  if(!d) return '�?"';
+  return new Date(d).toLocaleString('es-ES',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'});
+}
+
+// escapeHtml �?" �sNICA definición del proyecto (antes había otra en revision-forms.js y copias locales
+// "esc" en varios módulos; la última cargada pisaba a las demás). Acepta números (el 0 se muestra),
+// ignora null/undefined y escapa también comillas, así sirve para texto y para atributos.
+function escapeHtml(text) {
+  if (text === null || text === undefined) return '';
+  return String(text).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+window.escapeHtml = escapeHtml;
+
+// Escapa un valor para usarlo dentro de un atributo HTML delimitado por comillas simples
+// (ej.: onclick="fn('${escapeAttr(valor)}')"). Escapa comillas simples, dobles,
+// angulares y ampersands para evitar romper el atributo o inyectar HTML.
+function escapeAttr(text) {
+  return String(text ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/'/g, '&#39;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+window.escapeAttr = escapeAttr;
+
+function debounce(fn,ms=300){
+  let t;
+  return (...a)=>{clearTimeout(t);t=setTimeout(()=>fn(...a),ms)};
+}
+
+function getToday(){
+  return new Date().toISOString().split('T')[0];
+}
+
+function getBadgeClass(status){
+  const map = {
+    activo:'badge-green', pendiente:'badge-yellow', aprobado:'badge-blue',
+    rechazado:'badge-red', en_ruta:'badge-orange', disponible:'badge-green',
+    en_taller:'badge-purple', completado:'badge-green', abierto:'badge-blue',
+    cerrado:'badge-gray', enviado:'badge-blue', borrador:'badge-gray',
+    en_mantenimiento:'badge-yellow'
+  };
+  return map[status] || 'badge-gray';
+}
+
+function getStatusLabel(status){
+  const map = {
+    activo:'Activo', pendiente:'Pendiente', aprobado:'Aprobado',
+    rechazado:'Rechazado', en_ruta:'En ruta', disponible:'Disponible',
+    en_taller:'En taller', completado:'Completado', abierto:'Abierto',
+    cerrado:'Cerrado', enviado:'Enviado', borrador:'Borrador',
+    en_mantenimiento:'En mantenimiento'
+  };
+  return map[status] || status;
+}
+
+function downloadJSON(data,filename){
+  const blob = new Blob([JSON.stringify(data,null,2)],{type:'application/json'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(blob);
+}
+
+// �.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.�
+//  FILTRO DE CAMPOS NUM�?RICOS
+// �.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.�
+// Clase .only-num �?' solo dígitos (teléfono, km, stock, año, cantidad�?�)
+// Clase .only-num-dec �?' dígitos + coma/punto decimal (precios)
+document.addEventListener('input', function(e){
+  const el = e.target;
+  if(el.tagName !== 'INPUT') return;
+
+  // �"?�"? Solo números enteros �"?�"?
+  if(el.classList.contains('only-num')){
+    const val = el.value.replace(/[^\d]/g,'');
+    if(val !== el.value) el.value = val;
+    return;
+  }
+
+  // �"?�"? Solo decimales �"?�"?
+  if(el.classList.contains('only-num-dec')){
+    let s = el.value.replace(',', '.').replace(/[^\d.]/g,'');
+    // Solo un punto decimal
+    const i = s.indexOf('.');
+    if(i !== -1) s = s.slice(0, i+1) + s.slice(i+1).replace(/\./g,'');
+    // Máximo 2 decimales
+    const p = s.split('.');
+    if(p[1] && p[1].length > 2) s = p[0] + '.' + p[1].slice(0, 2);
+    if(s !== el.value) el.value = s;
+    return;
+  }
+});
+
+// �"?�"? Formatear precio a formato español (coma decimal) �"?�"?
+function formatoPrecioES(num){
+  if(num == null || isNaN(num)) return '0,00';
+  return parseFloat(num).toFixed(2).replace('.', ',');
+}
+
+document.addEventListener('click', function(e){
+  const btn = e.target.closest('[data-action]');
+  if(!btn) return;
+
+  const id = btn.dataset.id || null;
+
+  switch(btn.dataset.action){
+    case 'edit-cliente':      showClienteForm(id); return;
+    case 'save-cliente':      saveCliente(id); return;
+    case 'edit-presupuesto':  showPresupuestoForm(id); return;
+    case 'save-presupuesto':  savePresupuesto(id); return;
+    case 'edit-parte':        showParteForm(id); return;
+    case 'save-parte':        saveParte(id); return;
+    case 'edit-vehiculo':     showVehiculoForm(id); return;
+    case 'save-vehiculo':     saveVehiculo(id); return;
+    case 'edit-articulo':     showArticuloForm(id); return;
+    case 'save-articulo':     saveArticulo(id); return;
+    case 'confirm-itv':       window.marcarITVPasada(id); return;
+  }
+  }); 
+// �.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.�
+//  GEOLOCALIZACI�"N �?" Ceuti como punto base
+// �.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.�
+
+/** Punto base: oficina/taller en C. Chapí, Ceutí */
+const BASE_CEUTI = { lat: 38.0858, lng: -1.2741 };
+const FACTOR_CARETERA = 1.3;
+
+/** Factor carretera configurable (Configuración �?' Factor carretera). Ajusta los kms estimados
+ *  cuando la geolocalización/ruta real falla. Multiplica la distancia en línea recta. */
+function getFactorCarretera(){
+  const v = parseFloat(localStorage.getItem('autopuerta_factor_carretera'));
+  return (v && v > 0 && v < 10) ? v : FACTOR_CARETERA;
+}
+window.getFactorCarretera = getFactorCarretera;
+
+/** Geocodificar dirección �?' coordenadas (Nominatim, gratis) */
+/**
+ * Geocodificación robusta con degradación progresiva:
+ *  1. La dirección tal cual (con número de portal).
+ *  2. Sin número de portal (si Nominatim no tiene ese portal, busca la vía entera).
+ *  3. Sin acentos ni signos (los usuarios escriben "Avda", sin tildes, etc.).
+ *  4. Solo la parte municipal ("... Petrer, Alicante") �?' centro del pueblo.
+ * Devuelve {lat, lng, nombreCompleto, precisión} o null si nada funcionó.
+ */
+async function geocodificar(direccion){
+  const base = String(direccion || '').trim();
+  if (!base) return null;
+  const norm = s => s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^\p{L}\p{N}\s,]/gu, ' ').replace(/\s+/g, ' ').trim();
+
+  // Candidatos en orden de precisión
+  const candidatos = [];
+  const sinNumero = base.replace(/\s+\d+[a-zA-Zºª°.]?(\s|,|$)/, '').replace(/,\s*,/g, ',').trim();
+  if (sinNumero && sinNumero !== base) candidatos.push(sinNumero);
+  const sinAcentos = norm(base);
+  if (sinAcentos && !candidatos.includes(sinAcentos)) candidatos.push(sinAcentos);
+  const sinAcentosSinNum = norm(sinNumero);
+  if (sinAcentosSinNum && !candidatos.includes(sinAcentosSinNum)) candidatos.push(sinAcentosSinNum);
+  // Sin el tipo de vía ("Calle/Avenida/Paseo/Plaza de..."): Nominatim falla si en OSM
+  // la vía tiene otro tipo (p. ej. "Carrer La Constitució" vs "Avenida de la Constitución")
+  const sinTipoVia = norm(sinNumero).replace(/\b(calle|c\/|avda?|avenida|paseo|plaza|pl|camino|ctra|carretera|poligono|polígono|carrer|carrer)\b\s*(de\s+(la|el|los|las)?\s*)?/gi, '').replace(/\s+/g, ' ').trim();
+  if (sinTipoVia && sinTipoVia.length >= 4 && !candidatos.includes(sinTipoVia)) candidatos.push(sinTipoVia);
+  // Municipios: cada tramo de la dirección (de más específico a menos), excluyendo CP
+  const trozos = base.split(',').map(t => t.trim()).filter(Boolean)
+    .filter(t => t.length >= 4 && !/^\d{4,5}$/.test(t));
+  [...trozos].reverse().forEach(t => candidatos.push(t + ', España'));
+  candidatos.push(base); // el original como primer intento real
+
+  const orden = [candidatos[candidatos.length - 1], ...candidatos.slice(0, -1)]; // original primero
+  for (let i = 0; i < orden.length; i++) {
+    const q = orden[i];
+    if (!q) continue;
+    // Pasar por el proxy local (server.py): Nominatim no permite CORS desde el navegador
+    let data = null;
+    try {
+      const res = await fetch('/geocode?q=' + encodeURIComponent(q), { headers: { 'Accept-Language': 'es' } });
+      if(res.ok) data = await res.json();
+      else {
+        // Proxy no disponible (server.py sin reiniciar) �?' intento directo como respaldo
+        const durl = 'https://nominatim.openstreetmap.org/search?format=json&limit=5&addressdetails=1&countrycodes=es&q=' + encodeURIComponent(q);
+        try{
+          const dres = await fetch(durl, { headers: { 'Accept-Language': 'es' } });
+          if(dres.ok) data = await dres.json();
+        }catch(_){ /* CORS bloqueado: seguirá con el siguiente candidato */ }
+      }
+    } catch (e) {
+      console.warn('geocodificar fallo (' + q + '):', e.message || e);
+    }
+    if (!data || !data.length) continue; // siguiente candidato
+    // Preferir resultados con calle/portal sobre "solo pueblo"
+    const mejor = data.find(d => d.address && (d.address.road || d.address.house_number)) || data[0];
+    return { lat: parseFloat(mejor.lat), lng: parseFloat(mejor.lon),
+             nombreCompleto: mejor.display_name,
+             precision: i === 0 ? 'exacta' : (mejor.address && mejor.address.road ? 'calle' : 'municipio') };
+  }
+  // �"?�"? Respaldo: Photon (Komoot), gratuito y sin límites agresivos �"?�"?
+  try {
+    const q = orden[0];
+    if (q) {
+      const res = await fetch('https://photon.komoot.io/api/?limit=5&lang=es&q=' + encodeURIComponent(q));
+      if (res.ok) {
+        const j = await res.json();
+        const f = (j.features || [])[0];
+        if (f && f.geometry?.coordinates) {
+          const p = f.properties || {};
+          const dir = [p.street, p.housenumber, p.postcode, p.city, p.state].filter(Boolean).join(', ');
+          return { lat: f.geometry.coordinates[1], lng: f.geometry.coordinates[0],
+                   nombreCompleto: dir || q, precision: p.street ? 'calle' : 'municipio' };
+        }
+      }
+    }
+  } catch(_) { }
+  return null;
+}
+
+/** Coordenadas �?' dirección (Nominatim) */
+async function geocodificarInverso(lat, lng){
+  const url = 'https://nominatim.openstreetmap.org/reverse?format=json&addressdetails=1&zoom=18&lat='
+    + lat + '&lon=' + lng;
+  try {
+    const res = await fetch(url, { headers: { 'Accept-Language': 'es' } });
+    const data = await res.json();
+    if (!data || data.error) return null;
+    const a = data.address || {};
+    const calle = [a.road || a.pedestrian || a.industrial, a.house_number].filter(Boolean).join(' ');
+    const ciudad = a.city || a.town || a.village || a.municipality || '';
+    const partes = [calle, a.postcode, ciudad].filter(Boolean);
+    return { direccion: partes.length ? partes.join(', ') : data.display_name,
+             nombreCompleto: data.display_name };
+  } catch (e) {
+    console.error('Error geocodificarInverso:', e);
+    return null;
+  }
+}
+
+/** Haversine: distancia en línea recta entre dos puntos (km) */
+function calcularKmLineal(origen, destino){
+  const R = 6371;
+  const dLat = (destino.lat - origen.lat) * Math.PI / 180;
+  const dLng = (destino.lng - origen.lng) * Math.PI / 180;
+  const a = Math.sin(dLat/2)**2 +
+            Math.cos(origen.lat * Math.PI / 180) * Math.cos(destino.lat * Math.PI / 180) *
+            Math.sin(dLng/2)**2;
+  return 2 * R * Math.asin(Math.sqrt(a));
+}
+
+/** Distancia por carretera: OSRM online �?' fallback Haversine �- FACTOR_CARETERA */
+async function calcularKm(origen, destino){
+  const ruta = await kmRutaReal(origen.lat, origen.lng, destino.lat, destino.lng).catch(() => null);
+  if (ruta != null) return Math.round(ruta);
+  return Math.round(calcularKmLineal(origen, destino) * getFactorCarretera());
+}
+
+/**
+ * Distancia REAL por carretera entre dos coordenadas usando OSRM (OpenStreetMap).
+ * Gratuita y sin API key. Devuelve km (ida) o null si no hay conexión/queda fuera de servicio,
+ * en cuyo caso el llamador debe usar el fallback haversine �- FACTOR_CARETERA.
+ */
+let __osrmDown = 0; // timestamp hasta el que no reintentamos tras un fallo
+async function kmRutaReal(lat1, lng1, lat2, lng2){
+  if (Date.now() < __osrmDown) return null; // tras un fallo no insistimos durante 5 min
+  try {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 6000); // no bloquear el formulario más de 6 s
+    const res = await fetch(`https://router.project-osrm.org/route/v1/driving/${lng1},${lat1};${lng2},${lat2}?overview=false`,
+      { signal: ctrl.signal });
+    clearTimeout(t);
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    if (data.code !== 'Ok' || !data.routes?.length) throw new Error('sin ruta');
+    return data.routes[0].distance / 1000; // metros -> km
+  } catch (e) {
+    __osrmDown = Date.now() + 5 * 60 * 1000; // 5 min sin reintentar
+    console.warn('[kms] OSRM no disponible, usando estimación haversine:', e.message);
+    return null;
+  }
+}
+window.kmRutaReal = kmRutaReal;
+
+/** Km ida + vuelta desde Ceuti, redondeado SIEMPRE arriba a múltiplo de 10 */
+async function kmIdaVuelta(destino){
+  const lineal = calcularKmLineal(BASE_CEUTI, destino);   // línea recta
+  const idaVuelta = Math.round(lineal * getFactorCarretera() * 2);  // ida + vuelta carretera
+  return Math.ceil(idaVuelta / 10) * 10;                  // 58 -> 60
+}
+// Dictado por voz �?" versión robusta con MutationObserver
+// �.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.�
+//  DICTADO POR VOZ
+// �.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.�
+(function(){
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if(!SR){
+    console.warn('Dictado por voz no soportado en este navegador');
+    return;
+  }
+
+  let rec = null;
+  let activeInput = null;
+
+  function startVoice(input){
+    stopVoice();
+    activeInput = input;
+    rec = new SR();
+    rec.lang = 'es-ES';
+    rec.continuous = true;
+    rec.interimResults = false;
+
+    rec.onresult = function(e){
+      let texto = '';
+      for(let i = e.resultIndex; i < e.results.length; i++){
+        if(e.results[i].isFinal) texto += e.results[i][0].transcript + ' ';
+      }
+      if(texto && activeInput){
+        activeInput.value += (activeInput.value ? ' ' : '') + texto.trim();
+        activeInput.dispatchEvent(new Event('input', {bubbles:true}));
+      }
+    };
+
+    rec.onend = function(){ updateBtn(false); rec = null; activeInput = null; };
+    rec.onerror = function(){ updateBtn(false); rec = null; activeInput = null; };
+
+    try { rec.start(); updateBtn(true); } catch(e){ console.error(e); }
+  }
+
+  function stopVoice(){
+    if(rec){ try{ rec.stop(); }catch(e){} rec = null; }
+    updateBtn(false);
+    activeInput = null;
+  }
+
+  function updateBtn(on){
+    document.querySelectorAll('.voice-btn').forEach(b => b.classList.toggle('recording', on));
+  }
+
+  // Delegación de clics en botones de micrófono
+  document.addEventListener('click', function(e){
+    const btn = e.target.closest('.voice-btn');
+    if(!btn) return;
+    const container = btn.closest('.input-with-voice');
+    const input = container?.querySelector('input, textarea');
+    if(!input) return;
+    if(activeInput === input && rec){ stopVoice(); }
+    else { startVoice(input); }
+  });
+
+  // Inyectar botones donde falten
+  function injectVoiceButtons(root=document){
+    const inputs = [];
+    if(root.matches?.('input[type="text"], textarea')) inputs.push(root);
+    root.querySelectorAll?.('input[type="text"], textarea').forEach(el => inputs.push(el));
+    inputs.forEach(el => {
+      if(el.classList.contains('only-num') ||
+         el.classList.contains('only-num-dec') ||
+         el.hasAttribute('data-sin-voz') ||
+         (el.id && el.id.startsWith('search')) ||
+         el.type === 'number' || el.type === 'date' || el.type === 'email' ||
+         el.parentElement?.classList.contains('input-with-voice')) return;
+
+      const wrapper = document.createElement('div');
+      wrapper.className = 'input-with-voice';
+      el.parentNode.insertBefore(wrapper, el);
+      wrapper.appendChild(el);
+
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'voice-btn';
+      btn.title = 'Dictar por voz';
+      btn.innerHTML = '<i class="fas fa-microphone"></i>';
+      wrapper.appendChild(btn);
+    });
+  }
+
+  const voiceObserver = new MutationObserver(mutations => {
+    mutations.forEach(mutation => mutation.addedNodes.forEach(node => {
+      if(node.nodeType === Node.ELEMENT_NODE) injectVoiceButtons(node);
+    }));
+  });
+  voiceObserver.observe(document.body, {childList:true, subtree:true});
+  injectVoiceButtons();
+})();
+// �.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.�
+//  VALIDAR DNI/NIE (formato + letra de control)
+// �.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.�
+function validarDNI(input){
+  if(!input) return false;
+  let v = String(input).trim().toUpperCase().replace(/[ -]/g,'');
+  // CIF de empresa: letra + 7-8 dígitos/caracteres (B12345678, A12345674...)
+  // (verificación del dígito de control omitida a propósito: aceptamos el CIF tal cual)
+  if(/^[ABCDEFGHJNPQRSUVW]\d{7}[0-9A-J]$/.test(v) || /^[ABCDEFGHJNPQRSUVW]\d{8}$/.test(v)) return true;
+  // 8 dígitos + letra, o NIE X/Y/Z + 7 dígitos + letra
+  const re = /^([XYZ]?)(\d{7,8})([A-Z])$/;
+  const m = v.match(re);
+  if(!m) return false;
+  
+  const prefijo = m[1]; // X, Y o Z (vacío para DNI normal)
+  let numStr = m[2];
+  
+  // Si empieza por X/Y/Z, cambiar al número equivalente
+  if(prefijo === 'X') numStr = '0' + numStr.slice(0,7);
+  else if(prefijo === 'Y') numStr = '1' + numStr.slice(0,7);
+  else if(prefijo === 'Z') numStr = '2' + numStr.slice(0,7);
+  
+  const LETRAS = 'TRWAGMYFPDXBNJZSQVHLCKE';
+  const letraEsperada = LETRAS[parseInt(numStr,10) % 23];
+  const letraReal = m[3];
+  
+  return letraReal === letraEsperada;
+}
+// �.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.�
+//  FIRMA DIGITAL (canvas mouse + touch)
+// �.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.�
+// Las firmas se guardan siempre en un lienzo lógico fijo (proporción 5:2), sea cual
+// sea el tamaño en pantalla, para que se vean igual en el móvil, el PDF y el escritorio.
+const FIRMA_W = 600, FIRMA_H = 240;
+
+function firmaDibujarTrazos(ctx, strokes, mapPoint, lineWidth, color){
+  ctx.strokeStyle = color;
+  ctx.fillStyle = color;
+  ctx.lineWidth = lineWidth;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  strokes.forEach(points => {
+    if(!points.length) return;
+    const pts = points.map(mapPoint);
+    if(pts.length === 1){
+      ctx.beginPath();
+      ctx.arc(pts[0].x, pts[0].y, lineWidth / 2, 0, Math.PI * 2);
+      ctx.fill();
+      return;
+    }
+    ctx.beginPath();
+    ctx.moveTo(pts[0].x, pts[0].y);
+    for(let i = 1; i < pts.length - 1; i++){
+      const mx = (pts[i].x + pts[i + 1].x) / 2;
+      const my = (pts[i].y + pts[i + 1].y) / 2;
+      ctx.quadraticCurveTo(pts[i].x, pts[i].y, mx, my);
+    }
+    const last = pts[pts.length - 1];
+    ctx.lineTo(last.x, last.y);
+    ctx.stroke();
+  });
+}
+
+// Recorta los trazos, los escala sin deformar y los centra en el lienzo de destino.
+function firmaVolcarEnLienzo(canvas, strokes, sourceWidth){
+  const all = strokes.flat();
+  if(!all.length) return;
+  const xs = all.map(p => p.x), ys = all.map(p => p.y);
+  const minX = Math.min(...xs), maxX = Math.max(...xs);
+  const minY = Math.min(...ys), maxY = Math.max(...ys);
+  const boxW = Math.max(maxX - minX, 1), boxH = Math.max(maxY - minY, 1);
+  const pad = 14;
+  const scale = Math.min((FIRMA_W - pad * 2) / boxW, (FIRMA_H - pad * 2) / boxH, 2.5);
+  const offX = (FIRMA_W - boxW * scale) / 2 - minX * scale;
+  const offY = (FIRMA_H - boxH * scale) / 2 - minY * scale;
+  canvas.width = FIRMA_W;
+  canvas.height = FIRMA_H;
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0, 0, FIRMA_W, FIRMA_H);
+  const lineWidth = Math.min(Math.max(sourceWidth * scale, 2.5), 6);
+  firmaDibujarTrazos(ctx, strokes, p => ({ x: p.x * scale + offX, y: p.y * scale + offY }), lineWidth, '#111');
+}
+
+// Pantalla completa para firmar con el dedo. Devuelve una promesa con los trazos, o null si se cancela.
+function abrirPadFirma(titulo){
+  return new Promise(resolve => {
+    const light = document.body.classList.contains('light');
+    const padBg = light ? '#ffffff' : '#1e293b';
+    const padInk = light ? '#111' : '#f8fafc';
+    const overlay = document.createElement('div');
+    overlay.id = 'padFirmaOverlay';
+    overlay.style.cssText = 'position:fixed;top:0;left:0;width:100vw;height:100vh;height:100dvh;z-index:20000;background:#0f172a;display:flex;flex-direction:column;padding:12px;padding-top:max(12px,env(safe-area-inset-top));padding-bottom:max(12px,env(safe-area-inset-bottom));gap:10px;touch-action:none;box-sizing:border-box;';
+    overlay.innerHTML =
+      '<div style="display:flex;justify-content:space-between;align-items:center;color:#fff;gap:12px;flex:0 0 auto">' +
+        '<strong style="font-size:16px">' + escapeHtml(titulo || 'Firma') + '</strong>' +
+        '<small style="opacity:.75;text-align:right">Firma con el dedo dentro del recuadro</small>' +
+      '</div>' +
+      '<div id="padWrap" style="flex:1 1 0;min-height:0;position:relative;background:' + padBg + ';border-radius:12px;overflow:hidden;border:1px solid #334155">' +
+        '<canvas id="padCanvas" style="position:absolute;inset:0;width:100%;height:100%;touch-action:none;display:block"></canvas>' +
+        '<div style="position:absolute;left:5%;right:5%;bottom:22%;border-bottom:2px dashed #64748b;pointer-events:none"></div>' +
+        '<div style="position:absolute;left:5%;bottom:calc(22% + 6px);color:#64748b;font-size:20px;pointer-events:none">�o.</div>' +
+      '</div>' +
+      '<div style="display:flex;gap:10px;flex:0 0 auto">' +
+        '<button type="button" id="padClear" style="flex:1;min-height:52px;border:1px solid transparent;border-radius:10px;background:linear-gradient(135deg,#22c55e 0%,#16a34a 100%);color:#fff;font:inherit;font-size:15px;font-weight:700">Borrar</button>' +
+        '<button type="button" id="padCancel" style="flex:1;min-height:52px;border:1px solid transparent;border-radius:10px;background:linear-gradient(135deg,#22c55e 0%,#16a34a 100%);color:#fff;font:inherit;font-size:15px;font-weight:700">Cancelar</button>' +
+        '<button type="button" id="padOk" style="flex:2;min-height:52px;border:0;border-radius:10px;background:#16a34a;color:#fff;font:inherit;font-size:16px;font-weight:600" disabled>Aceptar</button>' +
+      '</div>';
+    document.body.appendChild(overlay);
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+
+    const canvas = overlay.querySelector('#padCanvas');
+    const okBtn = overlay.querySelector('#padOk');
+    const ctx = canvas.getContext('2d');
+    let strokes = [];
+    let current = null;
+    let cssW = 1, cssH = 1;
+
+    const LINE = 3.2;
+    function repaint(){
+      const dpr = window.devicePixelRatio || 1;
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.clearRect(0, 0, cssW, cssH);
+      firmaDibujarTrazos(ctx, strokes, p => ({ x: p.x * cssW, y: p.y * cssH }), LINE, padInk);
+    }
+    function resize(){
+      const rect = canvas.getBoundingClientRect();
+      const dpr = window.devicePixelRatio || 1;
+      cssW = Math.max(rect.width, 1);
+      cssH = Math.max(rect.height, 1);
+      canvas.width = Math.round(cssW * dpr);
+      canvas.height = Math.round(cssH * dpr);
+      repaint();
+    }
+    resize();
+    window.addEventListener('resize', resize);
+    window.addEventListener('orientationchange', resize);
+
+    function pos(e){
+      const r = canvas.getBoundingClientRect();
+      return { x: (e.clientX - r.left) / r.width, y: (e.clientY - r.top) / r.height };
+    }
+    canvas.addEventListener('pointerdown', e => {
+      e.preventDefault();
+      canvas.setPointerCapture(e.pointerId);
+      current = [pos(e)];
+      strokes.push(current);
+      repaint();
+    });
+    canvas.addEventListener('pointermove', e => {
+      if(!current) return;
+      e.preventDefault();
+      (e.getCoalescedEvents ? e.getCoalescedEvents() : [e]).forEach(ev => current.push(pos(ev)));
+      repaint();
+    });
+    const end = e => {
+      if(!current) return;
+      current = null;
+      okBtn.disabled = !strokes.length;
+      if(e) e.preventDefault();
+    };
+    canvas.addEventListener('pointerup', end);
+    canvas.addEventListener('pointercancel', end);
+    canvas.addEventListener('contextmenu', e => e.preventDefault());
+
+    function close(result){
+      window.removeEventListener('resize', resize);
+      window.removeEventListener('orientationchange', resize);
+      document.body.style.overflow = prevOverflow;
+      overlay.remove();
+      resolve(result);
+    }
+    overlay.querySelector('#padClear').addEventListener('click', () => {
+      strokes = []; current = null; okBtn.disabled = true; repaint();
+    });
+    overlay.querySelector('#padCancel').addEventListener('click', () => close(null));
+    okBtn.addEventListener('click', () => {
+      // Pasa de coordenadas normalizadas a píxeles de pantalla para conservar la proporción real.
+      const px = strokes.map(s => s.map(p => ({ x: p.x * cssW, y: p.y * cssH })));
+      close({ strokes: px, width: LINE });
+    });
+  });
+}
+
+function initFirmaCanvas(canvasId, opts = {}){
+  const canvas = document.getElementById(canvasId);
+  if(!canvas) return null;
+
+  const ctx = canvas.getContext('2d');
+  const color = opts.color || '#111';
+  const lineWidth = opts.width || 3;
+  const titulo = opts.title || canvas.getAttribute('data-firma-titulo') || 'Firma';
+
+  canvas.width = FIRMA_W;
+  canvas.height = FIRMA_H;
+  canvas.style.height = 'auto';
+  canvas.style.aspectRatio = FIRMA_W + ' / ' + FIRMA_H;
+  canvas.style.touchAction = 'none';
+
+  // El recuadro toma el fondo de la app; en tema oscuro se invierte solo el trazo para verse claro (la imagen guardada sigue siendo oscura).
+  if(!canvas.parentElement.classList.contains('firma-box')){
+    const box = document.createElement('div');
+    box.className = 'firma-box';
+    canvas.parentElement.insertBefore(box, canvas);
+    box.appendChild(canvas);
+  }
+
+  if(opts.readOnly){
+    canvas.style.cursor = 'default';
+    return { clear: ()=>{}, getDataURL: ()=> canvas.toDataURL('image/png'), hasSignature: ()=> hasSignature(canvasId) };
+  }
+  canvas.style.cursor = 'pointer';
+
+  const coarse = window.matchMedia && window.matchMedia('(pointer: coarse)').matches;
+  let drawing = false;
+  let last = null;
+
+  function getPos(e){
+    const r = canvas.getBoundingClientRect();
+    return {
+      x: (e.clientX - r.left) * (canvas.width / r.width),
+      y: (e.clientY - r.top) * (canvas.height / r.height)
+    };
+  }
+
+  // En pantallas táctiles se firma en una pantalla completa; con ratón se dibuja directamente.
+  async function openPad(){
+    const result = await abrirPadFirma(titulo);
+    if(result && result.strokes.length) firmaVolcarEnLienzo(canvas, result.strokes, result.width);
+  }
+
+  if(coarse){
+    canvas.addEventListener('click', openPad);
+  }else{
+    canvas.addEventListener('pointerdown', e => {
+      e.preventDefault();
+      canvas.setPointerCapture(e.pointerId);
+      drawing = true;
+      last = getPos(e);
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      ctx.arc(last.x, last.y, lineWidth / 2, 0, Math.PI * 2);
+      ctx.fill();
+    });
+    canvas.addEventListener('pointermove', e => {
+      if(!drawing) return;
+      e.preventDefault();
+      const p = getPos(e);
+      ctx.strokeStyle = color;
+      ctx.lineWidth = lineWidth;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      ctx.beginPath();
+      ctx.moveTo(last.x, last.y);
+      ctx.lineTo(p.x, p.y);
+      ctx.stroke();
+      last = p;
+    });
+    const stop = () => { drawing = false; };
+    canvas.addEventListener('pointerup', stop);
+    canvas.addEventListener('pointercancel', stop);
+  }
+
+  return {
+    clear: ()=>{ ctx.clearRect(0,0,canvas.width,canvas.height); },
+    getDataURL: ()=> canvas.toDataURL('image/png'),
+    hasSignature: ()=> hasSignature(canvasId)
+  };
+}
+
+function clearFirmaCanvas(canvasId){
+  const canvas = document.getElementById(canvasId);
+  if(!canvas) return;
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+}
+
+// js/utils.js
+function hasSignature(canvasId) {
+  const canvas = document.getElementById(canvasId);
+  if (!canvas || !canvas.width || !canvas.height) return false;
+
+  try {
+    const data = canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height).data;
+    // Hay firma si algún píxel es visible y no es blanco puro opaco (fondo vacío).
+    for (let i = 0; i < data.length; i += 4) {
+      const alpha = data[i + 3];
+      if (alpha > 0 && !(alpha === 255 && data[i] === 255 && data[i + 1] === 255 && data[i + 2] === 255)) {
+        return true;
+      }
+    }
+  } catch (e) {
+    console.error('Error al verificar firma:', e);
+  }
+  return false;
+}
+
+function pintarFirmaEnCanvas(canvasId, dataURL){
+  const canvas = document.getElementById(canvasId);
+  if(!canvas) return;
+  canvas.width = FIRMA_W;
+  canvas.height = FIRMA_H;
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  if(!dataURL) return;
+
+  const img = new Image();
+  img.onload = function(){
+    const ratio = Math.min(FIRMA_W / img.width, FIRMA_H / img.height);
+    const w = img.width * ratio;
+    const h = img.height * ratio;
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+    ctx.drawImage(img, (FIRMA_W - w) / 2, (FIRMA_H - h) / 2, w, h);
+  };
+  img.src = dataURL;
+}
+
+// �"?�"? Confirmación universal antes de eliminar �"?�"?
+window.confirmDelete = function(itemName, callback){
+  const overlay = document.getElementById('modalOverlay');
+  const title = document.getElementById('modalTitle');
+  const body = document.getElementById('modalBody');
+  const footer = document.getElementById('modalFooter');
+
+  if(!overlay || !title || !body || !footer){
+    console.error('confirmDelete: elementos del modal no encontrados');
+    return;
+  }
+
+  title.textContent = 'Confirmar eliminación';
+  body.innerHTML = '<p>¿Estás seguro de que quieres eliminar <strong>' + escapeHtml(itemName) + '</strong>?</p><p style="color:#dc2626;font-size:13px;margin-top:8px">Esta acción no se puede deshacer.</p>';
+  footer.innerHTML =
+    '<button class="btn btn-outline" onclick="closeModal()">Cancelar</button>' +
+    '<button class="btn btn-danger" id="confirmDeleteBtn">Eliminar</button>';
+
+  overlay.classList.add('open', 'confirm-mode');
+
+  document.getElementById('confirmDeleteBtn').onclick = function(){
+    closeModal();
+    callback();
+  };
+};
+// �"?�"? Cerrar modal �"?�"?
+if (typeof window.closeModal !== 'function') {
+  window.closeModal = function(){
+    const overlay = document.getElementById('modalOverlay');
+    if (!overlay) return;
+    overlay.classList.remove('open');
+    overlay.style.display = '';
+  };
+}
+// �.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.�
+//  VALIDACI�"N DE FORMULARIOS EN LÍNEA
+// �.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.�
+// Muestra u oculta el error debajo de un campo concreto
+function setFieldError(fieldId, msg){
+  const field = document.getElementById(fieldId);
+  if(!field) return false;
+  clearFieldError(fieldId);
+  if(msg){
+    field.classList.add('input-error');
+    const small = document.createElement('small');
+    small.className = 'field-error-msg';
+    small.style.cssText = 'color:#dc2626;font-size:11px;display:block;margin-top:3px';
+    small.textContent = msg;
+    field.parentNode.appendChild(small);
+    return false;
+  }
+  return true;
+}
+
+function clearFieldError(fieldId){
+  const field = document.getElementById(fieldId);
+  if(!field) return;
+  field.classList.remove('input-error');
+  const err = field.parentNode.querySelector('.field-error-msg');
+  if(err) err.remove();
+}
+
+// Limpia todos los errores de un contenedor (modal/formulario)
+function clearAllFieldErrors(containerId){
+  const c = document.getElementById(containerId);
+  if(!c) return;
+  c.querySelectorAll('.input-error').forEach(el => el.classList.remove('input-error'));
+  c.querySelectorAll('.field-error-msg').forEach(el => el.remove());
+}
+
+// Validaciones reutilizables
+const validators = {
+  required: (v, label)=> v && v.trim() ? '' : (label || 'Este campo') + ' es obligatorio',
+  email: (v)=> !v || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v) ? '' : 'Email no válido',
+  telefono9: (v)=> !v || /^\d{9}$/.test(String(v).replace(/\D/g,'')) ? '' : 'El teléfono debe tener 9 dígitos',
+};
+document.addEventListener('input', function(e){
+  if(e.target.classList.contains('input-error')){
+    clearFieldError(e.target.id);
+  }
+});
+// ============================================================
+// HELPERS DE FECHAS PARA ÍNDICE COMPUESTO (matricula_fecha)
+// ============================================================
+
+/**
+ * Devuelve la fecha de hoy en formato ISO 'YYYY-MM-DD'.
+ * Ordenable lexicográficamente �?' compatible con IDBKeyRange.
+ */
+const todayStr = () => new Date().toISOString().slice(0, 10);
+
+// �"?�"? Catálogo de tipos de puerta �"?�"?
+// Sale del catálogo único (js/tipos-puerta.js): las mismas claves de siempre (seccional, rapida,
+// corredera, corredera_cristal, batiente, cortafuegos�?�) más basculante, enrollable, barrera, etc.
+const TIPOS_PUERTA = {};
+(window.TiposPuerta?.BASE || []).filter(t => !t.servicio).forEach(t => {
+  TIPOS_PUERTA[t.key] = { nombre: t.nombre, diasRevision: t.diasRevision, checklist: t.checklist };
+});
+
+// �"?�"? Helpers del catálogo �"?�"?
+function getTipoPuerta(tipo) {
+  if (TIPOS_PUERTA[tipo]) return TIPOS_PUERTA[tipo];
+  const t = window.TiposPuerta?.resolver(tipo);   // acepta nombre, código antiguo o alias
+  return t && TIPOS_PUERTA[t.key] ? TIPOS_PUERTA[t.key] : null;
+}
+
+// Compara dos valores de tipo de puerta aunque estén en formatos distintos
+// (key "seccional", nombre "Puerta Seccional", id de tabla "TP001"�?�).
+// Es la �sNICA comparación que deben usar buscadores y filtros: antes cada
+// pantalla comparaba con un formato distinto y nunca encontraba nada.
+window.mismoTipoPuerta = function (a, b) {
+  if (!a || !b) return false;
+  const A = window.TiposPuerta?.resolver?.(a);
+  const B = window.TiposPuerta?.resolver?.(b);
+  const ka = A ? A.key : String(a).trim().toLowerCase();
+  const kb = B ? B.key : String(b).trim().toLowerCase();
+  return ka === kb || String(a) === String(b);
+};
+
+// Próxima revisión de una PUERTA según la tabla de periodicidades (uso + criterio; ver tipos-puerta.js).
+// Acepta la puerta completa o solo su tipo (entonces se aplica el uso habitual del tipo).
+function calcularProximaRevisionPuerta(puertaOTipo, ultimaRevision) {
+  const puerta = (puertaOTipo && typeof puertaOTipo === 'object') ? puertaOTipo : { tipo: puertaOTipo };
+  return window.Periodicidad.proximaRevision(puerta, ultimaRevision ? String(ultimaRevision).slice(0, 10) : null);
+}
+
+// Compatibilidad: cálculo de fechas por meses (ISO)
+function calcularProximaRevisionRuta(ultimaRevisionISO, meses = 6) {
+  if (!ultimaRevisionISO) return null;
+  return window.Periodicidad.sumarMeses(String(ultimaRevisionISO).slice(0, 10), meses);
+}
+
+window.calcularProximaRevisionPuerta = calcularProximaRevisionPuerta;
+window.calcularProximaRevision = calcularProximaRevisionRuta;
+function parseFolioTexto(texto) {
+  const rutaRegex = /(?:ruta|RUTA)\s*(?:nº?\.?\s*)?(\d+)/i;
+  // Nombre de tienda: "H." o "H-" seguido de nombre (acepta HEDA sin separador)
+  const tiendaSplit = /(?=H[.\-\s]?)/gi;
+  const cpRegex = /\b(\d{5})\b/;
+  const calleRegex = /(c\/|calle\b|avda\.?|av\.|avenida\b|pl\.|plaza\b|pso\.|paseo\b|trav\.|camino\b|ronda\b|ctra\.|presbítero\b|gran vía\b)/i;
+
+  const lineas = texto.split(/\r?\n/)
+    .map(l => l.trim())
+    .filter(l => l.length > 0);
+
+  const rutas = [];
+  let rutaActual = null;
+  let ultimaTienda = null;
+
+  for (let i = 0; i < lineas.length; i++) {
+    let linea = lineas[i];
+
+    // Quitar bordes de tabla y basura suelta
+    linea = linea.replace(/[|¦�?]/g, ' ')
+                 .replace(/�?"+/g, ' ')
+                 .replace(/\s{2,}/g, ' ').trim();
+    if (!linea || /^[-=]+$/.test(linea)) continue;
+
+    // Cabeceras de tabla
+    if (/^\s*[KM]\s+TIENDA\s+DIRECCION/i.test(linea)) continue;
+
+    // ¿Nueva ruta?
+    const mRuta = linea.match(rutaRegex);
+    if (mRuta) {
+      rutaActual = { numero: mRuta[1], clientes: [] };
+      rutas.push(rutaActual);
+      ultimaTienda = null;
+      continue;
+    }
+    if (!rutaActual) continue;
+
+    // Dividir la línea en fragmentos: uno por cada "H." detectado
+    const partes = linea.split(tiendaSplit).map(p => p.trim()).filter(Boolean);
+
+    // Trozo antes del primer "H." (km suelto o continuación de dirección anterior)
+    if (!tiendaSplit.test(partes[0] === '' ? '' : partes[0]) && !/^H[.\-\s]?/i.test(partes[0])) {
+      const head = partes.shift();
+      if (ultimaTienda && (cpRegex.test(head) || calleRegex.test(head))) {
+        ultimaTienda.direccion += ' ' + head; // continuación de dirección partida
+      }
+    }
+
+    for (const frag of partes) {
+      // Separar nombre de dirección por primera calle detectada
+      const mCalle = frag.match(calleRegex);
+      let nombre, direccion;
+      if (mCalle) {
+        nombre = frag.slice(0, mCalle.index).trim().replace(/[,;·:\[\]]+\s*$/, '');
+        direccion = frag.slice(mCalle.index).trim();
+      } else {
+        nombre = frag.trim();
+        direccion = '';
+      }
+
+      // Limpiar nombre: quitar km delante (ej: "4,6 H.CAMPELLO") y basura final
+      nombre = nombre.replace(/^[\d.,]+\s+(?=H)/, '')
+                     .replace(/[\[\]:;,|-]+$/g, '')
+                     .replace(/\s+/g, ' ').trim();
+
+      if (nombre.length > 2) {
+        ultimaTienda = { nombre, direccion };
+        rutaActual.clientes.push(ultimaTienda);
+      }
+    }
+  }
+
+  // Limpieza final de direcciones
+  for (const r of rutas) {
+    for (const c of r.clientes) {
+      c.direccion = c.direccion.replace(/\s+/g, ' ')
+                               .replace(/[\[\]|]+/g, '')
+                               .replace(/[:;,]+$/g, '')
+                               .trim();
+      // Normalizar nombre a "H.NOMBRE"
+      c.nombre = c.nombre.replace(/^H[.\-\s]+/i, 'H.');
+    }
+  }
+
+  return { rutas };
+}
+
+window.parseFolioTexto = parseFolioTexto;
+
+// �.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.�
+//  FUNCIONES DE ITV (para auth.js y pages.js)
+// �.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.�
+window.diasHastaFechaITV = function(value){
+  const match=String(value||'').slice(0,10).match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if(!match) return null;
+  const target=Date.UTC(Number(match[1]),Number(match[2])-1,Number(match[3]));
+  const today=new Date();
+  const todayUtc=Date.UTC(today.getFullYear(),today.getMonth(),today.getDate());
+  return Math.round((target-todayUtc)/86400000);
+};
+
+window.textoCuentaAtrasITV = function(days){
+  if(days<0){
+    const overdue=Math.abs(days);
+    return `<strong>CADUCADA</strong> hace ${overdue} día${overdue===1?'':'s'}`;
+  }
+  if(days===0) return '<strong>CADUCA HOY</strong>';
+  return `Caduca en <strong>${days}</strong> día${days===1?'':'s'}`;
+};
+
+// ── Tablas → tarjetas en móvil ─────────────────────────────────────────────
+// Cada celda recibe su cabecera como data-label y el CSS (≤640px) las muestra como tarjetas
+// apiladas en vez de obligar a deslizar la tabla en horizontal.
+//   · <th data-titulo> elige la columna que hace de título de la tarjeta (por defecto, la primera con cabecera).
+//   · Cabecera vacía + sin botones = columna decorativa (foto): se oculta en la tarjeta.
+//   · Última celda con botones = fila de acciones a todo el ancho.
+//   · <div class="table-wrapper keep-table"> conserva la tabla (formularios con campos editables).
+(function(){
+  const VACIO = /^[—–-]?$/;
+  function etiquetar(){
+    document.querySelectorAll('.table-wrapper:not(.keep-table) table:not(.hiperber-checklist)').forEach(t=>{
+      const ths=[...t.querySelectorAll('thead th')];
+      if(!ths.length) return;
+      const textos=ths.map(h=>h.textContent.trim());
+      let titulo=ths.findIndex(h=>h.hasAttribute('data-titulo'));
+      if(titulo<0) titulo=textos.findIndex(x=>x);
+      t.querySelectorAll('tbody tr').forEach(tr=>{
+        if(tr.dataset.mobTabla===String(tr.children.length)+'|'+tr.textContent.length) return;
+        [...tr.children].forEach((td,i)=>{
+          if(td.tagName!=='TD') return;
+          const colspan=td.colSpan>1;
+          td.setAttribute('data-label',colspan?'':(textos[i]||''));
+          const accion=!!td.querySelector('button,a.btn,.btn')&&i===tr.children.length-1;
+          const decorativa=!colspan&&!textos[i]&&!accion;
+          td.classList.toggle('td-titulo',!colspan&&i===titulo);
+          td.classList.toggle('td-acciones',accion);
+          td.classList.toggle('td-media',decorativa);
+          td.classList.toggle('td-vacio',!colspan&&!accion&&i!==titulo&&VACIO.test(td.textContent.trim())&&!td.querySelector('img,input,select,button'));
+        });
+        tr.dataset.mobTabla=String(tr.children.length)+'|'+tr.textContent.length;
+      });
+    });
+  }
+  let pendiente=false;
+  const programar=()=>{ if(pendiente) return; pendiente=true; setTimeout(()=>{ pendiente=false; try{ etiquetar(); }catch(e){ /* solo estética */ } },30); };
+  document.addEventListener('DOMContentLoaded',()=>{
+    new MutationObserver(programar).observe(document.body,{childList:true,subtree:true});
+    programar();
+  });
+})();

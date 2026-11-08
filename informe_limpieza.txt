@@ -1,0 +1,235 @@
+INFORME DE LIMPIEZA — INFORME.xlsx
+============================================================
+Clientes leídos:                  528
+Filas 100% vacías:                0  → eliminadas
+Duplicadas por código exacto:     0  → fusionadas
+Mismo nombre, distinto código:    26  → MARCADAS (revisar a mano)
+Mismo NIF, distinto código:       1  → MARCADAS (revisar a mano)
+Clientes finales:                 528
+
+CALIDAD DE DATOS (para rellenar a mano o ampliar desde Sage):
+  Sin dirección:          41  (no geocodificables)
+  Sin población:         175
+  Sin NIF:               234
+  Sin teléfono:          317
+  Sin email:             195
+  Sin persona contacto:  458
+  Geocodificables (dirección+población): 347 de 528
+
+Clientes sin NINGÚN dato de contacto (ni teléfono ni email) — candidatos a obsoletos:
+    43000007  Agricultura y Mercados, S.
+    43000779  Aitana Construcción
+    43000791  Albert Palao Servicios, S.L
+    43000428  Alberto Pedreño Soto
+    43000175  Alcantadis, S.L
+    43000174  Alejandro Ruiz Molina
+    43000705  Alfa Cediva, S.L
+    43000584  Alfrisan, S.L
+    43000783  AMC Globalco
+    43000656  Animur 2012, S.L
+    43000777  Antonio Palazón Meseguer
+    43000687  Aparcamiento Clavillos
+    43000789  APLEONA
+    43000561  Ardemetal
+    43000550  ATDL, S.L
+    43000221  Automáticos Rumatic, S.L
+    43000590  Azorin Descanso, S.L
+    43000676  Barinas 2021, S.L
+    43000618  Baser Inspecciones Técnicas
+    43000053  C. Propi. Edif. Aldaba
+    43000678  C. Propi. Edif. Marina
+    43000223  C. Propi. Residencial Beniaján
+    43000629  C. Propietarios Atalayas II
+    43000640  C. Propietarios Lepanto
+    43000639  C. Propietarios Siria
+    43000696  Cadel Recycling Lab. S.L
+    43000647  Caladeros del Mediterraneo, S.L
+    43000446  Carpintería Metálica Almarjal, S.L
+    43000556  Casa Huérfanos Cardenal Belluga Hijas de la Caridad
+    43000612  Cash Costto, S.L
+    43000650  Cebollas Javaloyes, S.L
+    43000001  Cliente Contado
+    43000657  Comercial David
+    43000177  Comunidad de Propietarios San Vicente
+    43000449  Comunidad de Vecinos Coop. S. Miguel Arcangel , BL
+    43000551  Construcciones Urdecon, S.A
+    43000558  Construcciones Virexma, S.L
+    43000751  D´GREGA, S.L.U
+    43000637  Detergentes Solyeco, S.L.
+    44000001  DEUDOR
+    43000760  Dimbe Auxiliar de Soldadura, S.L
+    43000757  D-Motorsport, S.L
+    43000579  Econatura
+    43000061  Edgar Gomez Gallego
+    43000422  EIFFAGE ENERGÍA, S.L.U
+    43000517  El Moreno Sociedad Cooperativa
+    43000231  Elisa Hita Palazón
+    43000771  Embotelladora Los Montes, S.L
+    43000663  Equizone Europa, S.A
+    43000588  Estructuras y Cerrajería Gamar
+    43000505  Exeter III Alicante-Miranda, S.L
+    43000181  Exit, S.L
+    43000737  Fatima María López Sandoval
+    43000669  Francisco Parra Caballero
+    43000738  Fruitum 2016, S.L.U
+    43000719  Frutas Nova, S. Coop
+    43000786  Frutas y Hortalizas del sureste, S.L
+    43000726  Ganadería Valle del Sol, S.L
+    43000602  García Fernandez Soldaduras, S.L
+    43000085  Garmel Balear Ttes. S.L.U
+    43000717  Gesticon
+    43000756  Global Waste Materials Repackaging FZE, S.L
+    43000089  Goldfrio Logística, S.L
+    43000090  Gregal Sociedad Cooperativa
+    43000607  Grupo Mant Barcelona, S.L
+    43000636  Grupo Zaragoza
+    43000695  HAVI LOGISTICS FSL SL
+    43000279  Hermanos Inglés, S.A
+    43000452  Hijos de Manuel Lucas, S.L
+    43000599  Hortofortini España, S.L.U
+    43000749  Hurtaplas, S.L
+    43000634  Ileana Silvina Ghilarducci
+    43000712  Inurban, S.A.U
+    43000659  Inversiones Almenara, S.L.U
+    43000732  Inversiones Carrascoy, S.L.U
+    43000708  Inversiones Montajes, S.L.U
+    43000491  Jesús Orozco Valiente
+    43000710  Jet2.com Ltd
+    43000671  Joaquín Faz Fernandez
+    43000769  José Carlos Moya Martinez
+    43000270  Jose Manuel Jurado Fernandez
+    43000183  La Senda Frozen Food, S.L
+    43000758  Laura Romera Ruiz
+    43000664  Leticia Marín Sanchez
+    43000729  Logística Mazarrón, S.L
+    43000115  Los Alamos Bloques: 1, 2 y 3
+    43000768  Manuel Lucas
+    43000724  Marcavi Textil
+    43000638  Maribel
+    43000117  Marvimundo, S.L.U
+    43000122  Meseguer Ortuño Hnos. S.L
+    43000124  Metrosup, S.A
+    43000784  MH Refrigeración
+    43000549  Miguel Angel Peñas Lechuga
+    43000581  Miguel Fernandez Ruiz
+    43000342  Miguel Hernandez Moya
+    43000205  Molinense Producciones Naturales, S.L
+    43000608  Montoya y Muñoz, S.L
+    43000625  Movilex Recycling Group, S.L
+    43000616  Nanopac Hortofrutícola, S.L
+    43000633  Naus Anoia, S.L
+    43000127  Navarro Artero, S.L
+    43000128  Nelva Motor, S.L
+    43000129  Nelvauto, S.L
+    43000131  Novograf, S.L.U
+    43000762  Oliver Moreno Moratón
+    43000781  Palancares alimentación, S.L
+    43000698  Panadería Cuesta Blanca, S.L
+    43000577  Parque de Bomberos Alcantarilla
+    43000029  Pavasal, S.A
+    43000555  Pedro Belmonte
+    43000668  Pedro Cano
+    43000745  Pedro Pablo Gil Rodriguez
+    43000610  Pedro Riquelme
+    43000133  Pescados Cartagena, S.L
+    43000443  Pilar Barea Pozo
+    43000626  PINA-LAS TORRES
+    43000135  Piscifactorías del Atlántico, S.L
+    43000303  Piscifactorías del Mediterraneo, S.L
+    43000138  Pistas Itv, S.A
+    43000178  Plataforma Logística U.L. Murcia
+    43000139  Portes Bisbal, S.L
+    43000140  Prefabricados Hijos de Ginés Celdrán, S.L
+    43000614  Proman Suminstros Especializados, S.L
+    43000413  Promohispania Grupo Empresarial del Levante, S.L
+    43000622  Puertas Virgen de la Salud, S.L
+    43000142  Quality Humanitaria, S.L.U
+    43000685  Residencial Buena Vista
+    43000546  Residencial Parque Monte Verde
+    43000761  Residencial Villa Azahar III
+    43000179  Ricardo Fuentes E Hijos, S.A
+    43000674  ROMAFRUT
+    43000611  Salazones Artesanos y Conservas, S.L
+    43000336  Salvador Morales Sanchez
+    43000148  Sanchis Mira, S.A
+    43000149  Sat N9890 Ole
+    43000775  Sergio Cerrajero Alguazas
+    43000369  Servicios Plásticos, S.A
+    43000153  Sidex Suministros Industriales, S.L
+    43000156  Taller y Cerrajería Porras Gomis, S.L
+    43000624  TANA, S.A
+    43000793  Técnicas de Impresión Printtec, S.L
+    43000571  Telecomunicacion de Levante, S.L
+    43000662  Transmantemur, S.L
+    43000778  Transporte Integral de Paquetería, S.A
+    43000746  Transportes El Charcos
+    43000163  Transportes Seller, S.L
+    43000339  Transportes Vedriel, S.L
+    43000164  Triguer Obras y Reformas, S.L
+    43000402  Valentin García Valenzuela
+    43000774  VALGOM DOOR SOLUTIONS, S.L.U
+    43000747  Vallas metálicas del Mediterráneo, S.L
+    43000554  Variaciones energeticas
+    43000585  Vegacarpas, S.L
+    43000780  Viviendas Calderón de la Barca de la Alberca, S. Coop.
+    43000700  Viviendas Don Juan Tenorio S. Coop
+    43000743  VLV INGENIERIA Y CONSTRUCCION
+    43000635  Volmur Ibérica, S.L
+    43000578  Yolanda
+    43000360  Zolve España-Logística y Transporte
+
+Clientes marcados como posible duplicado:
+    43000174  Alejandro Ruiz Molina  [mismo nombre, distinto código]
+    43000052  Alejandro Ruiz Molina  [mismo nombre, distinto código]
+    43000258  AT La Espada, S.L  [mismo nombre, distinto código]
+    43000048  AT La Espada, S.L  [mismo nombre, distinto código]
+    43000464  Babyplant, S.L  [mismo nombre, distinto código]
+    43000020  Babyplant, S.L  [mismo nombre, distinto código]
+    43000042  Bareca Sdad. Coop.  [mismo nombre, distinto código]
+    43000199  Bareca Sdad. Coop.  [mismo nombre, distinto código]
+    43000057  Diego Sanchez Fortun Casanova  [mismo nombre, distinto código]
+    43000051  Diego Sanchez Fortun Casanova  [mismo nombre, distinto código]
+    43000069  Exclusivas Alicantinas, S.A.U  [mismo nombre, distinto código]
+    43000037  Exclusivas Alicantinas, S.A.U  [mismo nombre, distinto código]
+    43000031  Frigoríficos Marbamar, S.A  [mismo nombre, distinto código]
+    43000206  Frigoríficos Marbamar, S.A  [mismo nombre, distinto código]
+    43000080  Fruit Tech Natural S.A Cabezo de Torres  [mismo NIF, distinto código]
+    43000079  Fruit Tech Natural, S.A  [mismo NIF, distinto código]
+    43000082  Frutas Esther, S.A  [mismo nombre, distinto código]
+    43000038  Frutas Esther, S.A  [mismo nombre, distinto código]
+    43000030  Genéricacip, S.L  [mismo nombre, distinto código]
+    43000529  Genericacip, S.L  [mismo nombre, distinto código]
+    43000090  Gregal Sociedad Cooperativa  [mismo nombre, distinto código]
+    43000049  Gregal Sociedad Cooperativa  [mismo nombre, distinto código]
+    43000094  Helberica Chocolates, S.A  [mismo nombre, distinto código]
+    43000028  Helbérica Chocolates, S.A  [mismo nombre, distinto código]
+    43000664  Leticia Marín Sanchez  [mismo nombre, distinto código]
+    43000665  Leticia Marín Sanchez  [mismo nombre, distinto código]
+    43000025  Logística Friseco, S.L  [mismo nombre, distinto código]
+    43000078  Logística Friseco, S.L  [mismo nombre, distinto código]
+    43000113  Logística Omega, S.A  [mismo nombre, distinto código]
+    43000045  Logística Omega, S.A  [mismo nombre, distinto código]
+    43000010  Misan SG S. Coop  [mismo nombre, distinto código]
+    43000434  Misan SG S. Coop  [mismo nombre, distinto código]
+    43000127  Navarro Artero, S.L  [mismo nombre, distinto código]
+    43000012  Navarro Artero, S.L  [mismo nombre, distinto código]
+    43000024  Novarali, S.L  [mismo nombre, distinto código]
+    43000184  Novarali, S.L  [mismo nombre, distinto código]
+    43000198  Ontime Plataforma Sur, S.L  [mismo nombre, distinto código]
+    43000027  Ontime Plataforma Sur, S.L  [mismo nombre, distinto código]
+    43000138  Pistas Itv, S.A  [mismo nombre, distinto código]
+    43000137  Pistas ITV, S.A  [mismo nombre, distinto código]
+    43000022  Polimur, S.A  [mismo nombre, distinto código]
+    43000410  Polimur, S.A  [mismo nombre, distinto código]
+    43000154  Soluzone Asistencia, S.L  [mismo nombre, distinto código]
+    43000035  Soluzone Asistencia, S.L  [mismo nombre, distinto código]
+    43000039  Talleres Orozco Automoción, S.L.U  [mismo nombre, distinto código]
+    43000375  Talleres Orozco Automoción, S.L.U  [mismo nombre, distinto código]
+    43000159  Tradismur, S.L  [mismo nombre, distinto código]
+    43000036  Tradismur, S.L  [mismo nombre, distinto código]
+    43000046  Transportes Hermanos Hernandez, S.L  [mismo nombre, distinto código]
+    43000482  Transportes Hermanos Hernandez, S.L  [mismo nombre, distinto código]
+    43000163  Transportes Seller, S.L  [mismo nombre, distinto código]
+    43000050  Transportes Seller, S.L  [mismo nombre, distinto código]
+    43000339  Transportes Vedriel, S.L  [mismo nombre, distinto código]
+    43000682  Transportes Vedriel, S.L  [mismo nombre, distinto código]

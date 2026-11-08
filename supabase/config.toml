@@ -1,0 +1,11 @@
+[functions.team-admin]
+verify_jwt = false
+
+[functions.share-revision]
+verify_jwt = false
+
+[functions.send-push]
+verify_jwt = false
+
+[functions.recordatorios-presupuestos]
+verify_jwt = false

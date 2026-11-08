@@ -1,0 +1,1 @@
+window.SUPABASE_PUBLIC = {"url":"https://ziimllianelsocrdeeut.supabase.co","anon":"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InppaW1sbGlhbmVsc29jcmRlZXV0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTEzMTgyMjksImV4cCI6MjEwNjg5NDIyOX0.mjh_HBDR0UZRgU4MCZIy3djQxWWp7Dc9gVWVa-DRgf4"};

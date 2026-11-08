@@ -1,0 +1,19 @@
+{
+  "appId": "com.tufamilia.localiza",
+  "appName": "Localiza Familia",
+  "webDir": "www",
+  "android": {
+    "allowMixedContent": false
+  },
+  "plugins": {
+    "BackgroundGeolocation": {
+      "locationServiceOptions": "HIGH_ACCURACY",
+      "staleDataTime": 30,
+      "notificationTitle": "Localiza Familia activo",
+      "notificationText": "Compartiendo ubicación con tu familia"
+    }
+  },
+  "server": {
+    "androidScheme": "https"
+  }
+}
