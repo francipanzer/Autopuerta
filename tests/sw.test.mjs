@@ -7,6 +7,7 @@ const BASE = 'https://app.test/';
 const abs = u => new URL(typeof u === 'string' ? u : u.url, BASE).href;
 const noQ = u => u.split('?')[0];
 const html = fs.readFileSync(new URL('../index.html', import.meta.url), 'utf8');
+const ver = f => (html.match(new RegExp('js/' + f.replace('.', '\\.') + '\\?v=(\\d+)')) || [])[1];
 
 function loadSW({ files = {}, hang = false } = {}) {
   const handlers = {}, store = new Map(), added = [];
@@ -72,11 +73,11 @@ test('las 9 hojas de medidas del precache existen en disco', () => {
 
 test('instalaciÃ³n: cachea imprescindibles + todos los JS, y un fallo no la aborta', async () => {
   const files = { [BASE]: 'x', [BASE + 'index.html']: html, [BASE + 'css/styles.css']: 'x', [BASE + 'manifest.json']: '{}',
-    [BASE + 'js/medidas.js?v=6']: 'x', [BASE + 'js/sync-utils.js?v=1']: 'x', [BASE + 'js/db.js?v=49']: 'x' };
+    [BASE + 'js/medidas.js?v=' + ver('medidas.js')]: 'x', [BASE + 'js/sync-utils.js?v=' + ver('sync-utils.js')]: 'x', [BASE + 'js/db.js?v=' + ver('db.js')]: 'x' };
   const w = loadSW({ files });
   let waited; w.handlers.install({ waitUntil: p => { waited = p; } });
   await waited;
-  for (const u of ['js/medidas.js?v=6', 'js/sync-utils.js?v=1', 'js/db.js?v=49', 'index.html']) assert.ok(w.added.includes(BASE + u), 'no precacheado ' + u);
+  for (const u of ['js/medidas.js?v=' + ver('medidas.js'), 'js/sync-utils.js?v=' + ver('sync-utils.js'), 'js/db.js?v=' + ver('db.js'), 'index.html']) assert.ok(w.added.includes(BASE + u), 'no precacheado ' + u);
 });
 test('instalaciÃ³n: si faltan los imprescindibles NO se instala (se reintentarÃ¡) en vez de quedar a medias', async () => {
   const w = loadSW({ files: {} });

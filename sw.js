@@ -1,4 +1,4 @@
-const CACHE_NAME = 'autopuerta-v134';  // importador de clientes: apertura robusta + verificación
+const CACHE_NAME = 'autopuerta-v147';  // Almacén: artículos de Sage 50 (importar / exportar, stock bidireccional)
 
 // Hojas de medidas: se guardan al instalar para poder medir sin cobertura en la obra
 const HOJAS_MEDIDAS = [

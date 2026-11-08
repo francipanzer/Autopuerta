@@ -9,7 +9,12 @@ function loadScriptOnce(src){
   _scriptLoads[src] = new Promise((resolve, reject) => {
     const s = document.createElement('script');
     s.src = src;
-    s.onload = () => resolve();
+    s.onload = () => {
+      // El módulo cargado pudo pisar wrappers de auth.js (p. ej. la precarga en segundo plano
+      // de pages_configuracion.js borraba la tarjeta «Gestionar usuarios»): restáuralos siempre.
+      if (typeof window.rewrapAfterModuleLoad === 'function') { try { window.rewrapAfterModuleLoad(); } catch(e) {} }
+      resolve();
+    };
     s.onerror = () => { delete _scriptLoads[src]; s.remove(); reject(new Error('No se pudo cargar ' + src + '. Revisa tu conexión.')); };
     document.head.appendChild(s);
   });
@@ -40,18 +45,19 @@ window.ensurePdfLibs = async function(){
     ['tableros', ['render_tableros']],
     ['informesKms', ['render_informesKms']],
     // Módulos de pages.js troceado (carga diferida)
-    ['pagesPartes', ['render_partesTrabajo', 'renderPartes', 'showParteForm', 'saveParte', 'deleteParte', 'verFichaParte', 'addMaterialParte', 'removeMaterialParte', 'updateMaterialParte', 'updateMaterialParteDeLista', 'pintarPuertasParte']],
+    ['pagesPartes', ['render_partesTrabajo', 'renderPartes', 'showParteForm', 'saveParte', 'deleteParte', 'verFichaParte', 'addMaterialParte', 'removeMaterialParte', 'updateMaterialParte', 'pintarPuertasParte']],
     ['pagesPresupuestos', ['render_presupuestos', 'renderPresupuestos', 'showPresupuestoForm', 'savePresupuesto', 'deletePresupuesto', 'duplicatePresupuesto', 'verFichaPresupuesto', 'sendPresupuesto', 'addLineItem', 'removeLineItem', 'updateLineItem', 'onLineDescChange', 'onLineTipoChange', 'importarPresupuestoFoto', 'abrirHojaMedidasPresupuesto', 'savePresupuestoAsTemplate', 'showPlantillasPresupuesto', 'usarPlantillaPresupuesto', 'borrarPlantillaPresupuesto']],
     ['pagesConfiguracion', ['render_configuracion', 'openConfigEmpresa', 'openProveedores', 'editProveedor', 'deleteProveedor', 'openConfigApariencia', 'openConfigCorreo', 'openConfigFactorCarretera', 'guardarFactorCarretera', 'openConfigSync', 'openConfigAndroid', 'openAndroidNavigationHelp', 'openConfigInfo', 'openConfigPlantillasMedidas', 'borrarPlantillaDesdeConfig', 'usarPlantillaMedida', 'getCompanySettings', 'isValidCifCif', 'guardarConfigCorreo', 'cargarConfigCorreo', 'probarConexionCorreo', 'exportAllData', 'importAllData', 'clearAllData']],
-    ['pagesGestion', ['render_estadisticas', 'pintarEstadisticas', 'render_daily_report', 'generateDailyReport', 'exportReportCSV', 'render_revisionesProgramadas', 'render_revisiones_rutas', 'render_revisiones_tiendas', 'render_rutas', 'showRutaForm', 'saveRuta', 'deleteRuta', 'deleteCadena', 'deleteRutaDb', 'showRutasForCadena', 'renderCadenasList', 'optimizarRutaTiendas', 'abrirFormularioRevisionRuta', 'abrirFormularioRevisionCliente', 'abrirInformeRevisionRuta', 'buscarHistorialRevisiones', 'openHiperberReviewForm', 'cerrarFormularioRevision', 'updateHiperberDoor', 'updateHiperberDoorDecision', 'openHiperberFindingCamera', 'addHiperberFindingPhoto', 'removeHiperberFindingPhoto', 'addHiperberDoor', 'saveHiperberReviewForm', 'openDoticsMaintenanceForm', 'updateDoticsVisitLine', 'updateDoticsVisitState', 'openDoticsCamera', 'selectDoticsPhotoFile', 'addDoticsVisitLine', 'removeDoticsVisitLine', 'addDoticsVisitPhoto', 'removeDoticsVisitPhoto', 'saveDoticsMaintenanceForm', 'generarPDFRutaCompleta', 'abrirGoogleMaps', 'volverARevisionesCadena']],
+    ['pagesGestion', ['render_estadisticas', 'pintarEstadisticas', 'render_daily_report', 'generateDailyReport', 'exportReportCSV', 'abrirFormularioRevision', 'cerrarFormularioRevision', 'revisionHistoryMetadata', 'updateHiperberDoor', 'updateHiperberDoorDecision', 'openHiperberFindingCamera', 'addHiperberFindingPhoto', 'removeHiperberFindingPhoto', 'addHiperberDoor', 'saveHiperberReviewForm', 'openDoticsMaintenanceForm', 'updateDoticsVisitLine', 'updateDoticsVisitState', 'openDoticsCamera', 'selectDoticsPhotoFile', 'addDoticsVisitLine', 'removeDoticsVisitLine', 'addDoticsVisitPhoto', 'removeDoticsVisitPhoto', 'saveDoticsMaintenanceForm', 'abrirRevisionDotics', 'marcarDoticsTodoBueno', 'abrirGoogleMaps']],
     ['pagesImport', ['render_importFolio', 'showImportFolioModal', 'showImportClientesModal']],
     ['almacenEntradas', ['showEntradaMaterial', 'showHistorialEntradas']],
+    ['almacenSage', ['showImportArticulosSage', 'showExportarSage']],
     ['historicoPuertas', ['verHistoricoPuerta', 'mostrarBuscadorPuertas', 'renderBuscadorPuertas']],
     // NOTA: funciones de fotos/correo/recalculo de kms están en pages_core.js (carga síncrona).
     // NO registrarlas aquí como stubs: pisarían las funciones reales y buscarían un módulo inexistente.
     ['pdf', ['generatePDF_clientes','generatePDF_presupuesto','generatePDF_partes','generatePDF_revision',
              'generatePDF_almacen','generatePDF_presupuestos','generatePDF_ruta','seedDemoPDFData','generateDemoPDFPack']],
-    ['informeRevisionesCliente', ['render_revisionesCliente','generatePDF_informeCliente']]
+    ['informeRevisionesCliente', ['render_revisionesCliente','render_revisionesProgramadas','generatePDF_informeCliente','verRutasDeCliente','verUbicacionesDeRuta','verPuertasDeCliente','abrirNuevaRevision']]
   ];
   groups.forEach(([key, names]) => {
     if(!urls[key]) return;
@@ -480,6 +486,7 @@ async function kmIdaVuelta(destino){
     inputs.forEach(el => {
       if(el.classList.contains('only-num') ||
          el.classList.contains('only-num-dec') ||
+         el.hasAttribute('data-sin-voz') ||
          (el.id && el.id.startsWith('search')) ||
          el.type === 'number' || el.type === 'date' || el.type === 'email' ||
          el.parentElement?.classList.contains('input-with-voice')) return;
@@ -609,7 +616,7 @@ function abrirPadFirma(titulo){
         '<div style="position:absolute;left:5%;bottom:calc(22% + 6px);color:#64748b;font-size:20px;pointer-events:none">�o.</div>' +
       '</div>' +
       '<div style="display:flex;gap:10px;flex:0 0 auto">' +
-        '<button type="button" id="padClear" style="flex:1;min-height:52px;border:1px solid #64748b;border-radius:10px;background:transparent;color:#fff;font:inherit;font-size:15px">Borrar</button>' +
+        '<button type="button" id="padClear" style="flex:1;min-height:52px;border:1px solid transparent;border-radius:10px;background:linear-gradient(135deg,#22c55e 0%,#16a34a 100%);color:#fff;font:inherit;font-size:15px;font-weight:700">Borrar</button>' +
         '<button type="button" id="padCancel" style="flex:1;min-height:52px;border:1px solid transparent;border-radius:10px;background:linear-gradient(135deg,#22c55e 0%,#16a34a 100%);color:#fff;font:inherit;font-size:15px;font-weight:700">Cancelar</button>' +
         '<button type="button" id="padOk" style="flex:2;min-height:52px;border:0;border-radius:10px;background:#16a34a;color:#fff;font:inherit;font-size:16px;font-weight:600" disabled>Aceptar</button>' +
       '</div>';
@@ -942,213 +949,21 @@ window.mismoTipoPuerta = function (a, b) {
   return ka === kb || String(a) === String(b);
 };
 
-function getDiasRevisionByTipo(tipo) {
-  return getTipoPuerta(tipo)?.diasRevision || 365; // fallback conservador
+// Próxima revisión de una PUERTA según la tabla de periodicidades (uso + criterio; ver tipos-puerta.js).
+// Acepta la puerta completa o solo su tipo (entonces se aplica el uso habitual del tipo).
+function calcularProximaRevisionPuerta(puertaOTipo, ultimaRevision) {
+  const puerta = (puertaOTipo && typeof puertaOTipo === 'object') ? puertaOTipo : { tipo: puertaOTipo };
+  return window.Periodicidad.proximaRevision(puerta, ultimaRevision ? String(ultimaRevision).slice(0, 10) : null);
 }
 
-// Calcular próxima revisión para PUERTAS según tipo
-function calcularProximaRevisionPuerta(tipo, ultimaRevision) {
-  const dias = getDiasRevisionByTipo(tipo);
-  if (!ultimaRevision) {
-    const d = new Date();
-    return `${d.getFullYear() + 1}-01-01`;
-  }
-  const base = new Date(ultimaRevision);
-  base.setDate(base.getDate() + dias);
-  return base.toISOString().slice(0, 10);
-}
-
-// Compatibilidad: cálculo de fechas para RUTAS (por meses)
+// Compatibilidad: cálculo de fechas por meses (ISO)
 function calcularProximaRevisionRuta(ultimaRevisionISO, meses = 6) {
   if (!ultimaRevisionISO) return null;
-  const fecha = new Date(ultimaRevisionISO);
-  fecha.setMonth(fecha.getMonth() + meses);
-  return fecha.toISOString();
+  return window.Periodicidad.sumarMeses(String(ultimaRevisionISO).slice(0, 10), meses);
 }
 
 window.calcularProximaRevisionPuerta = calcularProximaRevisionPuerta;
-window.calcularProximaRevisionRuta = calcularProximaRevisionRuta;
 window.calcularProximaRevision = calcularProximaRevisionRuta;
-// ==================== RUTAS: Guardar / Actualizar ====================
-
-/**
- * window.saveRuta() �?' Promise<boolean>
- * Lee inputs del modal, valida, upserta Supabase + IndexedDB.
- */
-window.saveRuta = async function () {
-  const idExistente = document.getElementById('form-ruta-id')?.value || null;
-  const nombre = document.getElementById('form-ruta-nombre')?.value.trim();
-  const cadenaid = document.getElementById('form-ruta-cadena')?.value || null;
-  const frecuenciameses = parseInt(document.getElementById('form-ruta-frecuencia')?.value, 10) || 6;
-  const orden = parseInt(document.getElementById('form-ruta-orden')?.value, 10) || 0;
-  const ultimaVal = document.getElementById('form-ruta-ultima')?.value;
-  const ultimorevision = ultimaVal ? new Date(ultimaVal + 'T00:00:00').toISOString() : null;
-
-  if (!nombre) { mostrarToast('El nombre de la ruta es obligatorio', 'error'); return false; }
-  if (!cadenaid) { mostrarToast('Selecciona la cadena a la que pertenece', 'error'); return false; }
-
-  const ahora = new Date().toISOString();
-  const ruta = {
-    id: idExistente || window.db.nextId('RUT'),
-    nombre,
-    cadenaid,
-    cadenaId: cadenaid,
-    frecuenciameses,
-    frecuenciaMeses: frecuenciameses,
-    orden,
-    ultimorevision,
-    ultimaRevision: ultimorevision,
-    proximarevision: calcularProximaRevisionRuta(ultimorevision, frecuenciameses),
-    proximaRevision: calcularProximaRevisionRuta(ultimorevision, frecuenciameses),
-    updatedat: ahora
-  };
-
-  try {
-    if(!idExistente){
-      if(!orden) ruta.orden=(await getRutasByCadena(cadenaid)).length;
-      ruta.createdat=ahora;
-    }
-    if (cadenaid) {
-      window.setCurrentCadenId(cadenaid);
-      localStorage.setItem('cadenaId', String(cadenaid));
-    }
-    await dbPut('rutas',ruta);
-  } catch (e) {
-    console.error('saveRuta falló:', e);
-    mostrarToast('Error guardando la ruta', 'error');
-    return false;
-  }
-
-  closeModal?.();
-  mostrarToast(idExistente ? 'Ruta actualizada' : 'Ruta creada', 'success');
-
-  if (typeof render_rutas === 'function') {
-    const sel = document.getElementById('form-ruta-cadena');
-    if (sel && sel.value) render_rutas(sel.value);
-  }
-  return true;
-};
-// �.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.�
-//  PENDIENTES DE REVISI�"N (Rutas y Clientes)
-// �.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.�
-
-async function getPendientesRevision() {
-  const hoy = new Date(); hoy.setHours(0,0,0,0);
-  const treintaDias = new Date(hoy);
-  treintaDias.setDate(treintaDias.getDate() + 30);
-
-  // Días hasta una fecha YYYY-MM-DD parseada en HORA LOCAL (new Date('YYYY-MM-DD')
-  // se interpreta en UTC y con Math.ceil la fecha de HOY salía como +1 día)
-  const diasHastaLocal = (f) => {
-    const m = String(f || '').slice(0, 10).match(/^(\d{4})-(\d{2})-(\d{2})$/);
-    if (!m) return null;
-    const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
-    d.setHours(0, 0, 0, 0);
-    return Math.round((d - hoy) / (1000 * 60 * 60 * 24));
-  };
-
-  const pendientes = [];
-
-  try {
-    const todasRutas = await dbGetAll('rutas');
-    const cadenasMap = new Map((await dbGetAll('cadenas')).map(c => [String(c.id), c.nombre]));
-    for (const r of todasRutas) {
-      const ruta = {
-        ...r,
-        cadenaId: r.cadenaId ?? r.cadenaid ?? null,
-        proximaRevision: r.proximaRevision ?? r.proximarevision ?? null,
-        ultimaRevision: r.ultimaRevision ?? r.ultimorevision ?? null,
-      };
-      if (!ruta.proximaRevision) continue;
-      const dias = diasHastaLocal(ruta.proximaRevision);
-      if (dias === null) continue;
-      if (dias <= 30) {
-        pendientes.push({
-          id: ruta.id,
-          tipo: 'ruta',
-          cadenaId: String(ruta.cadenaId || ''),
-          nombre: cadenasMap.has(String(ruta.cadenaId)) ? `${cadenasMap.get(String(ruta.cadenaId))} · ${ruta.nombre}` : ruta.nombre,
-          cadenaNombre: cadenasMap.get(String(ruta.cadenaId)) || '',
-          rutaNombre: ruta.nombre,
-          detalle: `Ruta ${ruta.nombre} (Cadena ${cadenasMap.get(String(ruta.cadenaId)) || ruta.cadenaId})`,
-          proxima: ruta.proximaRevision,
-          dias,
-          clase: dias < 0 ? 'badge-red' : dias === 0 ? 'badge-red' : 'badge-yellow'
-        });
-      }
-    }
-  } catch(e) { console.warn('Error obteniendo rutas:', e); }
-
-  // 2. Clientes sin cadena (tienen su propia proximaRevision)
-  try {
-    const todosClientes = await dbGetAll('clientes');
-    for (const c of todosClientes) {
-      if (c.esCadena || !c.proximaRevision) continue;
-      const dias = diasHastaLocal(c.proximaRevision);
-      if (dias === null) continue;
-      if (dias <= 30) {
-        pendientes.push({
-          id: c.id,
-          tipo: 'cliente',
-          nombre: c.nombre,
-          detalle: `Cliente: ${c.nombre}`,
-          proxima: c.proximaRevision,
-          dias,
-          clase: dias <= 0 ? 'badge-red' : 'badge-yellow'
-        });
-      }
-    }
-  } catch(e) { console.warn('Error obteniendo clientes:', e); }
-
-  // 3. Puertas sueltas (sin ruta/cadena que las cubra)
-  try {
-    const todasPuertas = await dbGetAll('puertas');
-    const clientesConRuta = new Set(
-      (await dbGetAll('rutas')).map(r => r.clienteId).filter(Boolean)
-    );
-    for (const p of todasPuertas) {
-      if (!p.proximaRevision) continue;
-      // Evitar doble aviso: si su cliente ya tiene ruta, la ruta lo cubre
-      if (clientesConRuta.has(p.clienteId)) continue;
-      const dias = diasHastaLocal(p.proximaRevision);
-      if (dias === null) continue;
-      if (dias > 30) continue;   // no avisar con meses de antelación
-      pendientes.push({
-        id: p.id,
-        tipo: 'puerta',
-        clienteId: p.clienteId || null,
-        nombre: `${p.marca || ''} ${p.modelo || ''}`.trim() + (p.matricula ? ` (${p.matricula})` : ''),
-        detalle: `Puerta${p.tipo ? ' ' + p.tipo : ''}${p.clienteId ? ' · Cliente ' + p.clienteId : ''}`,
-        proxima: p.proximaRevision,
-        dias,
-        clase: dias <= 0 ? 'badge-red' : 'badge-yellow'
-      });
-    }
-  } catch(e) { console.warn('Error obteniendo puertas:', e); }
-
-  return pendientes.sort((a, b) => a.dias - b.dias);
-}
-// �"?�"? Helpers de cadenas y rutas �"?�"?
-async function getAllCadenas() {
-  return await dbGetAll('cadenas');
-}
-
-async function getRutasByCadena(cadenaId) {
-  if (!cadenaId) return [];
-  const rutas = await dbGetAll('rutas');
-  return rutas
-    .map(r => ({
-      ...r,
-      cadenaId: r.cadenaId ?? r.cadenaid ?? null,
-      cadenaid: r.cadenaid ?? r.cadenaId ?? null,
-      proximaRevision: r.proximaRevision ?? r.proximarevision ?? null,
-      proximarevision: r.proximarevision ?? r.proximaRevision ?? null,
-      ultimaRevision: r.ultimaRevision ?? r.ultimorevision ?? null,
-      ultimorevision: r.ultimorevision ?? r.ultimaRevision ?? null
-    }))
-    .filter(r => String(r.cadenaId ?? r.cadenaid) === String(cadenaId));
-}
-// �"?�"? Parser de folio OCR �?' estructura rutas/clientes �"?�"?�"?�"?�"?�"?
 function parseFolioTexto(texto) {
   const rutaRegex = /(?:ruta|RUTA)\s*(?:nº?\.?\s*)?(\d+)/i;
   // Nombre de tienda: "H." o "H-" seguido de nombre (acepta HEDA sin separador)
@@ -1259,33 +1074,43 @@ window.textoCuentaAtrasITV = function(days){
   return `Caduca en <strong>${days}</strong> día${days===1?'':'s'}`;
 };
 
-// �"?�"? Tiendas de una ruta (fuente única de verdad) �"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?
-// Mismo criterio que el formulario HIPERBER: el cliente pertenece a la ruta
-// (rutaId/rutaid) o a la cadena (cadenaId/padreId). Así el panel, las vistas
-// de rutas y el formulario ven exactamente las mismas tiendas.
-window.getTiendasDeRuta = async function(rutaId, cadenaId){
-  if(!rutaId) return [];
-  const clientes=await dbGetAll('clientes');
-  const enCadena=c=>cadenaId && (String(c.cadenaId??c.cadenaid??'')===String(cadenaId) || String(c.padreId??c.padreid??'')===String(cadenaId));
-  const orden=(a,b)=>(a.ordenRuta??a.ordenruta??Infinity)-(b.ordenRuta??b.ordenruta??Infinity) || String(a.nombre||'').localeCompare(String(b.nombre||''),'es');
-  let tiendas=clientes.filter(c=>String(c.rutaId??c.rutaid??'')===String(rutaId) || (enCadena(c) && String(c.rutaId??c.rutaid??'')===String(rutaId)));
-  // Respaldo: si la ruta no tiene clientes vinculados por rutaId pero la cadena
-  // sí tiene tiendas (solo enlazadas por cadena/padre), se muestran igualmente.
-  if(!tiendas.length && cadenaId){
-    tiendas=clientes.filter(enCadena);
+// ── Tablas → tarjetas en móvil ─────────────────────────────────────────────
+// Cada celda recibe su cabecera como data-label y el CSS (≤640px) las muestra como tarjetas
+// apiladas en vez de obligar a deslizar la tabla en horizontal.
+//   · <th data-titulo> elige la columna que hace de título de la tarjeta (por defecto, la primera con cabecera).
+//   · Cabecera vacía + sin botones = columna decorativa (foto): se oculta en la tarjeta.
+//   · Última celda con botones = fila de acciones a todo el ancho.
+//   · <div class="table-wrapper keep-table"> conserva la tabla (formularios con campos editables).
+(function(){
+  const VACIO = /^[—–-]?$/;
+  function etiquetar(){
+    document.querySelectorAll('.table-wrapper:not(.keep-table) table:not(.hiperber-checklist)').forEach(t=>{
+      const ths=[...t.querySelectorAll('thead th')];
+      if(!ths.length) return;
+      const textos=ths.map(h=>h.textContent.trim());
+      let titulo=ths.findIndex(h=>h.hasAttribute('data-titulo'));
+      if(titulo<0) titulo=textos.findIndex(x=>x);
+      t.querySelectorAll('tbody tr').forEach(tr=>{
+        if(tr.dataset.mobTabla===String(tr.children.length)+'|'+tr.textContent.length) return;
+        [...tr.children].forEach((td,i)=>{
+          if(td.tagName!=='TD') return;
+          const colspan=td.colSpan>1;
+          td.setAttribute('data-label',colspan?'':(textos[i]||''));
+          const accion=!!td.querySelector('button,a.btn,.btn')&&i===tr.children.length-1;
+          const decorativa=!colspan&&!textos[i]&&!accion;
+          td.classList.toggle('td-titulo',!colspan&&i===titulo);
+          td.classList.toggle('td-acciones',accion);
+          td.classList.toggle('td-media',decorativa);
+          td.classList.toggle('td-vacio',!colspan&&!accion&&i!==titulo&&VACIO.test(td.textContent.trim())&&!td.querySelector('img,input,select,button'));
+        });
+        tr.dataset.mobTabla=String(tr.children.length)+'|'+tr.textContent.length;
+      });
+    });
   }
-  return tiendas.slice().sort(orden);
-};
-
-// Puertas de una ruta: recorre sus tiendas y adjunta el nombre de cada cliente.
-// Mismo criterio que usa el formulario HIPERBER, así el panel y el formulario
-// ven exactamente las mismas rutas y tiendas.
-window.getPuertasDeRuta = async function(rutaId, cadenaId){
-  const tiendas=await window.getTiendasDeRuta(rutaId, cadenaId);
-  const puertas=[];
-  for(const tienda of tiendas){
-    const lista=await dbGetByIndex('puertas','clienteId',tienda.id);
-    for(const p of lista) puertas.push({...p, clienteNombre:tienda.nombre});
-  }
-  return puertas;
-};
+  let pendiente=false;
+  const programar=()=>{ if(pendiente) return; pendiente=true; setTimeout(()=>{ pendiente=false; try{ etiquetar(); }catch(e){ /* solo estética */ } },30); };
+  document.addEventListener('DOMContentLoaded',()=>{
+    new MutationObserver(programar).observe(document.body,{childList:true,subtree:true});
+    programar();
+  });
+})();

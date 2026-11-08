@@ -1,0 +1,296 @@
+ y <!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#4f46e5">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Localiza Familia">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<title>Localiza Familia</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  html, body { height: 100%; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background:#0f172a; color:#e2e8f0; overflow:hidden; }
+  #app { display:flex; flex-direction:column; height:100vh; height:100dvh; }
+  header { padding: max(10px, env(safe-area-inset-top)) 14px 10px; background:#1e293b; display:flex; align-items:center; gap:10px; box-shadow:0 2px 8px rgba(0,0,0,.4); z-index:1000; }
+  header h1 { font-size:16px; font-weight:700; flex:1; }
+  header .dot { width:10px; height:10px; border-radius:50%; background:#ef4444; flex-shrink:0; }
+  header .dot.on { background:#22c55e; box-shadow:0 0 8px #22c55e; }
+  #map { flex:1; z-index:1; }
+  .sheet { background:#1e293b; padding:12px 14px calc(12px + env(safe-area-inset-bottom)); border-top:1px solid #334155; max-height:45%; overflow-y:auto; }
+  .btn { display:block; width:100%; padding:13px; border:none; border-radius:12px; font-size:15px; font-weight:600; margin-top:8px; cursor:pointer; background:#334155; color:#e2e8f0; }
+  .btn.primary { background:#4f46e5; color:#fff; }
+  .btn.danger { background:#dc2626; color:#fff; }
+  .btn:disabled { opacity:.5; }
+  input, select { width:100%; padding:12px; border-radius:10px; border:1px solid #475569; background:#0f172a; color:#e2e8f0; font-size:15px; margin-top:8px; }
+  .card { background:#0f172a; border:1px solid #334155; border-radius:12px; padding:10px 12px; margin-top:8px; }
+  .card .nombre { font-weight:700; font-size:15px; }
+  .card .meta { font-size:12px; color:#94a3b8; margin-top:2px; }
+  .estado { display:inline-block; font-size:11px; font-weight:700; padding:2px 8px; border-radius:99px; margin-top:6px; }
+  .estado.llego { background:#14532d; color:#4ade80; }
+  .estado.camino { background:#1e3a5f; color:#60a5fa; }
+  .estado.sin { background:#3f3f46; color:#a1a1aa; }
+  .muted { color:#94a3b8; font-size:13px; margin-top:6px; }
+  .toast { position:fixed; left:50%; bottom:90px; transform:translateX(-50%); background:#22c55e; color:#052e16; font-weight:700; padding:14px 22px; border-radius:14px; z-index:5000; box-shadow:0 6px 20px rgba(0,0,0,.5); display:none; max-width:90vw; text-align:center; }
+  .modal { position:fixed; inset:0; background:rgba(0,0,0,.7); z-index:4000; display:none; align-items:center; justify-content:center; padding:20px; }
+  .modal .box { background:#1e293b; border-radius:16px; padding:22px; width:100%; max-width:380px; max-height:85vh; overflow-y:auto; }
+  .modal h2 { font-size:18px; margin-bottom:4px; }
+  .hidden { display:none !important; }
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <div class="dot" id="connDot"></div>
+    <h1 id="titulo">Localiza Familia</h1>
+    <button class="btn" style="width:auto;padding:8px 14px;margin:0" onclick="logout()">Salir</button>
+  </header>
+  <div id="map"></div>
+  <div class="sheet" id="panel"></div>
+</div>
+
+<div class="modal" id="modalLogin">
+  <div class="box">
+    <h2>Bienvenida 👋</h2>
+    <p class="muted">Entra con el código que acordó tu familia.</p>
+    <input id="inCod" placeholder="Código de familia (ej: MI-FAMILIA-2024)" autocapitalize="characters">
+    <select id="inRol">
+      <option value="padre">Soy el padre / madre (veo y marco destinos)</option>
+      <option value="hija">Soy hija (comparto mi ubicación)</option>
+    </select>
+    <input id="inNombre" placeholder="Tu nombre (para las hijas)" class="hidden">
+    <button class="btn primary" onclick="entrar()">Entrar</button>
+  </div>
+</div>
+
+<div class="modal" id="modalDestino">
+  <div class="box">
+    <h2>Marcar destino 🎯</h2>
+    <p class="muted">Busca la dirección, o mantén pulsado un punto del mapa.</p>
+    <input id="inDir" placeholder="Dirección: calle, ciudad...">
+    <button class="btn primary" onclick="buscarDireccion()">Buscar dirección</button>
+    <button class="btn" onclick="usarCentroMapa()">Usar el centro del mapa</button>
+    <button class="btn" onclick="cerrarModal('modalDestino')">Cancelar</button>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+// ====== CONFIGURACIÓN: pega aquí los datos de tu NUEVO proyecto Supabase ======
+const SUPABASE_URL = 'PON_AQUI_TU_URL';
+const SUPABASE_KEY = 'PON_AQUI_TU_ANON_KEY';
+const RADIO_LLEGADA = 150; // metros
+
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+let rol=null, nombre='', familia='', miId=null;
+let marcadores={}, destinoMarker=null, watchId=null, ultimoEnvio=0;
+let destino=null, avisadas={};
+const lineas = {};
+
+const map = L.map('map').setView([40.4168,-3.7038], 6);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19, attribution:'© OpenStreetMap'}).addTo(map);
+
+function toast(msg){ const t=document.getElementById('toast'); t.textContent=msg; t.style.display='block'; setTimeout(()=>t.style.display='none',5000); if('vibrate' in navigator) navigator.vibrate([200,100,200]); }
+function cerrarModal(id){ document.getElementById(id).style.display='none'; }
+function abrirModal(id){ document.getElementById(id).style.display='flex'; }
+function notify(titulo, cuerpo){ if('Notification' in window && Notification.permission==='granted') new Notification(titulo,{body:cuerpo}); }
+function dist(la1,lo1,la2,lo2){
+  const R=6371000, dLa=(la2-la1)*Math.PI/180, dLo=(lo2-lo1)*Math.PI/180;
+  const a=Math.sin(dLa/2)**2+Math.cos(la1*Math.PI/180)*Math.cos(la2*Math.PI/180)*Math.sin(dLo/2)**2;
+  return 2*R*Math.atan2(Math.sqrt(a),Math.sqrt(1-a));
+}
+
+// ---------- LOGIN ----------
+document.getElementById('inRol').addEventListener('change', e=>{
+  document.getElementById('inNombre').classList.toggle('hidden', e.target.value!=='hija');
+});
+async function entrar(){
+  familia = document.getElementById('inCod').value.trim().toUpperCase();
+  rol = document.getElementById('inRol').value;
+  nombre = document.getElementById('inNombre').value.trim() || (rol==='padre'?'Padre':'Hija');
+  if(!familia){ alert('Escribe el código de familia'); return; }
+  const {data,error} = await sb.from('miembros').insert({familia, rol, nombre}).select().single();
+  if(error){ alert('Error de conexión. Revisa la configuración de Supabase. Detalle: '+error.message); return; }
+  localStorage.setItem('lf_cod',familia); localStorage.setItem('lf_rol',rol); localStorage.setItem('lf_nombre',nombre);
+  miId = data.id;
+  iniciar();
+}
+function logout(){ localStorage.clear(); location.reload(); }
+async function autologin(){
+  familia=localStorage.getItem('lf_cod'); rol=localStorage.getItem('lf_rol'); nombre=localStorage.getItem('lf_nombre');
+  if(!familia){ abrirModal('modalLogin'); return; }
+  const {data,error} = await sb.from('miembros').select().eq('familia',familia).eq('rol',rol).eq('nombre',nombre).limit(1);
+  if(!error && data && data[0]){ miId=data[0].id; iniciar(); }
+  else { abrirModal('modalLogin'); }
+}
+
+// ---------- INICIO ----------
+async function iniciar(){
+  cerrarModal('modalLogin');
+  document.getElementById('titulo').textContent = (rol==='padre'?'👁️ ':'📍 ') + nombre;
+  if('Notification' in window && Notification.permission==='default') Notification.requestPermission();
+  await cargarDestino();
+  suscribirse();
+  if(rol==='hija'){ iniciarGPS(); document.getElementById('panel').innerHTML = '<div class="card"><span class="nombre">📍 Compartiendo ubicación</span><div class="meta">Mantén la app abierta para que papá/mamá te vea.</div></div><button class="btn" onclick="detenerGPS()">Detener compartir</button><button class="btn" onclick="iniciarGPS()">Reanudar compartir</button>'; }
+  else { await refrescarMiembros(); setInterval(refrescarMiembros, 15000); }
+  setInterval(comprobarLlegadas, 10000);
+  comprobarConexion();
+}
+function comprobarConexion(){
+  sb.from('miembros').select('id').eq('familia',familia).limit(1).then(r=>{
+    document.getElementById('connDot').classList.toggle('on', !r.error);
+  });
+}
+
+// ---------- GPS (hija) ----------
+function iniciarGPS(){
+  if(!navigator.geolocation){ toast('Tu navegador no soporta geolocalización'); return; }
+  if(watchId) return;
+  watchId = navigator.geolocation.watchPosition(async pos=>{
+    const {latitude:lat, longitude:lng, accuracy} = pos.coords;
+    ponerMarkerYo(lat,lng);
+    const ahora = Date.now();
+    if(ahora-ultimoEnvio > 8000){
+      ultimoEnvio = ahora;
+      await sb.from('miembros').update({ultima_ubicacion:{lat,lng,acc:accuracy,ts:new Date().toISOString()}, activo_hasta:new Date(Date.now()+120000).toISOString()}).eq('id',miId);
+      await sb.from('historial').insert({familia, nombre, lat, lng, ts:new Date().toISOString()});
+    }
+  }, err=>{ toast('No se puede obtener tu ubicación: '+err.message); },
+  {enableHighAccuracy:true, maximumAge:5000, timeout:15000});
+  toast('📍 Compartiendo tu ubicación');
+}
+function detenerGPS(){
+  if(watchId){ navigator.geolocation.clearWatch(watchId); watchId=null; toast('Compartimiento detenido'); }
+}
+function ponerMarkerYo(lat,lng){
+  if(window._mkYo) window._mkYo.setLatLng([lat,lng]);
+  else { window._mkYo = L.circleMarker([lat,lng],{radius:10,color:'#fff',weight:2,fillColor:'#4f46e5',fillOpacity:1}).addTo(map).bindPopup('Tú'); map.setView([lat,lng],15); }
+}
+
+// ---------- PADRE ----------
+async function refrescarMiembros(){
+  if(rol!=='padre') return;
+  const {data} = await sb.from('miembros').select().eq('familia',familia).neq('rol','padre');
+  if(!data) return;
+  const panel = document.getElementById('panel');
+  let html = '<div style="display:flex;gap:8px"><button class="btn primary" style="margin-top:0" onclick="abrirModal(\'modalDestino\')">🎯 Marcar destino</button><button class="btn" style="margin-top:0;width:auto;padding:13px 16px" onclick="verHistorial()">🕒</button></div>';
+  if(destino) html += `<div class="card">🎯 <b>Destino:</b> ${destino.nombre}<div class="meta">Radio de llegada: ${destino.radio} m</div><button class="btn danger" style="padding:8px" onclick="borrarDestino()">Quitar destino</button></div>`;
+  html += data.map(m=>{
+    const u = m.ultima_ubicacion;
+    const activo = m.activo_hasta && new Date(m.activo_hasta) > new Date();
+    let estado = '<span class="estado sin">Sin señal</span>';
+    if(u && activo){
+      if(destino){
+        const d = dist(u.lat,u.lng,destino.lat,destino.lng);
+        estado = d < destino.radio ? '<span class="estado llego">✅ ¡Llegó!</span>' : `<span class="estado camino">🚶 A ${Math.round(d)} m</span>`;
+      } else estado = '<span class="estado camino">📍 Compartiendo</span>';
+    }
+    const meta = u ? new Date(u.ts).toLocaleTimeString('es') + (u.acc?` (±${Math.round(u.acc)} m)`:'') : 'nunca';
+    return `<div class="card" onclick="centrar('${m.id}')"><span class="nombre">${m.nombre}</span> ${estado}<div class="meta">Última señal: ${meta}</div></div>`;
+  }).join('');
+  if(!data.length) html += '<p class="muted">Aún no hay hijas conectadas. Pídeles que abran la app y entren con el código <b>'+familia+'</b>.</p>';
+  panel.innerHTML = html;
+  data.forEach(m=>{ if(m.ultima_ubicacion) ponerMarkerHija(m.id, m.nombre, m.ultima_ubicacion); });
+  comprobarConexion();
+}
+function ponerMarkerHija(id,nombre,u){
+  if(marcadores[id]) marcadores[id].setLatLng([u.lat,u.lng]);
+  else marcadores[id] = L.circleMarker([u.lat,u.lng],{radius:11,color:'#fff',weight:2,fillColor:'#f59e0b',fillOpacity:1}).addTo(map).bindPopup(nombre);
+  if(destino) dibujarLinea(id,u);
+}
+function centrar(id){ const mk=marcadores[id]; if(mk){ map.setView(mk.getLatLng(),16); mk.openPopup(); } }
+function dibujarLinea(id,u){
+  if(!destino) return;
+  const pts=[[u.lat,u.lng],[destino.lat,destino.lng]];
+  if(lineas[id]) lineas[id].setLatLngs(pts); else lineas[id]=L.polyline(pts,{color:'#4f46e5',dashArray:'6 8'}).addTo(map);
+}
+
+// ---------- DESTINO ----------
+async function cargarDestino(){
+  const {data} = await sb.from('destinos').select().eq('familia',familia).order('creado',{ascending:false}).limit(1);
+  if(data && data[0]){ destino = data[0]; pintarDestino(); }
+}
+function pintarDestino(){
+  if(destinoMarker) map.removeLayer(destinoMarker);
+  destinoMarker = L.circle([destino.lat,destino.lng],{radius:destino.radio,color:'#22c55e',fillColor:'#22c55e',fillOpacity:.2}).addTo(map).bindPopup('🎯 '+destino.nombre);
+}
+async function buscarDireccion(){
+  const q = document.getElementById('inDir').value.trim();
+  if(!q) return;
+  try{
+    const r = await fetch('https://nominatim.openstreetmap.org/search?format=json&limit=1&q='+encodeURIComponent(q));
+    const j = await r.json();
+    if(!j.length){ toast('No se encontró esa dirección'); return; }
+    fijarDestino(parseFloat(j[0].lat), parseFloat(j[0].lon), j[0].display_name.split(',').slice(0,2).join(','));
+  }catch(e){ toast('Error buscando la dirección'); }
+}
+function usarCentroMapa(){ fijarDestino(map.getCenter().lat, map.getCenter().lng, 'Punto del mapa'); }
+async function fijarDestino(lat,lng,nombreDest){
+  destino = {familia, lat, lng, radio:RADIO_LLEGADA, nombre:nombreDest, creado:new Date().toISOString()};
+  const {data,error} = await sb.from('destinos').insert(destino).select().single();
+  if(!error && data) destino = data;
+  cerrarModal('modalDestino');
+  pintarDestino(); map.setView([lat,lng],15);
+  toast('🎯 Destino marcado');
+  refrescarMiembros();
+}
+async function borrarDestino(){
+  if(destino && destino.id) await sb.from('destinos').delete().eq('id',destino.id);
+  if(destinoMarker){ map.removeLayer(destinoMarker); destinoMarker=null; }
+  Object.values(lineas).forEach(l=>map.removeLayer(l));
+  Object.keys(lineas).forEach(k=>delete lineas[k]);
+  destino=null; refrescarMiembros();
+}
+map.on('contextmenu', e=>{ if(rol==='padre') fijarDestino(e.latlng.lat,e.latlng.lng,'Punto del mapa'); });
+// en móvil: doble toque largo ≈ mantener pulsado también funciona con contextmenu en la mayoría de navegadores
+
+// ---------- LLEGADAS ----------
+async function comprobarLlegadas(){
+  if(rol!=='padre' || !destino) return;
+  const {data} = await sb.from('miembros').select().eq('familia',familia).neq('rol','padre');
+  (data||[]).forEach(m=>{
+    const u=m.ultima_ubicacion; if(!u) return;
+    const llego = dist(u.lat,u.lng,destino.lat,destino.lng) < destino.radio;
+    if(llego && !avisadas[m.id]){
+      avisadas[m.id]=true;
+      toast('✅ ¡'+m.nombre+' ha llegado a '+destino.nombre+'!');
+      notify('¡Llegada!', m.nombre+' llegó a '+destino.nombre);
+    }
+    if(!llego && avisadas[m.id]) avisadas[m.id]=false;
+  });
+}
+
+// ---------- TIEMPO REAL ----------
+function suscribirse(){
+  sb.channel('lf-'+miId)
+    .on('postgres_changes',{event:'*',schema:'public',table:'miembros',filter:'familia=eq.'+familia},()=>{ refrescarMiembros(); })
+    .on('postgres_changes',{event:'*',schema:'public',table:'destinos',filter:'familia=eq.'+familia},()=>{ cargarDestino().then(refrescarMiembros); })
+    .subscribe();
+}
+
+// ---------- HISTORIAL ----------
+async function verHistorial(){
+  const {data} = await sb.from('historial').select().eq('familia',familia).order('ts',{ascending:false}).limit(50);
+  let html='<h2 style="font-size:16px">🕒 Últimas posiciones</h2>';
+  html += (data||[]).map(h=>`<div class="card"><b>${h.nombre}</b> — ${new Date(h.ts).toLocaleString('es')}<div class="meta">${h.lat.toFixed(5)}, ${h.lng.toFixed(5)}</div></div>`).join('');
+  if(!data || !data.length) html += '<p class="muted">Sin datos todavía.</p>';
+  document.getElementById('panel').innerHTML = html + '<button class="btn" onclick="refrescarMiembros()">← Volver</button>';
+}
+
+autologin();
+
+// Service worker (instalable)
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => navigator.serviceWorker.register('./sw.js').catch(()=>{}));
+}
+</script>
+</body>
+</html>

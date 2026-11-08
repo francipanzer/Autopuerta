@@ -164,7 +164,99 @@
   // Filas {id,nombre,…} de todos los tipos (puertas + servicios) ya cargados: para almacén, manuales, partes…
   async function filasDB() { await cargar().catch(() => {}); return filas({ servicios: true }); }
 
-  window.TiposPuerta = { lista, resolver, nombre, opciones, filas, filasDB, cargar, recargar, norm, esExcluido: esTipoExcluido, BASE };
+
+  // ═══════════════════════════════════════════════════════════
+  //  PERIODICIDAD DE REVISIONES (tabla de periodicidades por uso/criterio)
+  //  Única fuente: la usan fichas de puertas, revisiones, avisos y la base de datos.
+  //
+  //    Garaje y residencial   nº vehículos ≤ 5 ........ 12 meses
+  //                           5 < nº vehículos ≤ 50 .... 6 meses
+  //                           nº vehículos > 50 ........ 4 meses
+  //                           uso estacional ........... 12 meses
+  //    Industrial             todas excepto rápidas .... 6 meses
+  //                           puertas rápidas .......... 4 meses
+  //    Comercial              ≤ 10 ciclos/día .......... 6 meses
+  //                           > 10 ciclos/día .......... 4 meses
+  //                           cierres / enrollables .... 12 meses
+  // ═══════════════════════════════════════════════════════════
+  const USOS = {
+    garaje:     'Garaje y residencial',
+    industrial: 'Industrial',
+    comercial:  'Comercial'
+  };
+  // Uso más habitual de cada tipo, para cuando la puerta aún no tiene uso indicado
+  const USO_POR_TIPO = {
+    seccional: 'industrial', rapida: 'industrial', rapida_apilable: 'industrial',
+    corredera: 'comercial', corredera_cristal: 'comercial', enrollable: 'comercial',
+    basculante: 'garaje', barrera: 'garaje', cortafuegos: 'industrial'
+  };
+  const FRECUENCIA_DEFECTO = 12;     // servicios y tipos sin regla en la tabla
+
+  const claveTipo = tipo => { const t = resolver(tipo); return t ? t.key : ''; };
+  const esRapida = tipo => ['rapida', 'rapida_apilable'].includes(claveTipo(tipo));
+  const esEnrollable = tipo => claveTipo(tipo) === 'enrollable';
+  const entero = v => { const n = parseInt(v, 10); return Number.isFinite(n) && n >= 0 ? n : null; };
+
+  function usoPuerta(puerta) {
+    const u = String((puerta && puerta.uso) || '').toLowerCase();
+    if (USOS[u]) return u;
+    return USO_POR_TIPO[claveTipo(puerta && (puerta.tipo || puerta.tipoPuerta))] || '';
+  }
+
+  // → { meses, uso, motivo, completo }   (completo=false: falta un dato y se ha supuesto)
+  function periodicidad(puerta) {
+    const p = puerta || {};
+    const tipo = p.tipo || p.tipoPuerta;
+    const uso = usoPuerta(p);
+    if (!uso) return { meses: FRECUENCIA_DEFECTO, uso: '', motivo: 'Sin regla en la tabla: 12 meses', completo: true };
+
+    if (uso === 'garaje') {
+      if (p.usoEstacional === true || p.usoestacional === true)
+        return { meses: 12, uso, motivo: 'Garaje · uso estacional', completo: true };
+      const n = entero(p.nVehiculos ?? p.nvehiculos);
+      if (n === null) return { meses: 6, uso, motivo: 'Garaje · sin nº de vehículos (se asumen 6 meses)', completo: false };
+      if (n <= 5)  return { meses: 12, uso, motivo: 'Garaje · hasta 5 vehículos', completo: true };
+      if (n <= 50) return { meses: 6,  uso, motivo: 'Garaje · de 6 a 50 vehículos', completo: true };
+      return { meses: 4, uso, motivo: 'Garaje · más de 50 vehículos', completo: true };
+    }
+    if (uso === 'industrial') {
+      return esRapida(tipo)
+        ? { meses: 4, uso, motivo: 'Industrial · puerta rápida', completo: true }
+        : { meses: 6, uso, motivo: 'Industrial · todas excepto rápidas', completo: true };
+    }
+    // comercial
+    if (esEnrollable(tipo)) return { meses: 12, uso, motivo: 'Comercial · cierre / puerta enrollable', completo: true };
+    const c = entero(p.ciclosDia ?? p.ciclosdia);
+    if (c === null) return { meses: 6, uso, motivo: 'Comercial · sin ciclos/día (se asumen 6 meses)', completo: false };
+    return c > 10
+      ? { meses: 4, uso, motivo: 'Comercial · más de 10 ciclos/día', completo: true }
+      : { meses: 6, uso, motivo: 'Comercial · hasta 10 ciclos/día', completo: true };
+  }
+
+  const frecuenciaMeses = puerta => periodicidad(puerta).meses;
+
+  const pad2 = n => String(n).padStart(2, '0');
+  const hoyISO = () => { const d = new Date(); return d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate()); };
+
+  // Suma meses a una fecha YYYY-MM-DD sin pasar por UTC (31-ene + 1 mes = 28/29-feb)
+  function sumarMeses(fechaISO, meses) {
+    const m = String(fechaISO || '').slice(0, 10).match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (!m) return null;
+    const total = Number(m[1]) * 12 + (Number(m[2]) - 1) + Number(meses);
+    const anio = Math.floor(total / 12), mes = total % 12;
+    const ultimoDia = new Date(anio, mes + 1, 0).getDate();
+    return anio + '-' + pad2(mes + 1) + '-' + pad2(Math.min(Number(m[3]), ultimoDia));
+  }
+
+  // Próxima revisión de una puerta a partir de la fecha de la última (o de hoy si aún no se ha revisado)
+  function proximaRevision(puerta, ultimaRevision) {
+    return sumarMeses(ultimaRevision || hoyISO(), frecuenciaMeses(puerta));
+  }
+
+  const Periodicidad = { USOS, USO_POR_TIPO, periodicidad, frecuenciaMeses, proximaRevision, sumarMeses, usoPuerta, esRapida, esEnrollable, hoyISO };
+
+  window.Periodicidad = Periodicidad;
+  window.TiposPuerta = { lista, resolver, nombre, opciones, filas, filasDB, cargar, recargar, norm, esExcluido: esTipoExcluido, BASE, Periodicidad };
   // Carga en segundo plano en cuanto exista la base de datos local
   window.addEventListener('load', () => { setTimeout(() => { cargar().catch(() => {}); }, 800); });
   window.addEventListener('autopuerta:sync-state', () => { if (cargado) recargar().catch(() => {}); });

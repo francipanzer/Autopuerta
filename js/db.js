@@ -39,7 +39,6 @@ const TABLA = {
   revisiones:    'revisiones',
   partesTrabajo: 'partes_trabajo',
   albaranes: 'albaranes',
-  cadenas:       'cadenas',
   rutas:         'rutas',
   articulos:     'articulos',
   jornadas:      'jornadas',
@@ -97,7 +96,12 @@ const REN_OUT = {
   estadoTrasRevision:'estadotrasrevision',
   resultadoRev:'resultado',
   observacionesRev:'observaciones',
-  // Clientes
+  // Puertas: periodicidad por uso/criterio · ubicaciones
+  nVehiculos:'nvehiculos',
+  usoEstacional:'usoestacional',
+  ciclosDia:'ciclosdia',
+  clienteOrigenId:'clienteorigenid',
+  // Clientes (esCadena/padreId/cadenaId: campos antiguos, la app ya no los escribe)
   esCadena:'escadena',
   padreId:'padreid',
   cadenaId:'cadenaid',
@@ -122,6 +126,13 @@ const REN_OUT = {
   // Clientes (Sage + geolocalización)
   sageCodigo:'sagecodigo',
   sageDatos:'sagedatos',
+  // Artículos de Sage
+  codigoAlt:'codigoalt',
+  codFamilia:'codfamilia',
+  fechaBaja:'fechabaja',
+  controlStock:'controlstock',
+  sageStock:'sagestock',
+  sageSyncAt:'sagesyncat',
   tecnicoIds:'tecnicoids',
   clienteDireccion:'clientedireccion',
   clienteTelefono:'clientetelefono',
@@ -169,6 +180,10 @@ const REN_IN = {
   estadotrasrevision:'estadoTrasRevision',
   resultado:'resultadoRev',
   observaciones:'observacionesRev',
+ nvehiculos:'nVehiculos',
+  usoestacional:'usoEstacional',
+  ciclosdia:'ciclosDia',
+  clienteorigenid:'clienteOrigenId',
  escadena:'esCadena',
   padreid:'padreId',
   cadenaid:'cadenaId',

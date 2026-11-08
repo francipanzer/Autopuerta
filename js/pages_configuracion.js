@@ -34,11 +34,11 @@ window.render_configuracion = async function(el){
         '</div>'+
         '<div class="config-menu-arrow"><i class="fas fa-chevron-right"></i></div>'+
       '</div>'+
-      '<div class="config-menu-item" draggable="true" onclick="navigateTo(\'cadenas\')">'+
-        '<div class="config-menu-icon"><i class="fas fa-route"></i></div>'+
+      '<div class="config-menu-item" draggable="true" onclick="openConfigPeriodicidad()">'+
+        '<div class="config-menu-icon"><i class="fas fa-calendar-check"></i></div>'+
         '<div class="config-menu-content">'+
-          '<h3>Cadenas y Rutas</h3>'+
-          '<p>Gestión de cadenas de mantenimiento</p>'+
+          '<h3>Periodicidad de revisiones</h3>'+
+          '<p>Tabla de periodicidades y recálculo de todas las puertas</p>'+
         '</div>'+
         '<div class="config-menu-arrow"><i class="fas fa-chevron-right"></i></div>'+
       '</div>'+
@@ -149,6 +149,16 @@ window.render_configuracion = async function(el){
     '</div>';
 
   initConfigMenuDrag(el);
+
+  // Tarjeta «Usuarios y permisos» (solo administración): vive aquí además del wrapper de
+  // auth.js para que aparezca llegue la carga del módulo como llegue (precarga, stub, etc.).
+  if (window.isAdmin && window.isAdmin() && !el.querySelector('.user-management-entry')) {
+    const card = document.createElement('section');
+    card.className = 'card user-management-entry';
+    card.innerHTML = '<div class="card-header"><h3>Usuarios y permisos</h3></div><div class="card-body"><p>Invita al equipo, vincula técnicos a Empleados y administra roles y cuentas.</p><button class="btn btn-primary" type="button" id="openUserManagement"><i class="fas fa-user-shield"></i> Gestionar usuarios</button></div>';
+    el.prepend(card);
+    card.querySelector('#openUserManagement').addEventListener('click', window.openUserManagement);
+  }
 };
 
 /* ── Drag & drop del menú de configuración ───────────────────────── */
@@ -413,7 +423,7 @@ window.openConfigEmpresa=async function(){
     </form>`,
     `<div class="company-footer-btns"><button type="button" class="btn btn-primary" onclick="closeModal()">Cancelar</button>
     <button type="button" class="btn btn-primary" id="saveCompanySettings"><i class="fas fa-save"></i> Guardar datos</button>
-    <button type="button" class="btn btn-primary" id="btn-clearCompanySettings"><i class="fas fa-trash"></i>     Borrar datos</button></div>`);
+    <button type="button" class="btn btn-danger" id="btn-clearCompanySettings"><i class="fas fa-trash"></i>     Borrar datos</button></div>`);
   document.getElementById('btn-clearCompanySettings').addEventListener('click',()=>{
     const form=document.getElementById('companySettingsForm');
     form.querySelectorAll('input').forEach(input=>{input.value='';});
@@ -557,7 +567,7 @@ window.openProveedores = async function(){
         (v.lat ? '<br><small style="color:#16a34a">📍 Con coordenadas — kms automáticos</small>' : '<br><small style="color:#f59e0b">⚠️ Sin coordenadas — kms manuales</small>') +
       '</div>' +
       '<button class="btn btn-outline btn-sm btn-icon" title="Editar" onclick="editProveedor(\'' + escapeHtml(v.id) + '\')"><i class="fas fa-pen"></i></button>' +
-      '<button class="btn btn-outline btn-sm btn-icon" title="Eliminar" onclick="confirmDelete(\'Punto ' + escapeHtml(v.nombre) + '\', ()=>deleteProveedor(\'' + escapeHtml(v.id) + '\'))"><i class="fas fa-trash"></i></button>' +
+      '<button class="btn btn-danger btn-sm btn-icon" title="Eliminar" onclick="confirmDelete(\'Punto ' + escapeHtml(v.nombre) + '\', ()=>deleteProveedor(\'' + escapeHtml(v.id) + '\'))"><i class="fas fa-trash"></i></button>' +
     '</div>').join('')
     : '<p style="color:var(--text-muted)">Aún no hay puntos de recogida. Añade proveedores, talleres o delegaciones donde recojas material.</p>';
 
@@ -978,7 +988,7 @@ window.openConfigInfo = function(){
       'Notificaciones push para incidencias y partes asignados'
     ]},
     { v: 'v1.0–v1.3', fecha: '2026-09-30', items: [
-      'Lanzamiento: clientes, ubicaciones y puertas, partes de trabajo, presupuestos con hoja de medidas, almacén, albaranes, revisiones programadas por cadenas/rutas, incidencias, vehículos e informes de KMs',
+      'Lanzamiento: clientes, ubicaciones y puertas, partes de trabajo, presupuestos con hoja de medidas, almacén, albaranes, revisiones por cliente, ruta y ubicación, incidencias, vehículos e informes de KMs',
       'Instalable como app (PWA), funciona sin cobertura y exporta PDF'
     ]}
   ];
@@ -1078,9 +1088,9 @@ window.openConfigAyuda = function(){
     },
     {
       icon: 'fa-calendar-check', titulo: 'Revisiones programadas',
-      intro: 'Mantenimiento periódico de puertas por cadenas de clientes y rutas.',
+      intro: 'Mantenimiento periódico de puertas: clientes individuales o centrales con varias ubicaciones y rutas.',
       botones: [
-        ['Cadenas y rutas', 'Estructura de clientes en cadena con rutas y orden de visita; cada puerta tiene su frecuencia de revisión (meses) según su tipo.'],
+        ['Centrales, ubicaciones y rutas', 'Un cliente central tiene varias ubicaciones (naves) con sus puertas; las rutas agrupan ubicaciones y se eligen con casillas. La periodicidad de cada puerta sale de la tabla por uso y criterio.'],
         ['Registrar revisión', 'Desde la ruta o el cliente: formulario con checklist por tipo de puerta, resultado, fotos y firmas. Genera el PDF de la revisión.'],
         ['Optimizar ruta', 'Reordena las tiendas de la ruta por proximidad.'],
         ['Informe de revisiones', 'PDF del mantenimiento realizado por ruta o cliente.']
@@ -1130,7 +1140,7 @@ window.openConfigPlantillasMedidas = async function(){
         '<div style="font-size:12px;color:var(--text-muted)">'+((t.lineItems||[]).length)+' conceptos</div></div>'+
         '<div style="display:flex;gap:6px">'+
           '<button class="btn btn-primary btn-sm" onclick="usarPlantillaMedida(\''+escapeHtml(String(t.id))+'\')"><i class="fas fa-ruler"></i> Usar</button>'+
-          '<button class="btn btn-outline btn-sm btn-icon" title="Eliminar" onclick="borrarPlantillaDesdeConfig(\''+escapeHtml(String(t.id))+'\')"><i class="fas fa-trash"></i></button>'+
+          '<button class="btn btn-danger btn-sm btn-icon" title="Eliminar" onclick="borrarPlantillaDesdeConfig(\''+escapeHtml(String(t.id))+'\')"><i class="fas fa-trash"></i></button>'+
         '</div>'+
       '</div>'
     ).join('') || '<p style="color:var(--text-muted)">No hay plantillas todavía. Crea una desde Presupuestos con el icono de marcador, o pulsa "Nueva plantilla".</p>';

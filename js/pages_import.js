@@ -1,6 +1,6 @@
 
 // ── IMPORTAR CLIENTES DESDE UNA FOTO (folio de rutas) ─────────────────────────
-// Foto -> OCR (Tesseract + preprocesado en js/folio-ocr.js) -> filas editables -> clientes con cadena y ruta.
+// Foto -> OCR (Tesseract + preprocesado en js/folio-ocr.js) -> filas editables -> ubicaciones de un cliente central, con su ruta.
 (function () {
   const esc = s => window.escapeHtml(s);
   const toast = (m, t) => (window.showToast ? window.showToast(m, t) : console.log(m));
@@ -61,8 +61,9 @@
   // ── Coincidencia con clientes existentes ──
   function findExisting(nombre, cadenaId) {
     const k = nk(nombre);
-    if (!k || !st.clientes) return null;
-    return st.clientes.find(c => !c.esCadena && nk(c.nombre) === k && (!cadenaId || !c.cadenaId || String(c.cadenaId) === String(cadenaId))) || null;
+    if (!k || !st.ubicaciones || !cadenaId) return null;
+    const u = st.ubicaciones.find(x => String(x.clienteId) === String(cadenaId) && nk(x.denominacion) === k);
+    return u ? { ...u, nombre: u.denominacion } : null;
   }
 
   function rowHtml(r) {
@@ -78,9 +79,9 @@
         <input type="text" data-f="direccion" value="${esc(r.direccion)}" placeholder="Dirección completa (calle, nº, CP, población)"
           style="flex:2 1 260px;min-width:200px;padding:7px;border:1px solid ${low && !r.direccion ? '#f59e0b' : 'var(--border)'};border-radius:8px;background:var(--surface-alt);color:var(--text);">
         <button type="button" class="btn btn-outline btn-sm" data-act="merge" title="Unir con la fila anterior (cuando el nombre o la dirección salieron partidos)"><i class="fas fa-arrow-up"></i></button>
-        <button type="button" class="btn btn-outline btn-sm" data-act="del" title="Quitar fila"><i class="fas fa-trash"></i></button>
+        <button type="button" class="btn btn-danger btn-sm" data-act="del" title="Quitar fila"><i class="fas fa-trash"></i></button>
       </div>
-      <div data-badge style="margin:4px 0 0 26px;font-size:12px;color:#d97706;${ex || low ? '' : 'display:none;'}">${ex ? 'Ya existe como «' + esc(ex.nombre) + '»: se actualizarán su ruta, cadena y dirección. ' : ''}${low ? 'Lectura dudosa: revísala.' : ''}</div>
+      <div data-badge style="margin:4px 0 0 26px;font-size:12px;color:#d97706;${ex || low ? '' : 'display:none;'}">${ex ? 'Ya existe como «' + esc(ex.nombre) + '»: se actualizarán su ruta y dirección. ' : ''}${low ? 'Lectura dudosa: revísala.' : ''}</div>
     </div>`;
   }
 
@@ -89,13 +90,13 @@
     const ex = findExisting(r.nombre, st.cadenaId);
     const low = r.conf < 60;
     b.style.display = ex || low ? '' : 'none';
-    b.innerHTML = (ex ? 'Ya existe como «' + esc(ex.nombre) + '»: se actualizarán su ruta, cadena y dirección. ' : '') + (low ? 'Lectura dudosa: revísala.' : '');
+    b.innerHTML = (ex ? 'Ya existe como «' + esc(ex.nombre) + '»: se actualizarán su ruta y dirección. ' : '') + (low ? 'Lectura dudosa: revísala.' : '');
   }
 
   function updateCounters() {
     const n = st.rows.filter(r => r.sel && r.nombre.trim()).length;
     const btn = document.getElementById('imp-save');
-    if (btn) { btn.textContent = n ? `Importar ${n} cliente${n === 1 ? '' : 's'}` : 'Importar'; btn.disabled = !n || st.busy; }
+    if (btn) { btn.textContent = n ? `Importar ${n} ubicaci${n === 1 ? 'ón' : 'ones'}` : 'Importar'; btn.disabled = !n || st.busy; }
     const info = document.getElementById('imp-count');
     if (info) info.textContent = st.rows.length ? `${st.rows.length} fila${st.rows.length === 1 ? '' : 's'} detectada${st.rows.length === 1 ? '' : 's'}` : '';
   }
@@ -169,7 +170,7 @@
 
   async function guardar() {
     const cadenaId = document.getElementById('imp-cadena').value;
-    if (!cadenaId) { toast('Elige la cadena a la que pertenecen los clientes', 'error'); document.getElementById('imp-cadena').focus(); return; }
+    if (!cadenaId) { toast('Elige el cliente central al que pertenecen las ubicaciones', 'error'); document.getElementById('imp-cadena').focus(); return; }
     const filas = st.rows.filter(r => r.sel && r.nombre.trim());
     if (!filas.length) { toast('No hay filas marcadas para importar', 'error'); return; }
     const sinRuta = filas.filter(r => !String(r.ruta).trim());
@@ -185,8 +186,8 @@
     saveBtn.textContent = 'Guardando…';
     try {
       const cadena = (st.cadenas || []).find(c => String(c.id) === String(cadenaId));
-      const [clientes, rutasAll] = await Promise.all([window.db.dbGetAll('clientes'), window.db.dbGetAll('rutas')]);
-      const rutasCad = rutasAll.filter(r => String(r.cadenaId ?? r.cadenaid) === String(cadenaId));
+      const [ubicaciones, rutasAll] = await Promise.all([window.db.dbGetAll('ubicaciones'), window.db.dbGetAll('rutas')]);
+      const rutasCad = rutasAll.filter(r => String(r.clienteId) === String(cadenaId));
       const rutaCache = new Map();
       const creadasRutas = [];
 
@@ -197,14 +198,8 @@
         if (rutaCache.has(key)) return rutaCache.get(key);
         let ruta = rutasCad.find(r => n != null ? rutaNum(r.nombre) === n : nk(r.nombre) === nk(t));
         if (!ruta) {
-          const ahora = new Date().toISOString();
           const nombre = n != null ? `RUTA ${n}` : t.toUpperCase();
-          ruta = {
-            id: window.db.nextId('RUT'), nombre, cadenaid: cadenaId, cadenaId: cadenaId,
-            frecuenciameses: 6, frecuenciaMeses: 6, orden: n != null ? parseInt(n, 10) : rutasCad.length + creadasRutas.length + 1,
-            ultimorevision: null, ultimaRevision: null, proximarevision: null, proximaRevision: null,
-            createdat: ahora, updatedat: ahora
-          };
+          ruta = { id: window.db.nextId('RUT'), nombre, clienteId: cadenaId, orden: n != null ? parseInt(n, 10) : rutasCad.length + creadasRutas.length + 1 };
           await window.db.dbPut('rutas', ruta);
           creadasRutas.push(nombre);
           rutasCad.push(ruta);
@@ -216,7 +211,7 @@
       const maxOrden = new Map();
       const ordenSiguiente = (rutaId) => {
         if (!maxOrden.has(rutaId)) {
-          maxOrden.set(rutaId, clientes.filter(c => String(c.rutaId ?? c.rutaid) === String(rutaId)).reduce((m, c) => Math.max(m, c.ordenRuta ?? c.ordenruta ?? 0), 0));
+          maxOrden.set(rutaId, ubicaciones.filter(u => String(u.rutaId) === String(rutaId)).reduce((m, u) => Math.max(m, u.ordenRuta ?? 0), 0));
         }
         const v = maxOrden.get(rutaId) + 1; maxOrden.set(rutaId, v); return v;
       };
@@ -228,41 +223,29 @@
         const nombre = f.nombre.trim().replace(/\s+/g, ' ');
         const direccion = f.direccion.trim().replace(/\s+/g, ' ');
         const k = nk(nombre);
-        const ex = clientes.find(c => !c.esCadena && nk(c.nombre) === k && (!(c.cadenaId ?? c.cadenaid) || String(c.cadenaId ?? c.cadenaid) === String(cadenaId)));
+        const ex = ubicaciones.find(u => String(u.clienteId) === String(cadenaId) && nk(u.denominacion) === k);
         if (ex) {
-          const mismaRuta = String(ex.rutaId ?? ex.rutaid) === String(ruta.id);
-          const upd = { ...ex, cadenaId, rutaId: ruta.id, ordenRuta: mismaRuta && (ex.ordenRuta ?? ex.ordenruta) ? (ex.ordenRuta ?? ex.ordenruta) : ordenSiguiente(ruta.id) };
-          if (direccion) upd.direccion = direccion;
-          await putCliente(upd);
+          const mismaRuta = String(ex.rutaId) === String(ruta.id);
+          const upd = { ...ex, rutaId: ruta.id, ordenRuta: mismaRuta && ex.ordenRuta ? ex.ordenRuta : ordenSiguiente(ruta.id) };
+          if (direccion) { if (direccion !== ex.direccion) { upd.lat = null; upd.lng = null; } upd.direccion = direccion; }
+          await window.db.dbPut('ubicaciones', upd);
           Object.assign(ex, upd);
-          actualizados++; nombresActualizados.push(ex.nombre);
+          actualizados++; nombresActualizados.push(ex.denominacion);
         } else {
-          const nuevo = {
-            id: window.db.nextId('CLI'), tipo: 'empresa', nombre, direccion,
-            esCadena: false, padreId: null, cadenaId, rutaId: ruta.id, ordenRuta: ordenSiguiente(ruta.id)
-          };
-          await putCliente(nuevo);
-          clientes.push({ ...nuevo, __nuevoImport: true });
+          const nuevo = { id: window.db.nextId('UBI'), clienteId: cadenaId, denominacion: nombre, direccion, rutaId: ruta.id, ordenRuta: ordenSiguiente(ruta.id), activa: true };
+          await window.db.dbPut('ubicaciones', nuevo);
+          ubicaciones.push(nuevo);
           creados++;
         }
       }
 
-      // Comprobación real contra Supabase: que lo guardado esté de verdad en la tabla
-      const ids = clientes.filter(c => c.__nuevoImport).map(c => c.id);
-      if (ids.length && navigator.onLine && window.supabaseDB) {
-        const { data: ok, error: chkErr } = await window.supabaseDB.from('clientes').select('id').in('id', ids);
-        if (chkErr) throw chkErr;
-        if ((ok || []).length !== ids.length) throw new Error(`Supabase solo confirma ${(ok || []).length} de ${ids.length} clientes nuevos`);
-      }
-      clientes.forEach(c => { delete c.__nuevoImport; });
-
       const body = document.getElementById('imp-body');
       body.innerHTML = `<div style="padding:8px 4px;line-height:1.6;">
         <h3 style="margin:0 0 10px;color:#16a34a;"><i class="fas fa-circle-check"></i> Importación completada</h3>
-        <div><b>${creados}</b> cliente${creados === 1 ? '' : 's'} nuevo${creados === 1 ? '' : 's'} en la cadena <b>${esc(cadena ? cadena.nombre : '')}</b></div>
-        <div><b>${actualizados}</b> cliente${actualizados === 1 ? '' : 's'} ya existente${actualizados === 1 ? '' : 's'} actualizado${actualizados === 1 ? '' : 's'}${nombresActualizados.length ? ': ' + esc(nombresActualizados.join(', ')) : ''}</div>
+        <div><b>${creados}</b> ubicaci${creados === 1 ? 'ón nueva' : 'ones nuevas'} en <b>${esc(cadena ? cadena.nombre : '')}</b></div>
+        <div><b>${actualizados}</b> ubicaci${actualizados === 1 ? 'ón ya existente actualizada' : 'ones ya existentes actualizadas'}${nombresActualizados.length ? ': ' + esc(nombresActualizados.join(', ')) : ''}</div>
         <div>Rutas creadas: ${creadasRutas.length ? esc(creadasRutas.join(', ')) : 'ninguna (ya existían)'}</div>
-        <div style="color:var(--text-muted);font-size:13px;margin-top:6px;">Los clientes están en la lista de Clientes (por orden alfabético, 20 por página). Búscalos por nombre si no los ves.</div>
+        <div style="color:var(--text-muted);font-size:13px;margin-top:6px;">Las ubicaciones están en la ficha del cliente (Clientes → ${esc(cadena ? cadena.nombre : '')} → Ubicaciones). Sus coordenadas se buscan al ordenar la ruta.</div>
       </div>`;
       document.getElementById('imp-save').style.display = 'none';
       document.getElementById('imp-cancel').textContent = 'Cerrar';
@@ -286,7 +269,7 @@
 
   window.showImportFolioModal = async function () {
     if (st) return;
-    st = { rows: [], cadenas: [], cadenaId: '', clientes: [], rutas: [], loaded: false, busy: false, worker: null, thumbUrl: null };
+    st = { rows: [], cadenas: [], ubicaciones: [], cadenaId: '', clientes: [], rutas: [], loaded: false, busy: false, worker: null, thumbUrl: null };
     try {
       await abrirVentana();
     } catch (e) {
@@ -300,14 +283,15 @@
 
   async function abrirVentana() {
     const cadenas = [];
-    window.db.dbGetAll('clientes').then(c => { if (st) { st.clientes = c; renderRows(); } }).catch(() => {});
-    window.db.dbGetAll('cadenas').then(list => {
+    window.db.dbGetAll('ubicaciones').then(u => { if (st) { st.ubicaciones = u; renderRows(); } }).catch(() => {});
+    window.db.dbGetAll('clientes').then(all => {
       if (!st) return;
+      const list = all.filter(c => c.central === true);
       list.sort((a, b) => String(a.nombre).localeCompare(String(b.nombre), 'es'));
       st.cadenas = list;
       const sel = document.getElementById('imp-cadena');
-      if (sel) sel.innerHTML = '<option value="">— Elige una cadena —</option>' + list.map(c => `<option value="${esc(c.id)}">${esc(c.nombre)}</option>`).join('');
-    }).catch(e => { console.error(e); toast('No se pudieron cargar las cadenas', 'error'); });
+      if (sel) sel.innerHTML = '<option value="">— Elige el cliente central —</option>' + list.map(c => `<option value="${esc(c.id)}">${esc(c.nombre)}</option>`).join('');
+    }).catch(e => { console.error(e); toast('No se pudieron cargar los clientes', 'error'); });
 
     const overlay = document.createElement('div');
     overlay.id = 'imp-overlay';
@@ -319,12 +303,12 @@
           <button type="button" id="imp-x" class="btn btn-outline btn-sm" title="Cerrar"><i class="fas fa-xmark"></i></button>
         </div>
         <div id="imp-body" style="padding:16px 20px;overflow-y:auto;flex:1;min-height:0;">
-          <p style="margin:0 0 12px;color:var(--text-muted);font-size:13px;">Elige la cadena, carga la foto del folio y revisa lo leído: solo se toman el nombre y la dirección de cada centro. Todo es editable antes de importar.</p>
+          <p style="margin:0 0 12px;color:var(--text-muted);font-size:13px;">Elige el cliente central, carga la foto del folio y revisa lo leído: cada fila pasa a ser una ubicación del cliente (solo se toman nombre, dirección y ruta). Todo es editable antes de importar.</p>
           <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end;margin-bottom:12px;">
             <div style="flex:1 1 240px;">
-              <label style="font-weight:600;display:block;margin-bottom:4px;">Cadena *</label>
+              <label style="font-weight:600;display:block;margin-bottom:4px;">Cliente central *</label>
               <select id="imp-cadena" style="width:100%;padding:9px;border:1px solid var(--border);border-radius:8px;background:var(--surface-alt);color:var(--text);">
-                <option value="">— Elige una cadena —</option>
+                <option value="">— Elige el cliente central —</option>
                 ${cadenas.map(c => `<option value="${esc(c.id)}">${esc(c.nombre)}</option>`).join('')}
               </select>
             </div>
@@ -379,7 +363,7 @@
       if (st.cadenaId) {
         try {
           const rutas = await window.db.dbGetAll('rutas');
-          rutas.filter(r => String(r.cadenaId ?? r.cadenaid) === String(st.cadenaId))
+          rutas.filter(r => String(r.clienteId) === String(st.cadenaId))
             .sort((a, b) => (a.orden ?? 0) - (b.orden ?? 0))
             .forEach(r => { const o = document.createElement('option'); o.value = rutaNum(r.nombre) || r.nombre; o.label = r.nombre; dl.appendChild(o); });
         } catch (_) {}
@@ -491,7 +475,7 @@ window.renderManualesList = async function(){
       '<td>'+new Date(m.createdAt).toLocaleDateString('es-ES')+'</td>'+
       '<td class="actions-cell">'+
         '<button class="btn btn-outline btn-sm" onclick="verManual(\''+m.id+'\')"><i class="fas fa-eye"></i> Ver</button>'+
-        '<button class="btn btn-outline btn-sm btn-icon" onclick="eliminarManual(\''+m.id+'\')"><i class="fas fa-trash"></i></button>'+
+        '<button class="btn btn-danger btn-sm btn-icon" onclick="eliminarManual(\''+m.id+'\')"><i class="fas fa-trash"></i></button>'+
       '</td></tr>';
   }).join('') || '<tr><td colspan="5" style="text-align:center;padding:30px;color:var(--text-muted)">Sin manuales</td></tr>';
 };
@@ -869,7 +853,7 @@ window.__guardarClientesImportados = async function(){
             sageCodigo: fila.sageCodigo || null,
             lat: coords ? coords.lat : null,
             lng: coords ? coords.lng : null,
-            esCadena: false,
+            central: false,
             updatedAt: new Date().toISOString()
           });
           creados++;

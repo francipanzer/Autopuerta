@@ -729,7 +729,7 @@ window.HOJA_MEDIDAS = (function () {
         b.className = 'hme-nudge';
         b.innerHTML = {up:'&#9650;', down:'&#9660;', left:'&#9664;', right:'&#9654;'}[dir];
         b.title = 'Mover ' + dir;
-        b.style.cssText = 'position:absolute;width:16px;height:16px;line-height:14px;font-size:9px;padding:0;border:1px solid #0284c7;background:#e0f2fe;color:#0c4a6e;border-radius:3px;cursor:pointer;z-index:5;' +
+        b.style.cssText = 'position:absolute;width:16px;height:16px;line-height:14px;font-size:9px;padding:0;border:1px solid #15803d;background:#16a34a;color:#fff;border-radius:3px;cursor:pointer;z-index:5;' +
           (dir==='up' ? 'top:-9px;left:calc(50% - 8px);' : dir==='down' ? 'bottom:-9px;left:calc(50% - 8px);' : dir==='left' ? 'left:-9px;top:calc(50% - 8px);' : 'right:-9px;top:calc(50% - 8px);');
         b.addEventListener('pointerdown', ev => { ev.preventDefault(); ev.stopPropagation(); });
         b.addEventListener('click', ev => {

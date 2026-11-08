@@ -5,7 +5,7 @@ const HELP_GUIDES = [
   { page: 'presupuestos', title: 'Solicitudes de material y presupuestos', roles: ['admin', 'technician'], text: 'Los técnicos envían solicitudes con cliente, artículos y cantidades; no ven precios. Oficina revisa cada solicitud y la convierte en presupuesto para completar precios y enviarlo al cliente.' },
   { page: 'informesKms', title: 'Informes KMs', roles: ['admin', 'technician'], text: 'El kilometraje se calcula a partir de los partes de trabajo. El informe permite consultar y exportar los kilómetros de los vehículos del equipo.' },
   { page: 'medidas', title: 'Tomar medidas', roles: ['admin', 'technician'], text: 'Elige el tipo de puerta, rellena la hoja de medidas sobre el esquema, añade fotos si es necesario y guarda: la medición llega a administración. Solo administración puede eliminar mediciones.' },
-  { page: 'revisionesProgramadas', title: 'Revisiones programadas', roles: ['admin', 'technician'], text: 'Consulta las revisiones por cadena, ruta y puerta. Los técnicos pueden registrar el resultado de una revisión; solo administración cambia la programación.' },
+  { page: 'revisionesProgramadas', title: 'Revisiones programadas', roles: ['admin', 'technician'], text: 'Consulta las revisiones por cliente, ruta, ubicación y puerta. Los técnicos pueden registrar el resultado de una revisión; solo administración cambia la programación.' },
   { page: 'almacen', title: 'Almacén', roles: ['admin', 'technician'], text: 'Consulta artículos y existencias. A los técnicos se les ocultan precios, costes y controles de edición.' },
   { page: 'tableros', title: 'Tableros', roles: ['admin'], text: 'Organiza tareas en columnas. Crea tarjetas, asígnalas y muévelas entre estados arrastrándolas.' },
   { page: 'albaranes', title: 'Albaranes', roles: ['admin', 'technician'], text: 'Administración crea y asigna albaranes sin importes a los técnicos responsables. Los técnicos solo consultan los que se les han asignado y pueden obtener el PDF para mostrarlo y recoger la firma del cliente al finalizar la obra.' },
@@ -87,6 +87,23 @@ function isPasswordRecovery() {
   return location.hash.includes('type=recovery');
 }
 
+// Ojito mostrar/ocultar contraseña: activa los botones .password-eye dentro de "root"
+function initPasswordEyes(root) {
+  (root || document).querySelectorAll('.password-eye').forEach(button => {
+    const input = document.getElementById(button.dataset.eyeFor);
+    if (!input) return;
+    button.addEventListener('click', () => {
+      const visible = input.type === 'text';
+      input.type = visible ? 'password' : 'text';
+      button.innerHTML = visible ? '<i class="fas fa-eye"></i>' : '<i class="fas fa-eye-slash"></i>';
+      button.title = visible ? 'Mostrar contraseña' : 'Ocultar contraseña';
+      button.setAttribute('aria-label', button.title);
+      input.focus({ preventScroll: true });
+    });
+  });
+}
+window.initPasswordEyes = initPasswordEyes;
+
 function renderPasswordRecovery() {
   const screen = document.getElementById('authScreen');
   screen.hidden = false;
@@ -98,11 +115,12 @@ function renderPasswordRecovery() {
       <p class="auth-intro">Elige una contraseña nueva de al menos 12 caracteres.</p>
       <div id="authError" class="auth-error" role="alert" hidden></div>
       <form id="recoveryForm" class="auth-form">
-        <label>Nueva contraseña<input id="recoveryPassword" type="password" autocomplete="new-password" minlength="12" required></label>
-        <label>Repite la contraseña<input id="recoveryPasswordConfirm" type="password" autocomplete="new-password" minlength="12" required></label>
+        <label>Nueva contraseña<div class="password-wrap"><input id="recoveryPassword" type="password" autocomplete="new-password" minlength="12" required><button type="button" class="password-eye" data-eye-for="recoveryPassword" title="Mostrar contraseña" aria-label="Mostrar contraseña"><i class="fas fa-eye"></i></button></div></label>
+        <label>Repite la contraseña<div class="password-wrap"><input id="recoveryPasswordConfirm" type="password" autocomplete="new-password" minlength="12" required><button type="button" class="password-eye" data-eye-for="recoveryPasswordConfirm" title="Mostrar contraseña" aria-label="Mostrar contraseña"><i class="fas fa-eye"></i></button></div></label>
         <button class="btn btn-primary" type="submit">Guardar contraseña</button>
       </form>
     </div>`;
+  initPasswordEyes(screen);
   screen.querySelector('#recoveryForm').addEventListener('submit', async event => {
     event.preventDefault();
     const password = screen.querySelector('#recoveryPassword').value;
@@ -153,13 +171,15 @@ function renderAuthScreen(needsBootstrap, notice = '') {
       ` : `
         <form id="loginForm" class="auth-form">
           <label>Correo electrónico<input id="loginEmail" type="email" autocomplete="username" required></label>
-          <label>Contraseña<input id="loginPassword" type="password" autocomplete="current-password" required></label>
+          <label>Contraseña<div class="password-wrap"><input id="loginPassword" type="password" autocomplete="current-password" required><button type="button" class="password-eye" data-eye-for="loginPassword" title="Mostrar contraseña" aria-label="Mostrar contraseña"><i class="fas fa-eye"></i></button></div></label>
           <button class="btn btn-primary" type="submit">Entrar</button>
           <button class="auth-link" type="button" id="resetPassword">He olvidado mi contraseña</button>
         </form>
       `}
       <p class="auth-footer">Acceso exclusivo para miembros activos del equipo.</p>
     </div>`;
+
+  initPasswordEyes(screen);
 
   if (needsBootstrap) {
     screen.querySelector('#bootstrapForm').addEventListener('submit', async event => {
@@ -446,7 +466,7 @@ window.renderTechnicianWarehouse = async function(container) {
   container.innerHTML = `
     <div class="page-header"><div><h2>Almacén</h2><p>Consulta de referencias y existencias.</p></div></div>
     <div class="search-bar"><input id="techWarehouseSearch" type="search" placeholder="Buscar por referencia o nombre"></div>
-    <div class="card"><div class="table-wrapper"><table><thead><tr><th>Referencia</th><th>Artículo</th><th>Stock</th></tr></thead><tbody id="techWarehouseRows"></tbody></table></div></div>`;
+    <div class="card"><div class="table-wrapper"><table><thead><tr><th>Referencia</th><th data-titulo>Artículo</th><th>Stock</th></tr></thead><tbody id="techWarehouseRows"></tbody></table></div></div>`;
   const paint = () => {
     const query = container.querySelector('#techWarehouseSearch').value.toLocaleLowerCase('es').trim();
     const rows = articles.filter(item => `${item.referencia || ''} ${item.nombre || ''}`.toLocaleLowerCase('es').includes(query));
@@ -464,7 +484,7 @@ window.renderTechnicianRequests = async function(container) {
       ${requests.slice().sort((a,b)=>String(b.createdAt||'').localeCompare(String(a.createdAt||''))).map(request => {
         const mine = String(request.createdBy) === String(window.authState.user.id);
         const itemText = (request.articulos || []).map(item => `${item.nombre} × ${item.cantidad}`).join(', ');
-        return `<tr><td>${authEscape(formatDate(request.createdAt))}</td><td>${authEscape(request.clienteNombre)}</td><td>${authEscape(itemText)}</td><td>${request.estado === 'convertida' ? 'Convertida' : 'Pendiente'}</td><td>${mine && request.estado === 'pendiente' ? `<button class="btn btn-outline btn-sm" type="button" data-edit-request="${authEscape(request.id)}">Editar</button><button class="btn btn-outline btn-sm" type="button" data-delete-request="${authEscape(request.id)}">Eliminar</button>` : ''}</td></tr>`;
+        return `<tr><td>${authEscape(formatDate(request.createdAt))}</td><td>${authEscape(request.clienteNombre)}</td><td>${authEscape(itemText)}</td><td>${request.estado === 'convertida' ? 'Convertida' : 'Pendiente'}</td><td>${mine && request.estado === 'pendiente' ? `<button class="btn btn-outline btn-sm" type="button" data-edit-request="${authEscape(request.id)}">Editar</button><button class="btn btn-danger btn-sm" type="button" data-delete-request="${authEscape(request.id)}">Eliminar</button>` : ''}</td></tr>`;
       }).join('') || '<tr><td colspan="5">Todavía no hay solicitudes.</td></tr>'}
     </tbody></table></div></div>`;
   container.querySelector('#newMaterialRequest').addEventListener('click', () => showMaterialRequestForm());
@@ -484,7 +504,7 @@ window.showMaterialRequestForm = async function(requestId = '') {
   const clientOptions = clients.map(client => `<option value="${authEscape(client.id)}" ${String(client.id) === String(request?.clienteId || '') ? 'selected' : ''}>${authEscape(client.nombre)}</option>`).join('');
   const articleOptions = articles.map(article => `<option value="${authEscape(article.id)}">${authEscape(article.referencia)} · ${authEscape(article.nombre)} · stock ${authEscape(article.stock)}</option>`).join('');
   const items = request?.articulos || [];
-  const itemRows = items.map(item => `<li data-article="${authEscape(item.articuloId)}">${authEscape(item.referencia)} · ${authEscape(item.nombre)} × ${authEscape(item.cantidad)} <button type="button" class="btn btn-outline btn-sm" data-remove-article="${authEscape(item.articuloId)}" aria-label="Quitar artículo">×</button></li>`).join('');
+  const itemRows = items.map(item => `<li data-article="${authEscape(item.articuloId)}">${authEscape(item.referencia)} · ${authEscape(item.nombre)} × ${authEscape(item.cantidad)} <button type="button" class="btn btn-danger btn-sm" data-remove-article="${authEscape(item.articuloId)}" aria-label="Quitar artículo">×</button></li>`).join('');
   openModal(request ? 'Editar solicitud' : 'Nueva solicitud de material', `
     <form id="materialRequestForm" class="form-grid">
       <div class="form-group full"><label for="requestClient">Cliente *</label><select id="requestClient" required><option value="">Selecciona un cliente</option>${clientOptions}</select></div>
@@ -497,7 +517,7 @@ window.showMaterialRequestForm = async function(requestId = '') {
   let selectedItems = items.slice();
   const paintItems = () => {
     const list = document.getElementById('requestArticleList');
-    list.innerHTML = selectedItems.map(item => `<li data-article="${authEscape(item.articuloId)}">${authEscape(item.referencia)} · ${authEscape(item.nombre)} × ${authEscape(item.cantidad)} <button type="button" class="btn btn-outline btn-sm" data-remove-article="${authEscape(item.articuloId)}" aria-label="Quitar artículo">×</button></li>`).join('') || '<li class="muted">Aún no hay artículos.</li>';
+    list.innerHTML = selectedItems.map(item => `<li data-article="${authEscape(item.articuloId)}">${authEscape(item.referencia)} · ${authEscape(item.nombre)} × ${authEscape(item.cantidad)} <button type="button" class="btn btn-danger btn-sm" data-remove-article="${authEscape(item.articuloId)}" aria-label="Quitar artículo">×</button></li>`).join('') || '<li class="muted">Aún no hay artículos.</li>';
     list.querySelectorAll('[data-remove-article]').forEach(button => button.addEventListener('click', () => {
       selectedItems = selectedItems.filter(item => String(item.articuloId) !== button.dataset.removeArticle);
       paintItems();
@@ -705,6 +725,7 @@ lazyWrap('render_configuracion', async (base, container, arg) => {
   if (base) await base(container, arg);
   else container.innerHTML = '<div class="empty-state"><i class="fas fa-gear"></i><h3>Configuración</h3></div>';
   if (!window.isAdmin()) return;
+  if (container.querySelector('.user-management-entry')) return; // ya la pintó el módulo base
   const card = document.createElement('section');
   card.className = 'card user-management-entry';
   card.innerHTML = '<div class="card-header"><h3>Usuarios y permisos</h3></div><div class="card-body"><p>Invita al equipo, vincula técnicos a Empleados y administra roles y cuentas.</p><button class="btn btn-primary" type="button" id="openUserManagement"><i class="fas fa-user-shield"></i> Gestionar usuarios</button></div>';
@@ -921,7 +942,7 @@ window.renderTechnicianParts = async function(container) {
   container.innerHTML = `
     <div class="page-header"><div><h2>Partes de trabajo</h2><p>Consulta los partes del equipo y gestiona los tuyos.</p></div><button class="btn btn-primary" id="newTechnicianPart"><i class="fas fa-plus"></i> Nuevo parte</button></div>
     <div class="search-bar"><input type="search" id="technicianPartSearch" placeholder="Buscar parte, cliente o trabajo"></div>
-    <div class="card"><div class="table-wrapper"><table><thead><tr><th>Parte</th><th>Cliente</th><th>Ubicación</th><th>Técnico</th><th>Trabajo</th><th>Kms</th><th>Fecha</th><th>Acciones</th></tr></thead><tbody id="technicianPartRows"></tbody></table></div></div>`;
+    <div class="card"><div class="table-wrapper"><table><thead><tr><th>Parte</th><th data-titulo>Cliente</th><th>Ubicación</th><th>Técnico</th><th>Trabajo</th><th>Kms</th><th>Fecha</th><th>Acciones</th></tr></thead><tbody id="technicianPartRows"></tbody></table></div></div>`;
   const paint = () => {
     const query = container.querySelector('#technicianPartSearch').value.toLocaleLowerCase('es').trim();
     const filtered = parts.filter(part => [
@@ -933,7 +954,7 @@ window.renderTechnicianParts = async function(container) {
       const actions = own
         ? `<button type="button" class="btn btn-outline btn-sm" data-action="edit-parte" data-id="${authEscape(part.id)}" title="Editar mi parte"><i class="fas fa-pen"></i></button>
            <button type="button" class="btn btn-outline btn-sm" onclick="generatePDF_partes('${authEscape(part.id)}')" title="Descargar PDF"><i class="fas fa-file-pdf"></i></button>
-           <button type="button" class="btn btn-outline btn-sm" onclick="confirmDelete('Parte ${authEscape(part.id)}',()=>deleteParte('${authEscape(part.id)}'))" title="Eliminar mi parte"><i class="fas fa-trash"></i></button>`
+           <button type="button" class="btn btn-danger btn-sm" onclick="confirmDelete('Parte ${authEscape(part.id)}',()=>deleteParte('${authEscape(part.id)}'))" title="Eliminar mi parte"><i class="fas fa-trash"></i></button>`
         : `<button type="button" class="btn btn-outline btn-sm" data-view-part="${authEscape(part.id)}" title="Ver parte"><i class="fas fa-eye"></i> Ver</button>`;
       return `<tr><td><strong>${authEscape(part.id)}</strong></td><td>${authEscape(part.clienteNombre)}</td><td>${authEscape(part.ubicacionNombre || '—')}</td><td>${authEscape(part.empleadoNombre || '—')}</td><td>${authEscape(part.tipoPuerta || part.descripcion || '—')}</td><td>${authEscape(part.kms || 0)} km</td><td>${authEscape(formatDate(part.fecha))}</td><td class="actions-cell">${actions}</td></tr>`;
     }, { colspan: 8, empty: '<tr><td colspan="8">No hay partes que coincidan.</td></tr>' });

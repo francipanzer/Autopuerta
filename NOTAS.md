@@ -1,3 +1,27 @@
+## Reestructura clientes / ubicaciones / rutas / revisiones (nov 2026)
+
+**Modelo**
+- Cliente **individual**: una nave; sus puertas cuelgan de él.
+- Cliente **central** (`clientes.central`): varias naves = **ubicaciones** (tabla `ubicaciones`, con todos los datos de un cliente: dirección, contacto, teléfono, email, notas, coordenadas). Cada ubicación tiene sus puertas (`puertas.ubicacionId`). Las ubicaciones solo se ven dentro de la ficha del cliente padre (no engordan la lista de clientes).
+- **Ruta** (`rutas.clienteId`): pertenece a un central y agrupa ubicaciones (`ubicaciones.rutaId` + `ordenRuta`); se crea marcando casillas.
+- **Mantenimiento contratado** (`clientes.mantenimiento`): solo estos clientes salen en Revisiones, en el aviso del panel y en el badge del menú.
+- **Periodicidad por puerta**, sin depender de la ruta: tabla de la foto en `js/tipos-puerta.js` (`Periodicidad`). Uso (garaje/industrial/comercial) + criterio (nº vehículos, estacional, ciclos/día, rápida, enrollable). Si la puerta no tiene uso se asume el habitual de su tipo (`USO_POR_TIPO`). Resultado en `puertas.frecuenciaMeses`.
+- Se eliminaron las **cadenas** (tabla `cadenas` y pantallas) y las revisiones programadas por ruta. Historial/PDF antiguos siguen leyendo las claves `cadena`/`cadenaId` de las notas.
+
+**Código**
+- `js/central.js` (carga inicial): acceso a datos, motor `getEstadoRevisiones()` (cliente → rutas → ubicaciones → puertas), avisos, `reprogramarPuerta()` (técnico por RPC, admin directo), pantallas de ubicaciones / rutas / puertas y tabla de periodicidades en Configuración.
+- `js/informe-revisiones-cliente.js`: página Revisiones (Próximas / Historial). Individual → puertas; central → rutas → ubicaciones.
+- `js/pages_gestion.js`: formulario de revisión (`abrirFormularioRevision({clienteId, rutaId, ubicacionIds})`), guardado y DOTICS.
+- `js/pages_import.js`: importar desde foto ahora crea **ubicaciones** de un cliente central.
+
+**Botones (nov 2026)**: todos los botones de acción son verdes (bloque «BOTONES UNIFICADOS» al final de `css/styles.css`, también cubre `.btn-outline`, pestañas, `.icon-btn` y los de medidas). Rojo solo para eliminar/quitar (`.btn-danger`). Siguen con su propio color los selectores que codifican un valor (OK/X, Bueno/Operativo/No usar, casillas y pastillas de medidas), la X de cerrar y los adornos dentro de campos (ojo de contraseña, micrófono). Para un botón nuevo: `btn btn-primary` (verde) o `btn btn-danger` (eliminar).
+
+**DOTICS**: cliente especial, formato «Informe visita de mantenimiento» (modelo en papel: `modelodotics.jpg`, ejemplo relleno `informerevisiondotics.jpg`). La revisión de una ruta es UNA pantalla con todas las tiendas (como Hiperber): cada tienda = su informe (Cliente = la tienda, nº de intervención, equipos con tipo / denominación / nº de serie ya escritos; el técnico solo marca Bueno / Operativo / No usar y observaciones; «Todo bueno»). Casilla «Marcar finalizada» por tienda: al marcarla se GUARDA ese informe como su propio parte (una revisión + PDF por tienda; se puede reabrir y se actualiza el mismo parte). Casilla final «ruta completada» (bloqueada hasta finalizar todas) → resumen con PDF por tienda. Lo escrito sin finalizar queda como borrador en el dispositivo. Código: `abrirRevisionDotics()` y funciones `dr*` en pages_gestion.js; estilos `.dotics-*` al final de styles.css (solo variables del tema, una columna en móvil).
+
+**Borradores**: la revisión de una ruta (varias tiendas) guarda su progreso en el dispositivo (IndexedDB, `Central.Borradores`; clave usuario|cliente|alcance, caduca a los 30 días). Se guarda al marcar cada tienda y poco después de cada cambio; al reabrir la ruta se ofrece continuar. Se borra al guardar la revisión. No se sincroniza entre dispositivos.
+
+**Base de datos**: ejecutar `SUPABASE_REESTRUCTURA_CLIENTES.sql` (idempotente; hace copias `bk_reestructura_*`, añade columnas, migra cadenas→centrales y tiendas→ubicaciones y redirige puertas/partes/presupuestos/albaranes; define la nueva `update_door_revision_schedule` de 4 parámetros que usan los técnicos).
+
 # NOTAS / PENDIENTES DEL PROYECTO (autopuerta-pro)
 
 ## Lectura de documentos con OCR (nov 2026) — ESTADO Y PENDIENTES

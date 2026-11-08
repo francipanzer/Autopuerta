@@ -1,82 +1,52 @@
 // ═══════════════════════════════════════════════════════════
-//  REVISIONES — página única (reemplaza "Revisiones")
-//  · Motor único getEstadoRevisiones(): una fila por ruta (cadena) o cliente único
-//  · Pestañas: Próximas / Historial, con buscador por cliente y fecha
-//  · Botón "+ Nueva revisión" (cliente/cadena + fecha) que abre el formulario
-//  · Cliente único: "Le toca revisión el <fecha>" (sin desglose por puerta)
+//  REVISIONES — página única
+//  · Motor: Central.getEstadoRevisiones() (js/central.js): una fila por cliente
+//    con MANTENIMIENTO contratado.
+//  · Cliente individual → al pulsarlo salen sus puertas.
+//  · Cliente central    → al pulsarlo salen sus RUTAS; en cada ruta sus
+//    UBICACIONES (naves) y en cada ubicación sus puertas.
+//  · Pestañas Próximas / Historial, buscador por cliente, ruta o fecha.
 // ═══════════════════════════════════════════════════════════
 (function(){
 'use strict';
 
-// ── Helpers de fecha/estado ──
-function _dias(fecha){
-  if(!fecha) return null;
-  const hoy=new Date(); hoy.setHours(0,0,0,0);
-  const f=new Date(fecha); f.setHours(0,0,0,0);
-  return Math.ceil((f-hoy)/86400000);
+const C = () => window.Central;
+const _esc = s => escapeHtml(s);
+const _badge = f => C().badgeFecha(f);
+const _fmt = f => C().fmt(f);
+const hoyISO = () => window.Periodicidad.hoyISO();
+const plural=(n,s,p)=>n+' '+(n===1?s:p);
+
+// ── Fila de lista clicable ──
+function filaHTML({icono, titulo, detalle, fecha, dataAttr, botonRevisar}){
+  const b=_badge(fecha);
+  return '<div class="rev-fila" '+dataAttr+'>'+
+    '<div class="rev-fila-info"><strong><i class="fas '+icono+'"></i> '+_esc(titulo)+'</strong>'+
+      '<span class="rev-fecha">'+(fecha?'Le toca revisión el '+_fmt(fecha):'Sin revisión programada')+(detalle?' · '+detalle:'')+'</span></div>'+
+    '<div class="rev-fila-meta">'+(botonRevisar||'')+'<span class="badge '+b.clase+'">'+b.texto+'</span><i class="fas fa-chevron-right rev-chevron"></i></div></div>';
 }
-function _badge(fecha){
-  const d=_dias(fecha);
-  if(d===null)   return {texto:'Sin programar', clase:'badge-yellow'};
-  if(d<0)        return {texto:'Vencida '+Math.abs(d)+'d', clase:'badge-red'};
-  if(d===0)      return {texto:'Hoy', clase:'badge-red'};
-  if(d<=30)      return {texto:'En '+d+'d', clase:'badge-yellow'};
-  return {texto:'Al día', clase:'badge-green'};
+
+function cabecera({volver, icono, titulo, subtitulo, acciones}){
+  return '<div class="page-header"><div>'+(volver?'<button class="btn btn-back btn-sm" data-volver="1"><i class="fas fa-arrow-left"></i> Volver</button>':'')+'</div><div>'+
+    '<h2 class="page-revisiones-title"><i class="fas '+icono+'"></i> '+_esc(titulo)+'</h2>'+
+    '<p class="page-revisiones-subtitle">'+subtitulo+'</p></div>'+
+    '<div class="header-actions">'+(acciones||'')+'</div></div>';
 }
-function _fmt(f){ try{ return f?new Date(f).toLocaleDateString('es-ES'):'—'; }catch(e){ return String(f||'—'); } }
-const _esc = s => escapeHtml(s);   // única definición global (utils.js)
+
+function bloquePuertas(puertas){
+  if(!puertas.length) return '<p style="color:var(--gray);padding:6px 14px;">Sin puertas registradas.</p>';
+  return puertas.map(p=>{
+    const pb=_badge(p.proximaRevision);
+    const per=window.Periodicidad.frecuenciaMeses(p);
+    return '<div class="revision-puerta-item"><div><strong>'+_esc(p.nombre||'Puerta')+'</strong>'+
+      '<span class="revision-puerta-tipo">'+_esc(window.TiposPuerta.nombre(p.tipo)||'—')+' · cada '+per+' meses</span>'+
+      '<div class="revision-puerta-fecha">Última: '+_fmt(p.ultimaRevision)+' · Próxima: '+_fmt(p.proximaRevision)+'</div></div>'+
+      '<span class="badge '+pb.clase+' badge-sm">'+pb.texto+'</span></div>';
+  }).join('');
+}
 
 // ═══════════════════════════════════════════════════════════
-//  MOTOR ÚNICO — getEstadoRevisiones()
-//  Fuente de verdad compartida por la página, el badge y el PDF.
-//  Devuelve una fila por ruta (cadenas) o por cliente único,
-//  ordenada por fecha de próxima revisión.
-// ═══════════════════════════════════════════════════════════
-window.getEstadoRevisiones = async function(){
-  const [clientes,cadenas,rutas]=await Promise.all([dbGetAll('clientes'),dbGetAll('cadenas'),dbGetAll('rutas')]);
-  const cadenaIds=new Set(cadenas.map(c=>String(c.id)));
-  const rutasDeCadena=new Set(rutas.map(r=>String(r.id)));
-  const items=[];
-
-  // Cadenas: una fila por cada ruta
-  for(const cadena of cadenas){
-    for(const ruta of rutas.filter(r=>String(r.cadenaId??r.cadenaid??'')===String(cadena.id))){
-      let puertas=[];
-      try{ puertas=await window.getPuertasDeRuta(ruta.id,cadena.id); }catch(e){ puertas=[]; }
-      const proximaPuertas=puertas.map(p=>p.proximaRevision).filter(Boolean).sort()[0]||null;
-      items.push({
-        tipo:'cadena', esCadena:true,
-        id:String(cadena.id), nombre:cadena.nombre,
-        rutaId:String(ruta.id), rutaNombre:ruta.nombre||'Ruta',
-        proximaRevision:ruta.proximaRevision??ruta.proximarevision??proximaPuertas??null,
-        ultimaRevision:ruta.ultimaRevision??ruta.ultimorevision??null,
-        puertas
-      });
-    }
-  }
-
-  // Clientes únicos (sin cadena ni ruta de cadena)
-  for(const c of clientes){
-    const cid=String(c.cadenaId??c.cadenaid??c.padreId??c.padreid??'');
-    const rid=String(c.rutaId??c.rutaid??'');
-    if((cid&&cadenaIds.has(cid))||(rid&&rutasDeCadena.has(rid))) continue;
-    const puertas=await dbGetByIndex('puertas','clienteId',c.id);
-    items.push({
-      tipo:'cliente', esCadena:false,
-      id:String(c.id), nombre:c.nombre,
-      rutaId:null, rutaNombre:null,
-      proximaRevision:puertas.map(p=>p.proximaRevision).filter(Boolean).sort()[0]||null,
-      ultimaRevision:puertas.map(p=>p.ultimaRevision).filter(Boolean).sort().pop()||null,
-      puertas
-    });
-  }
-
-  items.sort((a,b)=>String(a.proximaRevision||'9999').localeCompare(String(b.proximaRevision||'9999')));
-  return items;
-};
-
-// ═══════════════════════════════════════════════════════════
-//  PÁGINA: Revisiones (pestañas Próximas / Historial + buscador)
+//  PÁGINA: Revisiones
 // ═══════════════════════════════════════════════════════════
 window.render_revisionesCliente=async function(main){
   if(!main) main=document.getElementById('mainContent');
@@ -84,12 +54,12 @@ window.render_revisionesCliente=async function(main){
     '<div class="page-revisiones">'+
       '<div class="page-header"><div>'+
         '<h2 class="page-revisiones-title"><i class="fas fa-clipboard-list"></i> Revisiones</h2>'+
-        '<p class="page-revisiones-subtitle">Próximas revisiones, historial y registro de nuevas revisiones.</p>'+
+        '<p class="page-revisiones-subtitle">Clientes con mantenimiento contratado: próximas revisiones, historial y registro de nuevas revisiones.</p>'+
       '</div><div class="header-actions">'+
         '<button class="btn btn-primary" onclick="window.abrirNuevaRevision()"><i class="fas fa-plus"></i> Nueva revisión</button>'+
       '</div></div>'+
       '<div class="rev-search">'+
-        '<input id="rev-q" class="input" type="search" placeholder="Buscar por cliente, cadena o ruta…" oninput="window.__revRefrescar()">'+
+        '<input id="rev-q" class="input" type="search" placeholder="Buscar cliente, ruta o ubicación…" oninput="window.__revRefrescar()">'+
         '<input id="rev-fecha" class="input" type="date" onchange="window.__revRefrescar()" title="Filtrar por fecha">'+
         '<button class="btn btn-outline" onclick="window.__revLimpiarFiltro()" title="Limpiar filtros"><i class="fas fa-eraser"></i></button>'+
       '</div>'+
@@ -99,29 +69,28 @@ window.render_revisionesCliente=async function(main){
       '</div>'+
       '<div id="rev-lista"></div>'+
     '</div>';
-  window.__revEstado={tab:'proximas', abiertos:new Set()};
+  window.__revEstado={tab:'proximas'};
   await window.__revRefrescar();
 };
+window.render_revisionesProgramadas=window.render_revisionesCliente;
 
 window.__revLimpiarFiltro=function(){
-  const q=document.getElementById('rev-q'); const f=document.getElementById('rev-fecha');
+  const q=document.getElementById('rev-q'), f=document.getElementById('rev-fecha');
   if(q) q.value=''; if(f) f.value='';
   window.__revRefrescar();
 };
-
 window.__revTab=function(tab){
   window.__revEstado.tab=tab;
   document.getElementById('rev-tab-proximas')?.classList.toggle('active',tab==='proximas');
   document.getElementById('rev-tab-historial')?.classList.toggle('active',tab==='historial');
   window.__revRefrescar();
 };
-
 function _filtros(){
-  const q=String(document.getElementById('rev-q')?.value||'').toLowerCase().trim();
-  const fecha=String(document.getElementById('rev-fecha')?.value||'').slice(0,10);
-  return {q,fecha};
+  return {
+    q:String(document.getElementById('rev-q')?.value||'').toLowerCase().trim(),
+    fecha:String(document.getElementById('rev-fecha')?.value||'').slice(0,10)
+  };
 }
-
 window.__revRefrescar=async function(){
   const cont=document.getElementById('rev-lista');
   if(!cont) return;
@@ -130,243 +99,163 @@ window.__revRefrescar=async function(){
   else await window.__revPintarHistorial(cont);
 };
 
-// --- Pestana PROXIMAS ---
-// Una fila por cadena (o cliente unico). Al pulsar una cadena se navega a una
-// vista dedicada con sus rutas (mejor en movil que un desplegable anidado);
-// al pulsar una ruta, a una vista de tiendas estilo cliente unico.
-// Delegacion de eventos en el contenedor: los botones sobreviven a cada re-render.
+// ── Pestaña PRÓXIMAS: una fila por cliente con mantenimiento ──
 window.__revPintarProximas=async function(cont){
   const {q,fecha}=_filtros();
-  let items=await window.getEstadoRevisiones();
-  // Solo clientes/rutas CON revisión pendiente programada (los demás van a Historial)
-  items=items.filter(i=>i.proximaRevision);
-  if(q) items=items.filter(i=>i.nombre.toLowerCase().includes(q)||(i.rutaNombre||'').toLowerCase().includes(q));
+  let items=await C().getEstadoRevisiones();
+  if(q) items=items.filter(i=>{
+    const texto=[i.nombre,...i.rutas.map(r=>r.nombre),...i.ubicaciones.map(u=>u.denominacion)].join(' ').toLowerCase();
+    return texto.includes(q);
+  });
   if(fecha) items=items.filter(i=>String(i.proximaRevision||'').slice(0,10)===fecha);
 
   if(!items.length){
-    cont.innerHTML='<div class="empty-state"><i class="fas fa-check-circle"></i><h3>Sin revisiones pendientes</h3><p>Todos los clientes y rutas están al día. Consulta el Historial para ver las pasadas.</p></div>';
+    cont.innerHTML='<div class="empty-state"><i class="fas fa-clipboard-check"></i><h3>Sin clientes con mantenimiento</h3><p>Marca «mantenimiento contratado» en la ficha de un cliente para que aparezca aquí.</p></div>';
     return;
   }
-
-  // Agrupar filas por cadena (o cliente unico sin cadena)
-  const grupos=new Map();
-  for(const it of items){
-    const gid=it.esCadena?('C:'+it.id):('K:'+it.id);
-    if(!grupos.has(gid)) grupos.set(gid,{esCadena:it.esCadena,id:it.id,nombre:it.nombre,proximaRevision:it.proximaRevision,filas:[]});
-    grupos.get(gid).filas.push(it);
-  }
-
-  cont.innerHTML=[...grupos.values()].map(g=>{
-    const badge=_badge(g.proximaRevision);
-    const esCadena=g.esCadena;
-    const icon=esCadena?'fa-sitemap':'fa-user';
-    const nItems=esCadena?g.filas.length:g.filas.flatMap(f=>f.puertas).length;
-    const unidades=esCadena?('ruta'+(nItems===1?'':'s')):('puerta'+(nItems===1?'':'s'));
-    return '<div class="rev-fila rev-grupo" data-navigate="'+(esCadena?'rutas':'tiendas')+'" data-id="'+_esc(g.id)+'">'+
-      '<div class="rev-fila-info">'+
-        '<strong><i class="fas '+icon+'"></i> '+_esc(g.nombre)+'</strong>'+
-        '<span class="rev-fecha">'+(g.proximaRevision?'Le toca revision el '+_fmt(g.proximaRevision):'Sin revision programada')+' - '+nItems+' '+unidades+'</span>'+
-      '</div>'+
-      '<div class="rev-fila-meta">'+
-        '<span class="badge '+badge.clase+'">'+badge.texto+'</span>'+
-        '<i class="fas fa-chevron-right rev-chevron"></i>'+
-      '</div>'+
-    '</div>';
-  }).join('');
-
-  // Delegacion de eventos (una vez por contenedor)
-  if(!cont.__delegado){
-    cont.__delegado=true;
-    cont.addEventListener('click',function(e){
-      const fila=e.target.closest('[data-navigate]');
-      if(!fila) return;
-      const tipo=fila.getAttribute('data-navigate');
-      const id=fila.getAttribute('data-id');
-      if(tipo==='rutas') window.verRutasDeCadena(id);
-      else window.verTiendasDeCliente(id);
-    });
-  }
-};
-
-// --- VISTA: rutas de una cadena (pagina propia, con boton Volver) ---
-window.verRutasDeCadena=async function(cadenaId){
-  const main=document.getElementById('mainContent');
-  if(!main) return;
-  const items=await window.getEstadoRevisiones();
-  const filas=items.filter(i=>i.esCadena&&String(i.id)===String(cadenaId));
-  const nombre=filas[0]?.nombre||'Cadena';
-  const proxima=filas.map(f=>f.proximaRevision).filter(Boolean).sort()[0];
-
-  main.innerHTML=
-    '<div class="page-revisiones">'+
-      '<div class="page-header"><div>'+
-        '<button class="btn btn-back btn-sm" onclick="navigateTo(\'revisionesCliente\')"><i class="fas fa-arrow-left"></i> Volver</button>'+
-      '</div><div>'+
-        '<h2 class="page-revisiones-title"><i class="fas fa-sitemap"></i> '+_esc(nombre)+'</h2>'+
-        '<p class="page-revisiones-subtitle">'+filas.length+' ruta'+(filas.length===1?'':'s')+(proxima?' - proxima revision el '+_fmt(proxima):'')+'</p>'+
-      '</div></div>'+
-      '<div id="rev-lista-rutas"></div>'+
-    '</div>';
-
-  const cont=document.getElementById('rev-lista-rutas');
-  // Contar tiendas reales (con o sin puertas), no puertas
-  const counts = new Map();
-  for (const r of filas) {
-    let tiendas = [];
-    try { tiendas = await window.getTiendasDeRuta(r.rutaId, r.id); } catch (e) { tiendas = []; }
-    counts.set(r.rutaId, tiendas.length);
-  }
-  cont.innerHTML=filas.length
-    ? filas.map(r=>{
-        const badge=_badge(r.proximaRevision);
-        const nTiendas=counts.get(r.rutaId)||r.puertas.length;
-        return '<div class="rev-fila" data-ruta="'+_esc(r.rutaId)+'">'+
-          '<div class="rev-fila-info">'+
-            '<strong><i class="fas fa-route"></i> '+_esc(r.rutaNombre)+'</strong>'+
-            '<span class="rev-fecha">'+(r.proximaRevision?'Le toca revision el '+_fmt(r.proximaRevision):'Sin revision programada')+' - '+nTiendas+' tienda'+(nTiendas===1?'':'s')+'</span>'+
-          '</div>'+
-          '<div class="rev-fila-meta">'+
-            '<span class="badge '+badge.clase+'">'+badge.texto+'</span>'+
-            '<i class="fas fa-chevron-right rev-chevron"></i>'+
-          '</div>'+
-        '</div>';
-      }).join('')
-    : '<div class="empty-state"><i class="fas fa-route"></i><h3>Sin rutas</h3><p>Esta cadena no tiene rutas creadas.</p></div>';
-
+  cont.innerHTML=items.map(i=>filaHTML({
+    icono:i.central?'fa-sitemap':'fa-user', titulo:i.nombre,
+    detalle:i.central?plural(i.rutas.length,'ruta','rutas')+' · '+plural(i.ubicaciones.length,'ubicación','ubicaciones'):plural(i.puertas.length,'puerta','puertas'),
+    fecha:i.proximaRevision, dataAttr:'data-cliente="'+_esc(i.id)+'" data-central="'+(i.central?1:0)+'"'
+  })).join('');
   if(!cont.__delegado){
     cont.__delegado=true;
     cont.addEventListener('click',e=>{
-      const fila=e.target.closest('[data-ruta]');
-      if(fila) window.verTiendasDeRuta(cadenaId, fila.getAttribute('data-ruta'));
+      const fila=e.target.closest('[data-cliente]');
+      if(!fila) return;
+      const id=fila.getAttribute('data-cliente');
+      if(fila.getAttribute('data-central')==='1') window.verRutasDeCliente(id); else window.verPuertasDeCliente(id);
     });
   }
 };
 
-// --- VISTA: tiendas de una ruta (estilo cliente unico: tienda como encabezado) ---
-window.verTiendasDeRuta=async function(cadenaId, rutaId){
-  const main=document.getElementById('mainContent');
-  if(!main) return;
-  const items=await window.getEstadoRevisiones();
-  const fila=items.find(i=>i.esCadena&&String(i.id)===String(cadenaId)&&String(i.rutaId)===String(rutaId));
-  if(!fila){
-    showToast('No se encontro la ruta','error');
-    return window.verRutasDeCadena(cadenaId);
-  }
+async function _estadoDe(clienteId){
+  const items=await C().getEstadoRevisiones();
+  return items.find(i=>String(i.id)===String(clienteId))||null;
+}
 
-  const cadenaNombre=fila.nombre;
-  let tiendas=[];
-  try{ tiendas=await window.getTiendasDeRuta(rutaId,cadenaId); }catch(e){ tiendas=[]; }
-  main.innerHTML=
-    '<div class="page-revisiones">'+
-      '<div class="page-header"><div>'+
-        '<button class="btn btn-back btn-sm" data-volver-cadena="1"><i class="fas fa-arrow-left"></i> Volver</button>'+
-      '</div><div>'+
-        '<h2 class="page-revisiones-title"><i class="fas fa-route"></i> '+_esc(fila.rutaNombre)+'</h2>'+
-        '<p class="page-revisiones-subtitle">'+_esc(cadenaNombre)+' - '+tiendas.length+' tienda'+(tiendas.length===1?'':'s')+(fila.proximaRevision?' - proxima el '+_fmt(fila.proximaRevision):'')+'</p>'+
-      '</div><div class="header-actions">'+
-        '<button class="btn btn-outline" data-accion="optimizar" data-ruta-id="'+_esc(rutaId)+'" data-cadena-id="'+_esc(cadenaId)+'" data-ruta-nombre="'+_esc(fila.rutaNombre)+'" data-cadena-nombre="'+_esc(cadenaNombre)+'"><i class="fas fa-route"></i> Optimizar ruta</button>'+
-        '<button class="btn btn-primary" data-accion="registrar" data-id="'+_esc(cadenaId)+'" data-es-cadena="1" data-ruta-id="'+_esc(rutaId)+'"><i class="fas fa-clipboard-check"></i> Registrar revision</button>'+
-        '<button class="btn btn-outline" data-accion="pdf" data-id="'+_esc(cadenaId)+'" data-es-cadena="1" data-ruta-id="'+_esc(rutaId)+'"><i class="fas fa-file-pdf"></i> PDF de la ruta</button>'+
-      '</div></div>'+
-      '<div id="rev-lista-tiendas"></div>'+
-    '</div>';
+// ── VISTA: rutas de un cliente central ──
+window.verRutasDeCliente=async function(clienteId){
+  const main=document.getElementById('mainContent'); if(!main) return;
+  const it=await _estadoDe(clienteId);
+  if(!it){ showToast('Este cliente no tiene mantenimiento contratado','warning'); return window.render_revisionesCliente(main); }
+  if(!it.central) return window.verPuertasDeCliente(clienteId);
 
-  const cont=document.getElementById('rev-lista-tiendas');
-  // Mapa de puertas por tienda
-  const porTienda=new Map();
-  fila.puertas.forEach(p=>{
-    const key=p.clienteNombre||'(sin tienda)';
-    if(!porTienda.has(key)) porTienda.set(key,[]);
-    porTienda.get(key).push(p);
+  let borradores=[];
+  try{ borradores=await C().Borradores.listar(clienteId); }catch(e){ /* sin borradores */ }
+  const enCurso=rutaId=>borradores.find(b=>b.alcance==='R:'+rutaId);
+  const filas=[...it.rutas].sort((a,b)=>String(a.proximaRevision||'9999').localeCompare(String(b.proximaRevision||'9999'))||String(a.nombre).localeCompare(String(b.nombre),'es')).map(r=>{
+    const b=enCurso(r.id), rs=b&&b.resumen;
+    return filaHTML({
+      icono:'fa-route', titulo:r.nombre,
+      detalle:plural(r.ubicaciones.length,'ubicación','ubicaciones')+(b?' · <strong style="color:#b45309">⏳ En curso'+(rs?' '+rs.hechas+'/'+rs.total:'')+'</strong>':''),
+      fecha:r.proximaRevision, dataAttr:'data-ruta="'+_esc(r.id)+'"',
+      botonRevisar:'<button class="btn btn-primary btn-sm" data-revisar-ruta="'+_esc(r.id)+'"><i class="fas fa-'+(b?'play':'clipboard-check')+'"></i> '+(b?'Continuar ruta':'Revisar ruta')+'</button>'});
   });
-  // Incluir tiendas sin puertas
-  tiendas.forEach(t=>{ const n=t.nombre||'(sin nombre)'; if(!porTienda.has(n)) porTienda.set(n,[]); });
-  const bRuta=_badge(fila.proximaRevision);
-  cont.innerHTML=porTienda.size
-    ? [...porTienda.entries()].map(([tienda,puertas])=>{
-        return '<div class="rev-tienda-bloque">'+
-          '<div class="rev-tienda-cab"><strong><i class="fas fa-store"></i> '+_esc(tienda)+'</strong>'+
-            (puertas.length?'<span class="badge '+bRuta.clase+' badge-sm">'+bRuta.texto+'</span>':'<span class="badge badge-yellow badge-sm">Sin puertas</span>')+'</div>'+
-          (puertas.length
-            ? '<div class="rev-tienda-puertas">'+puertas.map(p=>{
-                const pb=_badge(p.proximaRevision);
-                return '<div class="revision-puerta-item"><div><strong>'+_esc(p.nombre||'Puerta')+'</strong>'+
-                  '<span class="revision-puerta-tipo">'+_esc(p.puertaTipo||p.tipo||'—')+'</span>'+
-                  (p.proximaRevision?'<div class="revision-puerta-fecha">Última: '+_fmt(p.ultimaRevision)+' · Próxima: '+_fmt(p.proximaRevision)+'</div>':'')+
-                  '</div><span class="badge '+pb.clase+' badge-sm">'+pb.texto+'</span></div>';
-              }).join('')+'</div>'
-            : '<p style="color:var(--gray);padding:6px 14px;">Sin puertas registradas. Se añadirán al hacer la primera revisión.</p>')+
-        '</div>';
-      }).join('')
-    : '<div class="empty-state"><i class="fas fa-store"></i><h3>Sin tiendas</h3><p>Esta ruta no tiene tiendas asignadas.</p></div>';
+  if(it.sinRuta.length) filas.push(filaHTML({
+      icono:'fa-location-dot', titulo:'Ubicaciones sin ruta', detalle:plural(it.sinRuta.length,'ubicación','ubicaciones'),
+      fecha:C().minFecha(it.sinRuta.map(u=>u.proximaRevision)), dataAttr:'data-ruta="sin-ruta"'}));
 
-  // Delegacion: volver, registrar revision de ESTA ruta y PDF de ESTA ruta
+  main.innerHTML='<div class="page-revisiones">'+cabecera({
+      volver:true, icono:'fa-sitemap', titulo:it.nombre,
+      subtitulo:plural(it.rutas.length,'ruta','rutas')+' · '+plural(it.ubicaciones.length,'ubicación','ubicaciones')+(it.proximaRevision?' · próxima el '+_fmt(it.proximaRevision):''),
+      acciones:'<button class="btn btn-primary" data-accion="registrar"><i class="fas fa-clipboard-check"></i> Revisar central</button>'+
+               '<button class="btn btn-outline" data-accion="pdf"><i class="fas fa-file-pdf"></i> PDF</button>'})+
+    '<div id="rev-lista-rutas">'+(filas.join('')||'<div class="empty-state"><i class="fas fa-route"></i><h3>Sin rutas</h3><p>Crea rutas desde Clientes → '+_esc(it.nombre)+' → Rutas.</p></div>')+'</div></div>';
+
   main.querySelector('.page-header').addEventListener('click',e=>{
-    if(e.target.closest('[data-volver-cadena]')) return window.verRutasDeCadena(cadenaId);
-    const btn=e.target.closest('button[data-accion]');
-    if(!btn) return;
-    const acc=btn.getAttribute('data-accion');
-    const fecha=fila.proximaRevision||new Date().toISOString().slice(0,10);
-    if(acc==='registrar') window.openHiperberReviewForm(cadenaId,null,{rutaId,fecha});
-    if(acc==='pdf') window.generatePDF_informeCliente(cadenaId,true,rutaId);
-    if(acc==='optimizar') window.optimizarRutaTiendas(btn.getAttribute('data-ruta-id'),btn.getAttribute('data-cadena-id'),btn.getAttribute('data-ruta-nombre'),btn.getAttribute('data-cadena-nombre'));
+    if(e.target.closest('[data-volver]')) return window.render_revisionesCliente(main);
+    const b=e.target.closest('[data-accion]'); if(!b) return;
+    if(b.dataset.accion==='registrar') window.abrirFormularioRevision({clienteId,fecha:it.proximaRevision||hoyISO()});
+    if(b.dataset.accion==='pdf') window.generatePDF_informeCliente(clienteId);
+  });
+  document.getElementById('rev-lista-rutas').addEventListener('click',e=>{
+    const rb=e.target.closest('[data-revisar-ruta]');
+    if(rb){ e.stopPropagation(); const r=it.rutas.find(x=>String(x.id)===rb.getAttribute('data-revisar-ruta'));
+      return window.abrirFormularioRevision({clienteId,rutaId:rb.getAttribute('data-revisar-ruta'),fecha:(r&&r.proximaRevision)||hoyISO()}); }
+    const f=e.target.closest('[data-ruta]'); if(f) window.verUbicacionesDeRuta(clienteId,f.getAttribute('data-ruta'));
   });
 };
 
-// --- VISTA: puertas de un cliente unico (pagina propia, estilo cliente unico) ---
-window.verTiendasDeCliente=async function(clienteId){
-  const main=document.getElementById('mainContent');
-  if(!main) return;
-  const items=await window.getEstadoRevisiones();
-  const fila=items.find(i=>!i.esCadena&&String(i.id)===String(clienteId));
-  if(!fila){
-    showToast('No se encontro el cliente','error');
-    return;
-  }
+// ── VISTA: ubicaciones de una ruta (o de las que no tienen ruta) ──
+window.verUbicacionesDeRuta=async function(clienteId, rutaId){
+  const main=document.getElementById('mainContent'); if(!main) return;
+  const it=await _estadoDe(clienteId);
+  if(!it) return window.render_revisionesCliente(main);
+  const sinRuta=rutaId==='sin-ruta';
+  const ruta=sinRuta?null:it.rutas.find(r=>String(r.id)===String(rutaId));
+  if(!sinRuta && !ruta){ showToast('No se encontró la ruta','error'); return window.verRutasDeCliente(clienteId); }
+  const ubics=sinRuta?it.sinRuta:ruta.ubicaciones;
+  const proxima=C().minFecha(ubics.map(u=>u.proximaRevision));
+  const nombre=sinRuta?'Ubicaciones sin ruta':ruta.nombre;
 
-  main.innerHTML=
-    '<div class="page-revisiones">'+
-      '<div class="page-header"><div>'+
-        '<button class="btn btn-back btn-sm" onclick="navigateTo(\'revisionesCliente\')"><i class="fas fa-arrow-left"></i> Volver</button>'+
-      '</div><div>'+
-        '<h2 class="page-revisiones-title"><i class="fas fa-user"></i> '+_esc(fila.nombre)+'</h2>'+
-        '<p class="page-revisiones-subtitle">'+fila.puertas.length+' puerta'+(fila.puertas.length===1?'':'s')+(fila.proximaRevision?' - proxima el '+_fmt(fila.proximaRevision):'')+'</p>'+
-      '</div><div class="header-actions">'+
-        '<button class="btn btn-primary" data-accion="registrar" data-id="'+_esc(clienteId)+'" data-es-cadena="0"><i class="fas fa-clipboard-check"></i> Registrar revision</button>'+
-        '<button class="btn btn-outline" data-accion="pdf" data-id="'+_esc(clienteId)+'" data-es-cadena="0"><i class="fas fa-file-pdf"></i> PDF</button>'+
-      '</div></div>'+
-      '<div id="rev-lista-puertas"></div>'+
-    '</div>';
+  main.innerHTML='<div class="page-revisiones">'+cabecera({
+      volver:true, icono:sinRuta?'fa-location-dot':'fa-route', titulo:nombre,
+      subtitulo:_esc(it.nombre)+' · '+plural(ubics.length,'ubicación','ubicaciones')+(proxima?' · próxima el '+_fmt(proxima):''),
+      acciones:(window.isAdmin?.()&&!sinRuta?'<button class="btn btn-outline" data-accion="optimizar"><i class="fas fa-wand-magic-sparkles"></i> Ordenar ruta</button>':'')+
+               '<button class="btn btn-primary" data-accion="registrar"><i class="fas fa-clipboard-check"></i> Revisar '+(sinRuta?'ubicaciones':'ruta')+'</button>'+
+               '<button class="btn btn-outline" data-accion="pdf"><i class="fas fa-file-pdf"></i> PDF</button>'})+
+    '<div id="rev-lista-ubicaciones"></div></div>';
 
-  document.getElementById('rev-lista-puertas').innerHTML=fila.puertas.length
-    ? fila.puertas.map(p=>{
-        const b=_badge(p.proximaRevision);
-        return '<div class="revision-puerta-item"><div><strong>'+_esc(p.nombre||'Puerta')+'</strong>'+
-          '<span class="revision-puerta-tipo">'+_esc(p.puertaTipo||p.tipo||'—')+'</span>'+
-          (p.proximaRevision?'<div class="revision-puerta-fecha">Ultima: '+_fmt(p.ultimaRevision)+' - Proxima: '+_fmt(p.proximaRevision)+'</div>':'')+
-          '</div><span class="badge '+b.clase+' badge-sm">'+b.texto+'</span></div>';
-      }).join('')
-    : '<div class="empty-state"><i class="fas fa-door-open"></i><h3>Sin puertas</h3><p>Este cliente no tiene puertas registradas.</p></div>';
+  const cont=document.getElementById('rev-lista-ubicaciones');
+  cont.innerHTML=ubics.length?ubics.map((u,i)=>{
+    const b=_badge(u.proximaRevision);
+    return '<div class="rev-tienda-bloque"><div class="rev-tienda-cab"><strong><i class="fas fa-warehouse"></i> '+(sinRuta?'':(i+1)+'. ')+_esc(u.denominacion)+'</strong>'+
+      '<span><span class="badge '+(u.puertas.length?b.clase:'badge-yellow')+' badge-sm">'+(u.puertas.length?b.texto:'Sin puertas')+'</span> '+
+      '<button class="btn btn-outline btn-sm" data-maps="'+_esc(u.direccion||'')+'" title="Abrir en Maps"><i class="fas fa-map-marker-alt"></i></button> '+
+      '<button class="btn btn-primary btn-sm" data-revisar-ubic="'+_esc(u.id)+'"><i class="fas fa-clipboard-check"></i> Revisar</button></span></div>'+
+      (u.direccion?'<div class="revision-puerta-fecha" style="padding:0 14px 6px">'+_esc(u.direccion)+'</div>':'')+
+      '<div class="rev-tienda-puertas">'+bloquePuertas(u.puertas)+'</div></div>';
+  }).join(''):'<div class="empty-state"><i class="fas fa-warehouse"></i><h3>Sin ubicaciones</h3><p>Esta ruta no tiene ubicaciones asignadas.</p></div>';
 
   main.querySelector('.page-header').addEventListener('click',e=>{
-    const btn=e.target.closest('button[data-accion]');
-    if(!btn) return;
-    if(btn.getAttribute('data-accion')==='registrar') window.abrirFormularioRevisionCliente(clienteId, fila.proximaRevision||new Date().toISOString().slice(0,10));
-    if(btn.getAttribute('data-accion')==='pdf') window.generatePDF_informeCliente(clienteId,false);
+    if(e.target.closest('[data-volver]')) return window.verRutasDeCliente(clienteId);
+    const b=e.target.closest('[data-accion]'); if(!b) return;
+    if(b.dataset.accion==='registrar') window.abrirFormularioRevision({clienteId,rutaId:sinRuta?null:rutaId,ubicacionIds:ubics.map(u=>u.id),fecha:proxima||hoyISO()});
+    if(b.dataset.accion==='pdf') window.generatePDF_informeCliente(clienteId,{rutaId:sinRuta?'sin-ruta':rutaId});
+    if(b.dataset.accion==='optimizar') C().optimizarRuta(rutaId,clienteId);
+  });
+  cont.addEventListener('click',e=>{
+    const m=e.target.closest('[data-maps]');
+    if(m){ window.abrirGoogleMaps(m.getAttribute('data-maps')); return; }
+    const r=e.target.closest('[data-revisar-ubic]');
+    if(r) window.abrirFormularioRevision({clienteId,rutaId:sinRuta?null:rutaId,ubicacionIds:[r.getAttribute('data-revisar-ubic')],fecha:hoyISO()});
+  });
+};
+
+// ── VISTA: puertas de un cliente individual ──
+window.verPuertasDeCliente=async function(clienteId){
+  const main=document.getElementById('mainContent'); if(!main) return;
+  const it=await _estadoDe(clienteId);
+  if(!it){ showToast('Este cliente no tiene mantenimiento contratado','warning'); return window.render_revisionesCliente(main); }
+  if(it.central) return window.verRutasDeCliente(clienteId);
+
+  main.innerHTML='<div class="page-revisiones">'+cabecera({
+      volver:true, icono:'fa-user', titulo:it.nombre,
+      subtitulo:plural(it.puertas.length,'puerta','puertas')+(it.proximaRevision?' · próxima el '+_fmt(it.proximaRevision):''),
+      acciones:'<button class="btn btn-primary" data-accion="registrar"><i class="fas fa-clipboard-check"></i> Registrar revisión</button>'+
+               '<button class="btn btn-outline" data-accion="pdf"><i class="fas fa-file-pdf"></i> PDF</button>'})+
+    '<div id="rev-lista-puertas">'+(it.puertas.length?bloquePuertas(it.puertas):'<div class="empty-state"><i class="fas fa-door-open"></i><h3>Sin puertas</h3><p>Añade las puertas desde Clientes → '+_esc(it.nombre)+' → Puertas.</p></div>')+'</div></div>';
+
+  main.querySelector('.page-header').addEventListener('click',e=>{
+    if(e.target.closest('[data-volver]')) return window.render_revisionesCliente(main);
+    const b=e.target.closest('[data-accion]'); if(!b) return;
+    if(b.dataset.accion==='registrar') window.abrirFormularioRevision({clienteId,fecha:it.proximaRevision||hoyISO()});
+    if(b.dataset.accion==='pdf') window.generatePDF_informeCliente(clienteId);
   });
 };
 
 // ── Pestaña HISTORIAL ──
 window.__revPintarHistorial=async function(cont){
   const {q,fecha}=_filtros();
-  const [revisiones,cadenas,clientes]=await Promise.all([dbGetAll('revisiones'),dbGetAll('cadenas'),dbGetAll('clientes')]);
-  const chainNames=new Map(cadenas.map(c=>[String(c.id),c.nombre]));
+  const [revisiones,clientes]=await Promise.all([dbGetAll('revisiones'),dbGetAll('clientes')]);
   const clientNames=new Map(clientes.map(c=>[String(c.id),c.nombre]));
-
-  let filas=revisiones.map(r=>({r,meta:window.revisionHistoryMetadata?window.revisionHistoryMetadata(r):{clientNames:[],technician:'',chainId:null,chainName:''}}));
-  if(q) filas=filas.filter(({r,meta})=>{
-    const nombre=(meta.chainName||chainNames.get(String(meta.chainId||''))||'')+' '+meta.clientNames.join(' ')+' '+(r.clienteId?clientNames.get(String(r.clienteId))||'':'');
-    return nombre.toLowerCase().includes(q)||String(r.id).toLowerCase().includes(q);
+  const meta=r=>window.revisionHistoryMetadata?window.revisionHistoryMetadata(r):{clientNames:[],technician:'',chainName:''};
+  let filas=revisiones.map(r=>({r,m:meta(r)}));
+  const nombreDe=({r,m})=>m.clientName||m.chainName||clientNames.get(String(r.clienteId||m.clientId||''))||m.clientNames.join(', ')||'—';
+  if(q) filas=filas.filter(x=>{
+    const ubic=(x.r.items||[]).map(i=>i.ubicacionNombre||'').join(' ');
+    return (nombreDe(x)+' '+ubic+' '+(x.m.rutaNombre||'')).toLowerCase().includes(q)||String(x.r.id).toLowerCase().includes(q);
   });
   if(fecha) filas=filas.filter(({r})=>String(r.fecha||'').slice(0,10)===fecha);
   filas.sort((a,b)=>String(b.r.fecha||'').localeCompare(String(a.r.fecha||'')));
@@ -375,18 +264,17 @@ window.__revPintarHistorial=async function(cont){
     cont.innerHTML='<div class="empty-state"><i class="fas fa-inbox"></i><h3>Sin revisiones</h3><p>No hay revisiones registradas que coincidan con la búsqueda.</p></div>';
     return;
   }
-
-  cont.innerHTML='<div class="table-wrapper"><table><thead><tr><th>Fecha</th><th>Cliente / cadena</th><th>Técnico</th><th>Equipos</th><th>Resultado</th><th></th></tr></thead><tbody id="rev-hist-tbody">'+
-    filas.map(({r,meta})=>{
-      const nombre=meta.chainName||chainNames.get(String(meta.chainId||''))||meta.clientNames.join(', ')||(r.clienteId?clientNames.get(String(r.clienteId)):'—');
+  cont.innerHTML='<div class="table-wrapper"><table><thead><tr><th>Fecha</th><th>Cliente</th><th>Ruta / ubicaciones</th><th>Técnico</th><th>Puertas</th><th>Resultado</th><th></th></tr></thead><tbody>'+
+    filas.map(x=>{
+      const {r,m}=x;
+      const ubics=[...new Set((r.items||[]).map(i=>i.ubicacionNombre).filter(Boolean))];
       const crudo=r.estadoTrasRevision||((r.items||[]).some(i=>i.resultadoEstado==='x')?'Fuera de servicio':'Operativa');
-      const resultado=String(crudo).replace(/_/g,' ');
-      return '<tr><td>'+_esc(_fmt(r.fecha))+'</td><td>'+_esc(nombre||'—')+'</td><td>'+_esc(meta.technician||'—')+'</td>'+
-        '<td>'+(r.items||[]).length+'</td><td>'+_esc(resultado.charAt(0).toUpperCase()+resultado.slice(1))+'</td>'+
+      const res=String(crudo).replace(/_/g,' ');
+      return '<tr><td>'+_esc(_fmt(r.fecha))+'</td><td>'+_esc(nombreDe(x))+'</td>'+
+        '<td>'+_esc([m.rutaNombre,ubics.length>3?ubics.length+' ubicaciones':ubics.join(', ')].filter(Boolean).join(' · ')||'—')+'</td>'+
+        '<td>'+_esc(m.technician||'—')+'</td><td>'+(r.items||[]).length+'</td><td>'+_esc(res.charAt(0).toUpperCase()+res.slice(1))+'</td>'+
         '<td><button class="btn btn-outline btn-sm" data-accion="pdf-rev" data-id="'+_esc(r.id)+'"><i class="fas fa-file-pdf"></i></button></td></tr>';
     }).join('')+'</tbody></table></div>';
-
-  // Delegación de eventos del historial
   if(!cont.__delegadoHist){
     cont.__delegadoHist=true;
     cont.addEventListener('click',e=>{
@@ -397,109 +285,87 @@ window.__revPintarHistorial=async function(cont){
 };
 
 // ═══════════════════════════════════════════════════════════
-//  NUEVA REVISIÓN — pide cliente (o cadena) y fecha
+//  NUEVA REVISIÓN — cliente (con mantenimiento) y alcance
 // ═══════════════════════════════════════════════════════════
-window.abrirNuevaRevision=async function(cadenaPreseleccionada){
-  const [clientes,cadenas,rutas]=await Promise.all([dbGetAll('clientes'),dbGetAll('cadenas'),dbGetAll('rutas')]);
-  const cadenaIds=new Set(cadenas.map(c=>String(c.id)));
-  const rutasDeCadena=new Set(rutas.map(r=>String(r.id)));
+window.abrirNuevaRevision=async function(clientePreseleccionado){
+  const items=await C().getEstadoRevisiones();
+  if(!items.length){ showToast('Ningún cliente tiene mantenimiento contratado todavía','warning'); return; }
+  window.__nrItems=items;
+  const op=l=>l.map(c=>'<option value="'+_esc(c.id)+'">'+_esc(c.nombre)+'</option>').join('');
+  const body='<div class="form-grid">'+
+    '<div class="form-group"><label>Cliente *</label><select id="nr-cliente" class="input" onchange="window.__nrAlcance()">'+
+      '<option value="">— Seleccionar —</option>'+
+      (items.some(i=>i.central)?'<optgroup label="Centrales (varias ubicaciones)">'+op(items.filter(i=>i.central))+'</optgroup>':'')+
+      (items.some(i=>!i.central)?'<optgroup label="Individuales">'+op(items.filter(i=>!i.central))+'</optgroup>':'')+
+    '</select></div>'+
+    '<div class="form-group" id="nr-alcance-g" style="display:none"><label>Qué revisar</label><select id="nr-alcance" class="input"></select></div>'+
+    '<div class="form-group"><label>Fecha de revisión *</label><input id="nr-fecha" type="date" class="input" value="'+hoyISO()+'"></div>'+
+    '<p style="color:var(--text-muted);font-size:13px;margin:0;">Se abrirá el formulario con las puertas del alcance elegido.</p></div>';
+  openModal('Nueva revisión',body,
+    '<button class="btn btn-outline" onclick="cerrarFormularioRevision()">Cerrar</button>'+
+    '<button class="btn btn-primary" onclick="window.__revIniciar()"><i class="fas fa-arrow-right"></i> Continuar</button>');
+  if(clientePreseleccionado){ document.getElementById('nr-cliente').value=clientePreseleccionado; window.__nrAlcance(); }
+};
 
-  const opcionesCadenas=cadenas.map(c=>'<option value="C:'+_esc(c.id)+'">'+_esc(c.nombre)+'</option>').join('');
-  const clientesUnicos=clientes.filter(c=>{
-    const cid=String(c.cadenaId??c.cadenaid??c.padreId??c.padreid??'');
-    const rid=String(c.rutaId??c.rutaid??'');
-    return !cadenaIds.has(cid)&&!rutasDeCadena.has(rid);
-  });
-  const opcionesClientes=clientesUnicos.map(c=>'<option value="K:'+_esc(c.id)+'">'+_esc(c.nombre)+'</option>').join('');
-
-  const body=
-    '<div class="form-grid">'+
-      '<div class="form-group"><label>Cliente o cadena *</label>'+
-        '<select id="nr-cliente" class="input">'+
-          '<option value="">— Seleccionar —</option>'+
-          '<optgroup label="Cadenas">'+opcionesCadenas+'</optgroup>'+
-          '<optgroup label="Clientes">'+opcionesClientes+'</optgroup>'+
-        '</select></div>'+
-      '<div class="form-group"><label>Fecha de revisión *</label>'+
-        '<input id="nr-fecha" type="date" class="input" value="'+new Date().toISOString().slice(0,10)+'"></div>'+
-      '<p style="color:var(--text-muted);font-size:13px;margin:0;">Se abrirá el formulario de revisión con todas las puertas o tiendas del cliente seleccionado.</p>'+
-    '</div>';
-  const footer='<button class="btn btn-outline" onclick="cerrarFormularioRevision()">Cerrar</button>'+
-    '<button class="btn btn-primary" onclick="window.__revIniciar()"><i class="fas fa-arrow-right"></i> Continuar</button>';
-  openModal('Nueva revisión',body,footer);
-
-  if(cadenaPreseleccionada){
-    const sel=document.getElementById('nr-cliente');
-    if(sel) sel.value='C:'+cadenaPreseleccionada;
-  }
+window.__nrAlcance=function(){
+  const id=document.getElementById('nr-cliente').value;
+  const it=(window.__nrItems||[]).find(i=>String(i.id)===String(id));
+  const g=document.getElementById('nr-alcance-g'), sel=document.getElementById('nr-alcance');
+  if(!it||!it.central){ g.style.display='none'; sel.innerHTML=''; return; }
+  g.style.display='';
+  sel.innerHTML='<option value="todo">Toda la central ('+it.ubicaciones.length+' ubicaciones)</option>'+
+    (it.rutas.length?'<optgroup label="Una ruta">'+it.rutas.map(r=>'<option value="R:'+_esc(r.id)+'">'+_esc(r.nombre)+' ('+r.ubicaciones.length+')</option>').join('')+'</optgroup>':'')+
+    (it.ubicaciones.length?'<optgroup label="Una ubicación">'+it.ubicaciones.map(u=>'<option value="U:'+_esc(u.id)+'">'+_esc(u.denominacion)+'</option>').join('')+'</optgroup>':'');
 };
 
 window.__revIniciar=async function(){
-  const sel=document.getElementById('nr-cliente');
+  const clienteId=document.getElementById('nr-cliente').value;
   const fecha=document.getElementById('nr-fecha').value;
-  if(!sel||!sel.value) return showToast('Selecciona un cliente o cadena','error');
+  if(!clienteId) return showToast('Selecciona un cliente','error');
   if(!fecha) return showToast('Selecciona la fecha de revisión','error');
-  const [tipo,id]=sel.value.split(':');
+  const alcance=document.getElementById('nr-alcance')?.value||'todo';
   closeModal();
-  if(tipo==='C'){
-    const cadenas=await dbGetAll('cadenas');
-    const cadena=cadenas.find(c=>String(c.id)===id);
-    const nombre=(cadena?.nombre||'').trim().toLocaleUpperCase('es-ES');
-    if(nombre==='DOTICS') return window.openDoticsMaintenanceForm(id,null,fecha);
-    return window.openHiperberReviewForm(id,fecha);
-  }
-  return window.abrirFormularioRevisionCliente(id,fecha);
+  const opts={clienteId,fecha};
+  if(alcance.startsWith('R:')) opts.rutaId=alcance.slice(2);
+  if(alcance.startsWith('U:')) opts.ubicacionIds=[alcance.slice(2)];
+  return window.abrirFormularioRevision(opts);
 };
 
 // ═══════════════════════════════════════════════════════════
-//  PDF — informe de revisiones (usa el motor único)
+//  PDF — informe de estado de revisiones
+//  opts.rutaId: una ruta concreta ('sin-ruta' = ubicaciones sin ruta)
 // ═══════════════════════════════════════════════════════════
-window.generatePDF_informeCliente=async function(id, esCadena, rutaIdFiltro){
+window.generatePDF_informeCliente=async function(clienteId, opts){
+  opts=opts||{};
   await window.ensurePdfLibs?.();
+  const it=await _estadoDe(clienteId);
+  if(!it){ showToast('Este cliente no tiene mantenimiento contratado','warning'); return; }
   const doc=await createBrandedPDF('Informe de Revisiones','Estado de revisiones');
-  let nombre='—', lineas=[];
+  const lineas=[];
+  const puertaLinea=p=>['      · '+(p.nombre||'Puerta')+' ('+(window.TiposPuerta.nombre(p.tipo)||'—')+') · cada '+window.Periodicidad.frecuenciaMeses(p)+' m', _fmt(p.proximaRevision)];
+  const ubicLinea=u=>{ lineas.push(['   UBICACIÓN: '+u.denominacion+(u.direccion?' — '+u.direccion:''), '']); u.puertas.forEach(p=>lineas.push(puertaLinea(p))); };
 
-  if(esCadena){
-    const cadena=await dbGet('cadenas',id);
-    nombre=cadena?.nombre||'Cadena';
-    const rutas=await getRutasByCadena(id);
-    const rutasFiltradas=rutaIdFiltro?rutas.filter(r=>String(r.id)===String(rutaIdFiltro)):rutas;
-    for(const ruta of rutasFiltradas){
-      let puertas=[];
-      try{ puertas=await window.getPuertasDeRuta(ruta.id,id); }catch(e){ puertas=[]; }
-      const proxima=ruta.proximaRevision??ruta.proximarevision??puertas.map(p=>p.proximaRevision).filter(Boolean).sort()[0];
-      lineas.push(['RUTA: '+ruta.nombre+' ('+puertas.length+' tienda'+(puertas.length===1?'':'s')+')', proxima?_fmt(proxima):'Sin programar']);
-      // Nombre de la tienda como encabezado de su grupo de puertas
-      const porTienda=new Map();
-      puertas.forEach(p=>{
-        const key=p.clienteNombre||'(sin tienda)';
-        if(!porTienda.has(key)) porTienda.set(key,[]);
-        porTienda.get(key).push(p);
-      });
-      for(const [tienda,ps] of porTienda){
-        lineas.push(['TIENDA: '+tienda, '']);
-        for(const p of ps) lineas.push(['    '+((p.nombre||'Puerta')+' ('+(p.puertaTipo||'—')+')'), _fmt(p.proximaRevision)]);
-      }
+  lineas.push(['Cliente', it.nombre]);
+  lineas.push(['Próxima revisión', it.proximaRevision?_fmt(it.proximaRevision):'Sin programar']);
+  lineas.push(['Estado', _badge(it.proximaRevision).texto]);
+  if(it.central){
+    const rutas=opts.rutaId?(opts.rutaId==='sin-ruta'?[]:it.rutas.filter(r=>String(r.id)===String(opts.rutaId))):it.rutas;
+    for(const r of rutas){
+      lineas.push(['RUTA: '+r.nombre+' ('+plural(r.ubicaciones.length,'ubicación','ubicaciones')+')', r.proximaRevision?_fmt(r.proximaRevision):'Sin programar']);
+      r.ubicaciones.forEach(ubicLinea);
+    }
+    if(!opts.rutaId||opts.rutaId==='sin-ruta'){
+      if(it.sinRuta.length){ lineas.push(['UBICACIONES SIN RUTA','']); it.sinRuta.forEach(ubicLinea); }
     }
   }else{
-    const cliente=await dbGet('clientes',id);
-    nombre=cliente?.nombre||'Cliente';
-    const puertas=await dbGetByIndex('puertas','clienteId',id);
-    const proxima=puertas.map(p=>p.proximaRevision).filter(Boolean).sort()[0];
-    const badge=_badge(proxima);
-    lineas.push(['Cliente', nombre]);
-    lineas.push(['Próxima revisión', proxima?_fmt(proxima):'Sin programar']);
-    lineas.push(['Estado', badge.texto]);
-    lineas.push(['Puertas registradas', String(puertas.length)]);
-    for(const p of puertas) lineas.push(['   · '+(p.nombre||'Puerta')+' ('+(p.puertaTipo||'—')+')', _fmt(p.proximaRevision)]);
+    lineas.push(['Puertas registradas', String(it.puertas.length)]);
+    it.puertas.forEach(p=>lineas.push(puertaLinea(p)));
   }
-
   doc.autoTable(pdfTableStyle({startY:38,head:[['Concepto','Detalle / fecha']],body:lineas,
     headStyles:{fillColor:PDF_BRAND.primary,textColor:255,fontSize:8,fontStyle:'bold',cellPadding:3},
     bodyStyles:{fontSize:8,cellPadding:2.5,textColor:PDF_BRAND.text}}));
   addPDFFootersAllPages(doc);
-  const filename='revisiones_'+String(nombre).replace(/[^a-zA-Z0-9_-]/g,'_')+'_'+new Date().toISOString().slice(0,10)+'.pdf';
-  doc.save(filename);
+  doc.save('revisiones_'+String(it.nombre).replace(/[^a-zA-Z0-9_-]/g,'_')+'_'+hoyISO()+'.pdf');
   showToast('Informe de revisiones generado');
 };
 

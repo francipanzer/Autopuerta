@@ -128,7 +128,7 @@ function renderTableroCard(card, clientes, empleados) {
         <small>${employee ? window.avatarIniciales(employee.nombre, 'sm') + `<i class="fas fa-user"></i> ${escapeTablero(employee.nombre)}` : ''}</small>
         <div class="board-card-actions">
           <button class="btn btn-outline" type="button" title="Editar tarjeta" aria-label="Editar tarjeta" data-card-action="edit" data-id="${escapeTablero(card.id)}"><i class="fas fa-pen"></i></button>
-          <button class="btn btn-outline" type="button" title="Eliminar tarjeta" aria-label="Eliminar tarjeta" data-card-action="delete" data-id="${escapeTablero(card.id)}"><i class="fas fa-trash"></i></button>
+          <button class="btn btn-danger" type="button" title="Eliminar tarjeta" aria-label="Eliminar tarjeta" data-card-action="delete" data-id="${escapeTablero(card.id)}"><i class="fas fa-trash"></i></button>
         </div>
       </div>
     </article>`;

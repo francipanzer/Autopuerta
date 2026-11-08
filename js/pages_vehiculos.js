@@ -4,7 +4,7 @@ window.render_vehiculos = async function(el){
   el.innerHTML =
     '<div class="page-header"><div><h2>Vehículos</h2><p>Gestión de flota de trabajo</p></div>'+
     '<div class="header-actions"><button class="btn btn-primary" onclick="showVehiculoForm()"><i class="fas fa-plus"></i> Nuevo Vehículo</button></div></div>'+
-    '<div class="stats-grid">'+
+    '<div class="stats-grid stats-3">'+
       '<div class="stat-card"><div class="stat-icon" style="background:#dbeafe;color:#2563eb"><i class="fas fa-truck"></i></div><div class="stat-info"><h3>'+vehiculos.length+'</h3><p>Total vehículos</p></div></div>'+
       '<div class="stat-card"><div class="stat-icon" style="background:#dcfce7;color:#16a34a"><i class="fas fa-check-circle"></i></div><div class="stat-info"><h3>'+vehiculos.filter(v=>v.estado==='disponible').length+'</h3><p>Disponibles</p></div></div>'+
       '<div class="stat-card"><div class="stat-icon" style="background:#ffedd5;color:#ea580c"><i class="fas fa-route"></i></div><div class="stat-info"><h3>'+vehiculos.filter(v=>v.estado==='en_ruta').length+'</h3><p>En ruta</p></div></div>'+

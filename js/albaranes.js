@@ -98,7 +98,7 @@
       </div>
       ${pendingHtml}
       <div class="card"><div class="table-wrapper"><table>
-        <thead><tr><th>Nº albarán</th><th>Cliente</th><th>Fecha</th><th>Presupuesto</th><th>${admin ? 'Técnico(s)' : 'Estado'}</th></tr></thead>
+        <thead><tr><th>Nº albarán</th><th data-titulo>Cliente</th><th>Fecha</th><th>Presupuesto</th><th>${admin ? 'Técnico(s)' : 'Estado'}</th></tr></thead>
         <tbody>${records.map(record => {
           const assignedNames = (record.tecnicoIds || []).map(id => names[String(id)]).filter(Boolean).join(', ');
           return `<tr data-albaran-row="${esc(record.id)}" style="cursor:pointer">
@@ -127,7 +127,7 @@
       <div class="form-group"><label>Trabajo / material</label><input data-line-description maxlength="240" value="${esc(line.descripcion)}" required></div>
       <div class="form-group"><label>Cantidad</label><input data-line-quantity type="number" min="0.01" step="0.01" value="${esc(line.cantidad ?? 1)}" required></div>
       <div class="form-group"><label>Unidad</label><input data-line-unit maxlength="20" value="${esc(line.unidad || 'ud')}"></div>
-      <button type="button" class="btn btn-primary btn-sm" data-remove-line="${index}" aria-label="Quitar línea"><i class="fas fa-trash"></i></button>
+      <button type="button" class="btn btn-danger btn-sm" data-remove-line="${index}" aria-label="Quitar línea"><i class="fas fa-trash"></i></button>
     </div>`).join('');
   }
 

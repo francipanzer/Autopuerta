@@ -404,7 +404,7 @@ window.PLANTILLAS_MEDIDAS_V2 = { abrirMedicion(){}, abrirEditor(){}, abrirRegist
         <input type="text" placeholder="Defecto" value="${_esc(c.defecto)}" data-i="${i}" data-f="defecto" class="pmv2e-campo-in">
         <input type="text" placeholder="Mín" value="${_esc(c.min)}" data-i="${i}" data-f="min" class="pmv2e-campo-in">
         <input type="text" placeholder="Máx" value="${_esc(c.max)}" data-i="${i}" data-f="max" class="pmv2e-campo-in">
-        <button type="button" class="btn btn-outline btn-sm btn-icon" title="Quitar" onclick="PLANTILLAS_MEDIDAS_V2._quitarCampo(${i})"><i class="fas fa-minus"></i></button>
+        <button type="button" class="btn btn-danger btn-sm btn-icon" title="Quitar" onclick="PLANTILLAS_MEDIDAS_V2._quitarCampo(${i})"><i class="fas fa-minus"></i></button>
       </div>`).join('') +
       (estadoEdit.campos.length ? '<small style="color:var(--text-muted)">Columnas: etiqueta · valor por defecto · mínimo · máximo</small>' : '<small style="color:var(--text-muted)">Aún no hay campos. Añade al menos uno (p. ej. "Ancho hueco (mm)").</small>');
     cont.querySelectorAll('.pmv2e-campo-in').forEach(inp => {

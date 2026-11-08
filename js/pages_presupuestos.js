@@ -16,7 +16,7 @@ window.render_presupuestos = async function(el){
       '<input type="date" id="presHasta" onchange="window.__presPagina=0;renderPresupuestos()" title="Hasta">'+
     '</div>'+
     '<div class="card"><div  class="table-wrapper"><table><thead>'+
-      '<tr><th>ID</th><th>Cliente</th><th>Fecha</th><th>Válido hasta</th><th>Total</th><th>Parte</th><th>Estado</th></tr>'+
+      '<tr><th>ID</th><th data-titulo>Cliente</th><th>Fecha</th><th>Válido hasta</th><th>Total</th><th>Parte</th><th>Estado</th></tr>'+
     '</thead><tbody id="presBody"></tbody></table></div></div>'+
     '<div id="navPres" style="display:none;text-align:center;margin-top:12px">'+
       '<button class="btn btn-outline btn-sm" id="btnPresPrev" style="display:none"><i class="fas fa-chevron-up"></i> Mostrar menos</button> '+
@@ -184,7 +184,7 @@ function renderLineItems(cid, items){
       '<td><input type="number" data-field="cantidad" class="only-num-dec" min="0" step="0.01" inputmode="decimal" value="'+(Number(item.cantidad)||0)+'" onchange="updateLineItem(\''+cid+'\','+i+',\'cantidad\',this.value)" style="width:110px"></td>'+
       '<td><input type="number" data-field="precio" class="only-num-dec" min="0" step="0.01" inputmode="decimal" value="'+(Number(item.precio)||0)+'" onchange="updateLineItem(\''+cid+'\','+i+',\'precio\',this.value)" style="width:110px"></td>'+
       '<td><strong id="'+cid+'_subtotal_'+i+'">'+formatCurrency(item.cantidad*item.precio)+'</strong></td>'+
-      '<td><button class="btn btn-outline btn-sm btn-icon" onclick="removeLineItem(\''+cid+'\','+i+')" title="Eliminar línea"><i class="fas fa-minus"></i></button></td>'+
+      '<td><button class="btn btn-danger btn-sm btn-icon" onclick="removeLineItem(\''+cid+'\','+i+')" title="Eliminar línea"><i class="fas fa-minus"></i></button></td>'+
     '</tr>'
   ).join('');
 }
@@ -363,7 +363,7 @@ window.showPresupuestoForm = async function(id, tpl){
     '</span>'+
   '</div>'+
   '<h3 style="margin:20px 0 10px">Conceptos</h3>'+
-  '<div class="table-wrapper"><table><thead><tr><th>Tipo</th><th>Descripción</th><th>REF</th><th>Cant.</th><th>Precio</th><th>Subtotal</th><th></th></tr></thead><tbody id="'+lid+'_items"></tbody></table></div>'+
+  '<div class="table-wrapper keep-table"><table><thead><tr><th>Tipo</th><th>Descripción</th><th>REF</th><th>Cant.</th><th>Precio</th><th>Subtotal</th><th></th></tr></thead><tbody id="'+lid+'_items"></tbody></table></div>'+
   '<button class="btn btn-primary btn-sm" style="margin-top:10px" onclick="addLineItem(\''+lid+'\')"><i class="fas fa-plus"></i> Añadir línea</button>'+
   '<div class="totals-box" id="'+lid+'_totals" style="display:none">'+
     '<div class="row"><span>Subtotal:</span><span id="'+lid+'_subtotal">0,00 ,</span></div>'+
@@ -656,7 +656,7 @@ window.showPlantillasPresupuesto = function(){
         '<div style="display:flex;align-items:center;gap:8px;justify-content:space-between;padding:10px;border:1px solid var(--border,#e5e7eb);border-radius:8px">'+
         '<div><strong>'+escapeHtml(t.nombre)+'</strong><div style="font-size:12px;color:var(--text-muted)">'+(t.lineItems||[]).length+' conceptos</div></div>'+
         '<div style="display:flex;gap:6px"><button class="btn btn-primary btn-sm" onclick="usarPlantillaPresupuesto(\''+escapeHtml(t.id)+'\')">Usar</button>'+
-        '<button class="btn btn-outline btn-sm btn-icon" title="Eliminar" onclick="borrarPlantillaPresupuesto(\''+escapeHtml(t.id)+'\')"><i class="fas fa-trash"></i></button></div></div>'
+        '<button class="btn btn-danger btn-sm btn-icon" title="Eliminar" onclick="borrarPlantillaPresupuesto(\''+escapeHtml(t.id)+'\')"><i class="fas fa-trash"></i></button></div></div>'
       ).join('')+'</div>'
     : '<p style="color:var(--text-muted)">Aún no hay plantillas. Usa el icono de marcador en un presupuesto para guardarlo como plantilla.</p>';
   openModal('Plantillas de presupuesto', body, '<button class="btn btn-outline" onclick="closeModal()">Cerrar</button>');

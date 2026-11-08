@@ -5787,7 +5787,7 @@ window.openDoticsMaintenanceForm = async function(chainId, doorId=null, fechaPre
   let chain=await getCadenaById(chainId);
   if(!chain){
     const client=await dbGet('clientes',chainId);
-    if(client?.nombre?.trim().toLocaleUpperCase()==='DOTICS') chain={id:client.id,nombre:client.nombre};
+    if(String(client?.nombre||'').toLocaleUpperCase().includes('DOTICS')) chain={id:client.id,nombre:client.nombre};
   }
   if(!chain) return showToast('No se encontró la cadena DOTICS','error');
   const door=doorId ? await dbGet('puertas',doorId) : null;
@@ -6224,7 +6224,7 @@ async function render_rutas(mainOrChainId, requestedChainId) {
     console.warn('No se pudo leer nombre cadena', cadenaId);
   }
 
-  const esDotics=cadenaNombre.trim().toLocaleUpperCase()==='DOTICS';
+  const esDotics=String(cadenaNombre||'').toLocaleUpperCase().includes('DOTICS');
   const esHiperber=cadenaNombre.trim().toLocaleUpperCase()==='HIPERBER';
   main.innerHTML = `
     <div class="page-header">

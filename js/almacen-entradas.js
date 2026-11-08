@@ -122,7 +122,7 @@
       <td><select data-f="articuloId" style="${inp}width:100%;min-width:190px;">${artOptions(l.articuloId)}</select>
         <div data-motivo style="font-size:11px;color:${col};margin-top:2px;">${txt}${low ? ' · lectura dudosa' : ''}</div></td>
       <td style="white-space:nowrap;"><button type="button" class="btn btn-outline btn-sm" data-act="merge" title="Unir con la línea anterior (descripción partida)"><i class="fas fa-arrow-up"></i></button>
-        <button type="button" class="btn btn-outline btn-sm" data-act="del" title="Quitar línea"><i class="fas fa-trash"></i></button></td>
+        <button type="button" class="btn btn-danger btn-sm" data-act="del" title="Quitar línea"><i class="fas fa-trash"></i></button></td>
     </tr>`;
   }
 

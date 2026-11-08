@@ -13,7 +13,7 @@ window.render_partesTrabajo = async function(el){
       '<input type="date" id="filterFechaHasta" onchange="window.__partesPagina=0;renderPartes()" title="Hasta">'+
     '</div>'+
     '<div class="card"><div  class="table-wrapper"><table><thead>'+
-            '<tr><th>ID</th><th>Cliente</th><th>Ubicación</th><th>Puertas</th><th>Técnico</th><th>Tipo Puerta</th><th>Kms</th><th>Horas</th><th>Fotos</th><th>Fecha</th></tr>'+
+            '<tr><th>ID</th><th data-titulo>Cliente</th><th>Ubicación</th><th>Puertas</th><th>Técnico</th><th>Tipo Puerta</th><th>Kms</th><th>Horas</th><th>Fotos</th><th>Fecha</th></tr>'+
     '</thead><tbody id="parteBody"></tbody></table></div></div>'+
     '<div id="navPartes" style="display:none;text-align:center;margin-top:12px">'+
       '<button class="btn btn-outline btn-sm" id="btnParPrev" style="display:none"><i class="fas fa-chevron-up"></i> Mostrar menos</button> '+
@@ -221,12 +221,33 @@ window.verFichaParte = async function(id){
     '<button class="btn btn-outline btn-sm" onclick="closeModal()">Cerrar</button>'+
     '<button class="btn btn-primary btn-sm" onclick="closeModal();showParteForm(\''+escapeHtml(String(p.id))+'\')"><i class="fas fa-pen"></i> Editar</button>'+
     '<button class="btn btn-primary btn-sm" onclick="generatePDF_partes(\''+escapeHtml(String(p.id))+'\')"><i class="fas fa-file-pdf"></i> PDF</button>'+
-    '<button class="btn btn-danger btn-sm" onclick="confirmDelete(\'Parte '+escapeHtml(String(p.id))+'\', ()=>deleteParte('+JSON.stringify(String(p.id))+'))"><i class="fas fa-trash"></i> Eliminar</button>');
+    '<button class="btn btn-danger btn-sm" onclick="confirmDelete(\'Parte '+escapeHtml(String(p.id))+'\', ()=>deleteParte(\''+escapeHtml(String(p.id))+'\'))"><i class="fas fa-trash"></i> Eliminar</button>');
 };
 // Caché de nombres de puertas para la ficha
 let mapPuertasCache = {};
 window.tiposMapCache = window.tiposMapCache || new Map();   // (compartida con almacén)
 const MATERIAL_UNIDADES = ['ud', 'l', 'kg', 'm', 'caja'];
+
+// Búsqueda de artículos para el material del parte: todas las palabras deben aparecer (código, nombre,
+// descripción o familia, sin distinguir mayúsculas ni acentos); primero los códigos y nombres que empiezan igual.
+const matNorm = s => String(s ?? '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+window.buscarArticulosMaterial = function(articulos, texto, max){
+  const palabras = matNorm(texto).split(/\s+/).filter(Boolean);
+  if(!palabras.length) return { items: [], total: 0 };
+  const puntuados = [];
+  for(const a of articulos || []){
+    if(a.baja) continue;
+    const codigo = matNorm(a.sageCodigo || a.referencia);
+    const nombre = matNorm(a.nombre);
+    const resto = matNorm([a.codigoAlt, a.descripcion, a.familia].join(' '));
+    const todo = codigo + ' ' + nombre + ' ' + resto;
+    if(!palabras.every(p => todo.includes(p))) continue;
+    const q = palabras.join(' ');
+    puntuados.push({ a, puntos: (codigo === q ? 0 : codigo.startsWith(q) ? 1 : nombre.startsWith(q) ? 2 : palabras.every(p => codigo.includes(p) || nombre.includes(p)) ? 3 : 4) });
+  }
+  puntuados.sort((x, y) => x.puntos - y.puntos || String(x.a.nombre || '').localeCompare(String(y.a.nombre || ''), 'es', { sensitivity: 'base' }));
+  return { items: puntuados.slice(0, max || 8).map(p => p.a), total: puntuados.length };
+};
 
 function materialesParteHtml() {
   const st = window.__materialesParte || { lines: [], almacen: [] };
@@ -234,33 +255,137 @@ function materialesParteHtml() {
   const rows = st.lines.map((l, i) => {
     const art = l.articuloId ? st.almacen.find(a => String(a.id) === String(l.articuloId)) : null;
     const hint = art ? 'Stock en almacén: ' + (Number(art.stock) || 0) : '';
-    const artSel = art ? art.nombre : (l.descripcion || '');
+    const campo = art
+      ? '<div class="mat-chip"><span class="mat-chip-txt"><b>' + escapeHtml(art.nombre) + '</b><small>' + escapeHtml(art.sageCodigo || art.referencia || '') + (art.baja ? ' · de baja' : '') + '</small></span>' +
+        '<button type="button" class="mat-chip-x" aria-label="Cambiar artículo" onclick="matCambiar(' + i + ')"><i class="fas fa-xmark"></i></button></div>'
+      : '<input type="search" class="mat-search" id="pt_mat_q_' + i + '" autocomplete="off" enterkeyhint="search" placeholder="Buscar por código o nombre…" value="' + escapeHtml(l.descripcion || '') + '" ' +
+        'oninput="matBuscar(' + i + ',this)" onfocus="matBuscar(' + i + ',this)" onkeydown="matTecla(event,' + i + ')">' +
+        '<div class="mat-results" id="pt_mat_res_' + i + '" hidden></div>';
     return '<div class="mat-row">' +
-      '<div class="mat-name"><select onchange="updateMaterialParteDeLista(' + i + ',this)" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;font-size:14px">' +
-        '<option value="">— Elegir artículo —</option>' +
-        (st.__almacenOrdenado || []).map(a => '<option value="' + escapeHtml(a.nombre) + '"' + (a.nombre === artSel ? ' selected' : '') + '>' + escapeHtml(a.nombre) + (a.referencia ? ' (' + escapeHtml(a.referencia) + ')' : '') + '</option>').join('') +
-        (artSel && !(st.__almacenOrdenado || []).some(a => a.nombre === artSel) ? '<option value="' + escapeHtml(artSel) + '" selected>' + escapeHtml(artSel) + ' (manual)</option>' : '') +
-      '</select>' +
-        '<small id="pt_mat_hint_' + i + '" class="mat-hint">' + escapeHtml(hint) + '</small></div>' +
+      '<div class="mat-name">' + campo + '<small id="pt_mat_hint_' + i + '" class="mat-hint">' + escapeHtml(hint) + '</small></div>' +
       '<input type="number" min="0" step="0.01" inputmode="decimal" value="' + (l.cantidad || '') + '" placeholder="Cant." oninput="updateMaterialParte(' + i + ',\'cantidad\',this.value)">' +
       '<select onchange="updateMaterialParte(' + i + ',\'unidad\',this.value)">' + optU(l.unidad || 'ud') + '</select>' +
-      '<button type="button" class="btn btn-outline btn-sm btn-icon" title="Quitar" onclick="removeMaterialParte(' + i + ')"><i class="fas fa-trash"></i></button>' +
+      '<button type="button" class="btn btn-danger btn-sm btn-icon" title="Quitar" onclick="removeMaterialParte(' + i + ')"><i class="fas fa-trash"></i></button>' +
     '</div>';
   }).join('');
   return rows || '<small style="color:var(--text-muted)">Sin material. Pulsa «Añadir material» si has usado alguno.</small>';
 }
 
-// Al elegir un artículo del desplegable: fija descripción y articuloId
-window.updateMaterialParteDeLista = function(i, sel){
-  const st = window.__materialesParte;
-  const line = st?.lines[i];
+function matRepintar(enfocar){
+  const box = document.getElementById('pt_materiales');
+  if(box) box.innerHTML = materialesParteHtml();
+  if(enfocar) box?.querySelectorAll('.mat-row')[enfocar.fila]?.querySelector(enfocar.selector)?.focus();
+}
+
+// Escribir en el buscador: guarda el texto como material libre y lista las coincidencias del almacén
+window.matBuscar = function(i, input){
+  const st = window.__materialesParte, line = st?.lines[i];
   if(!line) return;
-  line.descripcion = sel.value;
-  const art = (st.almacen || []).find(a => a.nombre === sel.value);
-  line.articuloId = art ? art.id : '';
+  line.descripcion = input.value;
+  line.articuloId = '';
+  const res = document.getElementById('pt_mat_res_' + i);
+  if(!res) return;
+  const texto = input.value.trim();
+  const { items, total } = window.buscarArticulosMaterial(st.almacen, texto, 8);
+  let html = '';
+  if(!texto) html = '<div class="mat-vacio">Escribe el código o parte del nombre.</div>';
+  else {
+    html = items.map(a => '<button type="button" class="mat-opt" data-id="' + escapeHtml(a.id) + '" onclick="matElegir(' + i + ',this.dataset.id)">' +
+      '<b>' + escapeHtml(a.nombre) + '</b><small>' + escapeHtml(a.sageCodigo || a.referencia || '') + (a.familia ? ' · ' + escapeHtml(a.familia) : '') + ' · Stock ' + (a.controlStock === false ? '—' : (Number(a.stock) || 0)) + '</small></button>').join('');
+    if(!items.length) html = '<div class="mat-vacio">Sin coincidencias en el almacén.</div>';
+    else if(total > items.length) html += '<div class="mat-vacio">' + (total - items.length) + ' coincidencias más: sigue escribiendo para afinar.</div>';
+    html += '<button type="button" class="mat-opt mat-opt-manual" onclick="matCerrar()"><i class="fas fa-pen"></i> Usar «' + escapeHtml(texto) + '» como material sin artículo (no descuenta stock)</button>';
+  }
+  res.innerHTML = html;
+  res.hidden = false;
   const hint = document.getElementById('pt_mat_hint_' + i);
-  if(hint) hint.textContent = art ? 'Stock en almacén: ' + (Number(art.stock) || 0) : '';
+  if(hint) hint.textContent = '';
 };
+
+window.matTecla = function(ev, i){
+  if(ev.key === 'Enter'){
+    ev.preventDefault();
+    const primero = document.querySelector('#pt_mat_res_' + i + ' .mat-opt[data-id]');
+    if(primero) window.matElegir(i, primero.dataset.id);
+  } else if(ev.key === 'Escape') window.matCerrar();
+};
+
+window.matElegir = function(i, id){
+  const st = window.__materialesParte, line = st?.lines[i];
+  const art = st && (st.almacen || []).find(a => String(a.id) === String(id));
+  if(!line || !art) return;
+  line.articuloId = art.id;
+  line.descripcion = art.nombre;
+  matRepintar({ fila: i, selector: 'input[type="number"]' });      // el siguiente paso es la cantidad
+  const hint = document.getElementById('pt_mat_hint_' + i);
+  if(hint) hint.textContent = 'Stock en almacén: ' + (art.controlStock === false ? 'sin control (servicio)' : (Number(art.stock) || 0));
+};
+
+window.matCambiar = function(i){
+  const line = window.__materialesParte?.lines[i];
+  if(!line) return;
+  line.articuloId = ''; line.descripcion = '';
+  matRepintar({ fila: i, selector: '.mat-search' });
+};
+
+window.matCerrar = function(){ document.querySelectorAll('.mat-results').forEach(r => { r.hidden = true; }); };
+if(!window.__matCierreBound){
+  window.__matCierreBound = true;
+  document.addEventListener('click', e => { if(!e.target.closest('.mat-name')) window.matCerrar(); });
+}
+
+// Muestra/oculta un grupo del formulario (clase aparte para que aplicarModo no lo vuelva a mostrar)
+function ptOcultar(id, oculto){ document.getElementById(id)?.classList.toggle('pt-oculto', !!oculto); }
+
+// Buscador de clientes del parte: todas las palabras deben aparecer (sin distinguir mayúsculas ni tildes).
+// opciones: [{value, label}]. El <select id="pt_cliente"> (oculto) sigue guardando el valor y lanzando «change».
+window.ptBuscarOpciones = function(opciones, texto, max){
+  const palabras = matNorm(texto).split(/\s+/).filter(Boolean);
+  if(!palabras.length) return { items: [], total: 0 };
+  const q = palabras.join(' ');
+  const hits = (opciones || []).filter(o => { const n = matNorm(o.label); return palabras.every(p => n.includes(p)); });
+  hits.sort((a, b) => (matNorm(a.label).startsWith(q) ? 0 : 1) - (matNorm(b.label).startsWith(q) ? 0 : 1) || String(a.label).localeCompare(String(b.label), 'es', { sensitivity: 'base' }));
+  return { items: hits.slice(0, max || 8), total: hits.length };
+};
+
+function initBuscadorCliente(){
+  const sel = document.getElementById('pt_cliente'), q = document.getElementById('pt_cliente_q'), res = document.getElementById('pt_cliente_res');
+  if(!sel || !q || !res) return;
+  const opciones = () => [...sel.options].filter(o => o.value).map(o => ({ value: o.value, label: o.textContent }));
+  const textoActual = () => { const o = sel.options[sel.selectedIndex]; return sel.value && o ? o.textContent : ''; };
+  const pintar = () => {
+    const texto = q.value.trim();
+    if(!texto){ res.hidden = true; return; }
+    const { items, total } = window.ptBuscarOpciones(opciones(), texto, 8);
+    res.innerHTML = items.map(o => '<button type="button" class="mat-opt" data-v="' + escapeHtml(o.value) + '"><b>' + escapeHtml(o.label) + '</b></button>').join('') +
+      (!items.length ? '<div class="mat-vacio">Sin coincidencias. Puedes crear el cliente con el botón +.</div>' : '') +
+      (total > items.length ? '<div class="mat-vacio">' + (total - items.length) + ' coincidencias más: sigue escribiendo para afinar.</div>' : '');
+    res.hidden = false;
+  };
+  const elegir = v => { sel.value = v; sel.dispatchEvent(new Event('change')); q.value = textoActual(); res.hidden = true; };
+  q.addEventListener('input', () => {
+    if(!q.value.trim() && sel.value){ sel.value = ''; sel.dispatchEvent(new Event('change')); }
+    pintar();
+  });
+  q.addEventListener('focus', () => { q.select(); });
+  q.addEventListener('keydown', e => {
+    if(e.key === 'Enter'){ e.preventDefault(); const primero = res.querySelector('.mat-opt'); if(primero) elegir(primero.dataset.v); }
+    else if(e.key === 'Escape'){ res.hidden = true; }
+  });
+  res.addEventListener('click', e => { const b = e.target.closest('.mat-opt'); if(b) elegir(b.dataset.v); });
+  sel.addEventListener('change', () => { q.value = textoActual(); });     // también si se cambia por código (cliente recién creado)
+  q.value = textoActual();
+  if(!window.__ptClienteCierre){
+    window.__ptClienteCierre = true;
+    document.addEventListener('click', e => {
+      const r = document.getElementById('pt_cliente_res'), qq = document.getElementById('pt_cliente_q'), s = document.getElementById('pt_cliente');
+      if(!r || !qq || !s || e.target.closest('#pt_cliente_q,#pt_cliente_res')) return;
+      r.hidden = true;
+      const o = s.options[s.selectedIndex];
+      qq.value = s.value && o ? o.textContent : '';                       // lo escrito sin elegir se descarta
+    });
+  }
+}
 
 window.addMaterialParte = function() {
   window.__materialesParte.lines.push({ articuloId: '', descripcion: '', cantidad: '', unidad: 'ud' });
@@ -307,7 +432,6 @@ window.showParteForm = async function(id, prefill) {
   window.__tiposPuertaCache = await window.TiposPuerta.filasDB();
   window.__materialesParte = {
     almacen: almacenArticulos,
-    __almacenOrdenado: [...almacenArticulos].sort((a, b) => String(a.nombre || '').localeCompare(String(b.nombre || ''), 'es', { sensitivity: 'base' })),
     lines: (Array.isArray(p.materiales) ? p.materiales : []).map(m => ({
       articuloId: m.articuloId || '', descripcion: m.descripcion || '', cantidad: m.cantidad ?? '', unidad: m.unidad || 'ud'
     }))
@@ -341,33 +465,36 @@ window.showParteForm = async function(id, prefill) {
   const form = '<div class="form-grid">' +
     // Tipo de parte: normal (con cliente) o interno (desplazamiento sin cliente)
     '<div class="form-group full"><label>Tipo de parte</label>' +
-      '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">' +
-        '<label style="display:flex;align-items:center;gap:6px;font-weight:600"><input type="radio" name="pt_tipo_parte" id="pt_tipo_normal" value="normal" ' + (!p.interno ? 'checked' : '') + '> Trabajo normal</label>' +
-        '<label style="display:flex;align-items:center;gap:6px;font-weight:600"><input type="radio" name="pt_tipo_parte" id="pt_tipo_interno" value="interno" ' + (p.interno ? 'checked' : '') + '> Desplazamiento interno</label>' +
+      '<div style="display:flex;gap:8px;align-items:stretch;flex-wrap:wrap">' +
+        '<label style="flex:1 1 130px;display:flex;align-items:center;justify-content:center;gap:8px;font-weight:600;padding:10px;border:1px solid var(--border);border-radius:10px;background:var(--surface-alt);cursor:pointer"><input type="radio" name="pt_tipo_parte" id="pt_tipo_normal" value="normal" ' + (!p.interno ? 'checked' : '') + '> Trabajo normal</label>' +
+        '<label style="flex:1 1 130px;display:flex;align-items:center;justify-content:center;gap:8px;font-weight:600;padding:10px;border:1px solid var(--border);border-radius:10px;background:var(--surface-alt);cursor:pointer"><input type="radio" name="pt_tipo_parte" id="pt_tipo_interno" value="interno" ' + (p.interno ? 'checked' : '') + '> Desplazamiento interno</label>' +
       '</div>' +
-      '<small style="color:var(--text-muted);display:block;margin-top:4px">"Desplazamiento interno" = recogida de material, taller, formación... No se asigna a ningún cliente y sus KMs cuentan para el vehículo.</small>' +
+      '<small style="color:var(--text-muted);display:block;margin-top:4px">Desplazamiento interno = recogida de material, taller, formación… Sin cliente; sus KMs cuentan para el vehículo.</small>' +
     '</div>' +
-    '<div class="form-group"><label>ID</label><input id="pt_id" value="' + escapeHtml(nextId) + '"></div>' +
-    '<div class="form-group normal-only"><label>Cliente * <span id="pt_cliente_geo_icon"></span></label><select id="pt_cliente">' +
+    '<div class="form-group full"><label>Técnico asignado</label><select id="pt_empleado">' +
+      '<option value="">— Sin asignar</option>' +
+      empleados.map(e => '<option value="' + e.id + '" data-nombre="' + escapeHtml(e.nombre) + '" ' + (p.empleadoId === e.id ? 'selected' : '') + '>' + escapeHtml(e.nombre) + '</option>').join('') +
+    '</select></div>' +
+    '<div class="form-group full normal-only"><label>Cliente * <span id="pt_cliente_geo_icon"></span></label><div style="display:flex;gap:6px"><div style="flex:1;min-width:0;position:relative">' +
+      '<input type="search" id="pt_cliente_q" class="mat-search" data-sin-voz autocomplete="off" enterkeyhint="search" placeholder="Buscar cliente por nombre…">' +
+      '<div id="pt_cliente_res" class="mat-results" hidden></div>' +
+      '<select id="pt_cliente" style="display:none">' +
       '<option value="">— Seleccionar</option>' +
       (clienteSinFicha ? '<option value="__incidencia__" data-nombre="' + escapeHtml(clienteNombrePrefill) + '" selected>' + escapeHtml(clienteNombrePrefill) + ' (incidencia)</option>' : '') +
       clientes.map(c => '<option value="' + c.id + '" data-nombre="' + escapeHtml(c.nombre) + '" ' + (String(clienteIdSeleccionado) === String(c.id) ? 'selected' : '') + '>' + escapeHtml(c.nombre) + '</option>').join('') +
     '</select></div>' +
-    '<div class="form-group normal-only"><label>Tipo Puerta *</label><select id="pt_tipo">' +
+    '<button type="button" class="btn btn-outline btn-sm" onclick="abrirFichaClienteDesdeParte()" title="Crear un cliente nuevo y dejarlo seleccionado en este parte" style="flex-shrink:0"><i class="fas fa-user-plus"></i></button></div></div>' +
+    '<div class="form-group full normal-only pt-oculto" id="pt_ubic_group"><label>Ubicación del trabajo</label><select id="pt_ubicacion"><option value="">-- Selecciona un cliente primero --</option></select></div>' +
+    '<div class="form-group full normal-only"><label>Tipo Puerta *</label><select id="pt_tipo">' +
       '<option value="">— Seleccionar tipo —</option>' +
       (window.__tiposPuertaCache || []).map(t => '<option value="' + escapeHtml(t.nombre) + '" ' + (String(p.tipoPuerta || '') === String(t.nombre) ? 'selected' : '') + '>' + escapeHtml(t.nombre) + '</option>').join('') +
     '</select></div>' +
-    '<div class="form-group"><label>Técnico asignado</label><select id="pt_empleado">' +
-      '<option value="">— Sin asignar</option>' +
-      empleados.map(e => '<option value="' + e.id + '" data-nombre="' + escapeHtml(e.nombre) + '" ' + (p.empleadoId === e.id ? 'selected' : '') + '>' + escapeHtml(e.nombre) + '</option>').join('') +
-    '</select></div>' +
-    '<div class="form-group full normal-only" id="pt_puertas_group"><label>Puertas a revisar</label>' +
+    '<div class="form-group full normal-only pt-oculto" id="pt_puertas_group"><label>Puertas a revisar</label>' +
       '<div id="pt_puertas_lista" style="display:flex;flex-direction:column;gap:4px;max-height:220px;overflow:auto;border:1px solid var(--border);border-radius:8px;padding:8px">' +
         '<small style="color:var(--text-muted)">Selecciona cliente, ubicación y tipo de puerta para ver las puertas</small>' +
       '</div>' +
       '<small style="color:var(--text-muted);display:block;margin-top:4px">Marca con el check ✔ la(s) puerta(s) con intervención: son las que aparecen destacadas en el PDF.</small>' +
     '</div>' +
-    '<div class="form-group normal-only"><label>Ubicación del trabajo</label><select id="pt_ubicacion"><option value="">-- Selecciona un cliente primero --</option></select></div>' +
     '<div class="form-group full normal-only"><label>Descripción del trabajo *</label><textarea id="pt_desc" rows="3">' + escapeHtml(p.descripcion || '') + '</textarea></div>' +
     '<div class="form-group normal-only"><label>Kms (Ceuti — Cliente)</label>' +
       '<input id="pt_kms" class="only-num" value="' + (p.kms || '') + '" placeholder="Se calcula al elegir cliente">' +
@@ -399,6 +526,7 @@ window.showParteForm = async function(id, prefill) {
     '<div class="form-group"><label>Vehículo *</label><select id="pt_vehiculo"><option value="">— Seleccionar vehículo</option>' +
         vehiculos.map(v => '<option value="' + escapeHtml(v.id) + '" data-matricula="' + escapeHtml(v.matricula) + '" ' + (normMatricula(matriculaSel) === normMatricula(v.matricula) ? 'selected' : '') + '>' + escapeHtml(v.matricula) + ' - ' + escapeHtml(v.marca) + ' ' + escapeHtml(v.modelo) + '</option>').join('') +
     '</select></div>' +
+    '<div class="form-group"><label>ID</label><input id="pt_id" value="' + escapeHtml(nextId) + '"></div>' +
     '<div class="form-group"><label>Fecha</label><input id="pt_fecha" type="date" value="' + (p.fecha || getToday()) + '"></div>' +
     '<div class="form-group full normal-only"><label>Material utilizado</label>' +
       '<div id="pt_materiales">' + materialesParteHtml() + '</div>' +
@@ -446,7 +574,7 @@ window.showParteForm = async function(id, prefill) {
             '<div style="display:flex;gap:6px;flex-wrap:wrap">' +
               '<button type="button" class="btn btn-primary btn-sm" onclick="document.getElementById(\'pt_sello_input\').click()"><i class="fas fa-camera"></i> ' + (window.__selloClienteParte ? 'Repetir foto' : 'Fotografiar sello') + '</button>' +
               '<input type="file" id="pt_sello_input" accept="image/*" capture="environment" style="display:none">' +
-              '<button type="button" class="btn btn-outline btn-sm" id="pt_sello_borrar" style="' + (window.__selloClienteParte ? '' : 'display:none') + '"><i class="fas fa-trash"></i> Quitar</button>' +
+              '<button type="button" class="btn btn-danger btn-sm" id="pt_sello_borrar" style="' + (window.__selloClienteParte ? '' : 'display:none') + '"><i class="fas fa-trash"></i> Quitar</button>' +
             '</div>' +
           '</div>' +
           '<small style="color:var(--text-muted);display:block;margin-top:4px">Pide al cliente que selle un folio en blanco y hazle una foto. Se imprime sobre su firma en el PDF.</small>' +
@@ -505,6 +633,48 @@ window.showParteForm = async function(id, prefill) {
       const ocultarPuertas = /^(mantenimiento|reparaci[oó]n)$/i.test(tipo.trim());
       grupoPuertas.style.display = ocultarPuertas ? 'none' : '';
     }
+function confirmDeleteDouble(title, deleteCallback) {
+  // First confirmation modal
+  const firstTitle = '¿Eliminar esta parte?';
+  const firstContent = `
+    <p>${title}</p>
+    <button class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
+    <button class="btn btn-danger" onclick="showSecondConfirmation()">Eliminar</button>
+  `;
+  openModal(firstTitle, firstContent);
+  
+  // Store the delete callback
+  window.deleteCallback = deleteCallback;
+  
+  function showSecondConfirmation() {
+    const secondTitle = '¿Estás seguro?';
+    const secondContent = `
+      <p>¿Estás seguro de que deseas eliminar esta parte?</p>
+      <button class="btn btn-secondary" onclick="closeModal()">No</button>
+      <button class="btn btn-danger" onclick="finalDelete()">Sí</button>
+    `;
+    openModal(secondTitle, secondContent);
+  }
+  
+  function finalDelete() {
+    deleteCallback();
+    closeModal();
+  }
+}
+function filterClienteQuick() {
+  const input = document.getElementById('filterClienteParteQuick');
+  const select = document.getElementById('filterClienteParte');
+  const filter = input ? input.value.toLowerCase() : '';
+  const options = select.options;
+  for (let i = 0; i < options.length; i++) {
+    const option = options[i];
+    if (filter && !option.value.toLowerCase().includes(filter)) {
+      option.style.display = 'none';
+    } else {
+      option.style.display = '';
+    }
+  }
+}
   };
   document.querySelectorAll('input[name="pt_tipo_parte"]').forEach(r => r.addEventListener('change', aplicarModo));
   document.getElementById('pt_tipo')?.addEventListener('change', async () => {
@@ -518,8 +688,29 @@ window.showParteForm = async function(id, prefill) {
     p_prevPuertas = puertasIntervenidasActuales();
     const selCli = document.getElementById('pt_cliente');
     if(selCli?.value) window.pintarPuertasParte(selCli.value, null, p_prevPuertas);
+    // Recalcular KMs desde la ubicación elegida (no desde la ficha del cliente)
+    try {
+      const ubId = document.getElementById('pt_ubicacion')?.value;
+      const kmsInput = document.getElementById('pt_kms');
+      if (kmsInput && !document.getElementById('pt_tipo_interno')?.checked) {
+        if (ubId) {
+          const ub = await dbGet('ubicaciones', ubId);
+          if (ub?.lat && ub?.lng) {
+            const kms = await kmIdaVuelta({ lat: ub.lat, lng: ub.lng });
+            kmsInput.value = kms;
+            kmsInput.readOnly = true;
+            showToast('Kms recalculados desde "' + ub.denominacion + '": ' + kms);
+          } else {
+            showToast('📍 Ubicación sin coordenadas: geolocalízala en Clientes → Ubicaciones (📍 Geo)', 'error');
+          }
+        } else if (selCli?.value) {
+          kmsInput.readOnly = false;
+        }
+      }
+    } catch(e) { console.warn('[parte] kms ubicación:', e); }
   });
   aplicarModo();
+  initBuscadorCliente();
 
   // --- Desplazamiento interno: origen/destino (oficina, proveedores y clientes) + kms automáticos ---
   (async () => {
@@ -596,6 +787,8 @@ window.showParteForm = async function(id, prefill) {
   // al guardar o cancelar, restaura el parte exactamente como estaba: mismos datos,
   // fotos, firmas y materiales. Técnica: los nodos del modal del parte se mueven a un
   // DocumentFragment (los listeners y canvas sobreviven al traslado) y se devuelven al volver.
+  // También se usa para CREAR un cliente nuevo desde el parte (sin clienteId): al guardar,
+  // el cliente recién creado queda seleccionado en el parte y se cargan sus datos.
   window.abrirFichaClienteDesdeParte = function(clienteId){
     const overlay = document.getElementById('modalOverlay');
     const body = document.getElementById('modalBody');
@@ -610,8 +803,16 @@ window.showParteForm = async function(id, prefill) {
     while(body.firstChild) stash.b.appendChild(body.firstChild);
     while(foot.firstChild) stash.f.appendChild(foot.firstChild);
     window.__parteStash = true;
-    const restore = () => {
+    const restore = (nuevoClienteId) => {
       window.closeModal = origClose;                    // desparchear SIEMPRE
+      if (typeof window.__origNavigateToParcheado === 'function') window.__origNavigateToParcheado = null;
+      // Desinstalar los parches de alta de cliente si siguen puestos (se canceló el alta)
+      if (window.__parchesClienteDesdeParte) {
+        if (window.navigateTo === window.__parchesClienteDesdeParte.nav) window.navigateTo = window.__parchesClienteDesdeParte.origNav;
+        if (window.saveCliente === window.__parchesClienteDesdeParte.save) window.saveCliente = window.__parchesClienteDesdeParte.origSave;
+        window.__parchesClienteDesdeParte = null;
+      }
+      window.__clienteCreadoDesdeParte = null;
       window.__parteStash = null;
       title.textContent = stash.t;
       body.replaceChildren(stash.b);                    // nodos de vuelta, con sus listeners
@@ -619,6 +820,23 @@ window.showParteForm = async function(id, prefill) {
       overlay.classList.add('open');
       // 2. Refrescar icono y, si el cliente ya tiene coordenadas y faltaban los KMs, calcularlos
       const sel = document.getElementById('pt_cliente');
+      if (sel && nuevoClienteId) {
+        // Cliente recién creado: añadirlo al select, seleccionarlo y disparar la carga de datos
+        const yaEsta = sel.querySelector('option[value="' + CSS.escape(String(nuevoClienteId)) + '"]');
+        if (yaEsta) { sel.value = String(nuevoClienteId); sel.dispatchEvent(new Event('change')); return; }
+        dbGet('clientes', String(nuevoClienteId)).then(cli => {
+          if (cli && sel.isConnected) {
+            const opt = document.createElement('option');
+            opt.value = cli.id;
+            opt.dataset.nombre = cli.nombre || '';
+            opt.textContent = cli.nombre || cli.id;
+            sel.appendChild(opt);
+            sel.value = String(nuevoClienteId);
+            sel.dispatchEvent(new Event('change'));
+          }
+        }).catch(() => {});
+        return;
+      }
       if(sel && sel.value && sel.value !== '__incidencia__'){
         dbGet('clientes', sel.value).then(cli => {
           window.actualizarIconoGeoCliente(cli);
@@ -635,7 +853,33 @@ window.showParteForm = async function(id, prefill) {
     // clic fuera) restaura el parte en lugar de cerrar el modal. Las siguientes ya son normales.
     window.closeModal = function(){ restore(); };
     // 3. Abrir el formulario del cliente encima
-    window.showClienteForm(clienteId);
+    if (clienteId) {
+      window.showClienteForm(clienteId);
+    } else {
+      // Cliente NUEVO: al guardar, saveCliente navega a 'clientes'; interceptamos esa
+      // navegación (solo la primera vez) para quedarnos en el parte y seleccionarlo allí.
+      window.__clienteCreadoDesdeParte = null;
+      const origNavigate = window.navigateTo;
+      const origSave = window.saveCliente;
+      const navParche = function(page){
+        if (page === 'clientes') {
+          if (window.navigateTo === navParche) window.navigateTo = origNavigate;
+          const creado = window.__clienteCreadoDesdeParte;
+          window.__clienteCreadoDesdeParte = null;
+          restore(creado || undefined);
+          return Promise.resolve();
+        }
+        return origNavigate.apply(this, arguments);
+      };
+      const saveParche = function(idGuardado){
+        window.__clienteCreadoDesdeParte = idGuardado || (document.getElementById('cf_id')?.value ?? null);
+        return origSave.apply(this, arguments);
+      };
+      window.__parchesClienteDesdeParte = { nav: navParche, origNav: origNavigate, save: saveParche, origSave: origSave };
+      window.navigateTo = navParche;
+      window.saveCliente = saveParche;
+      window.showClienteForm(null);
+    }
   };
 
   setTimeout(async ()=>{
@@ -644,25 +888,42 @@ window.showParteForm = async function(id, prefill) {
       // Estado inicial del icono según el cliente precargado
       if(sel.value && sel.value !== '__incidencia__'){ dbGet('clientes', sel.value).then(actualizarIconoGeoCliente); }
       sel.addEventListener('change', async () => {
+        if (!sel.value) {                                   // sin cliente: se esconden ubicaciones y puertas
+          ptOcultar('pt_ubic_group', true); ptOcultar('pt_puertas_group', true);
+          const u = document.getElementById('pt_ubicacion'); if (u) u.innerHTML = '<option value="">-- Selecciona un cliente primero --</option>';
+          actualizarIconoGeoCliente(null);
+          return;
+        }
         if (sel.value === '__incidencia__') {
           actualizarIconoGeoCliente(null);
           document.getElementById('pt_kms').value = '';
           document.getElementById('pt_dni_cliente').value = '';
           document.getElementById('pt_ubicacion').innerHTML = '<option value="">Sin ficha de cliente</option>';
-          document.getElementById('pt_puertas').innerHTML = '<option value="">Sin ficha de cliente</option>';
+          ptOcultar('pt_ubic_group', true); ptOcultar('pt_puertas_group', true);
           return;
         }
         const cli = await dbGet('clientes', sel.value);
         actualizarIconoGeoCliente(cli);
 
         // --- Cálculo de KMs ---
-        if (cli?.lat && cli?.lng) {
+        // Si el cliente tiene ubicaciones, los KMs se calculan desde la UBICACIÓN elegida
+        // (la ficha del cliente suele ser la razón social/central, no donde están las puertas).
+        const ubicacionesCli = sel.value ? await dbGetByIndex('ubicaciones', 'clienteId', sel.value).catch(() => []) : [];
+        const ubConCoord = ubicacionesCli.find(u => u.lat && u.lng);
+        if (ubConCoord) {
+          const kms = await kmIdaVuelta({ lat: ubConCoord.lat, lng: ubConCoord.lng });
+          document.getElementById('pt_kms').value = kms;
+          showToast('Kms calculados: ' + kms + ' (ida+vuelta, desde "' + ubConCoord.denominacion + '")');
+        } else if (cli?.lat && cli?.lng) {
           const kms = await kmIdaVuelta({ lat: cli.lat, lng: cli.lng });
           document.getElementById('pt_kms').value = kms;
           showToast('Kms calculados: ' + kms + ' (ida+vuelta)');
-        } else {
+        } else if (!(ubicacionesCli.length)) {
           document.getElementById('pt_kms').value = '';
           showToast('📍 Cliente sin coordenadas: rellena los KMs a mano y geolocalízalo en Clientes', 'error');
+        } else {
+          document.getElementById('pt_kms').value = '';
+          showToast('📍 El cliente tiene ubicaciones pero ninguna con coordenadas: geolocalízalas en Clientes → Ubicaciones (📍 Geo)', 'error');
         }
 
         if (cli?.dni) {
@@ -674,6 +935,7 @@ window.showParteForm = async function(id, prefill) {
           selUbicacion.innerHTML = '<option value="">-- Selecciona una ubicación --</option>';
           if (sel.value) {
             const ubicaciones = await dbGetByIndex('ubicaciones', 'clienteId', sel.value);
+            ptOcultar('pt_ubic_group', !ubicaciones.length);      // sin ubicaciones, el campo no se muestra
             if (ubicaciones.length) {
               selUbicacion.innerHTML = '<option value="">-- Selecciona ubicación --</option>' +
                 ubicaciones.map(u =>
@@ -724,6 +986,7 @@ window.showParteForm = async function(id, prefill) {
       const selUbicacion = document.getElementById('pt_ubicacion');
       if (selUbicacion) {
         const ubicaciones = await dbGetByIndex('ubicaciones', 'clienteId', clienteIdSeleccionado);
+        ptOcultar('pt_ubic_group', !ubicaciones.length);
         if (ubicaciones.length) {
           selUbicacion.innerHTML = '<option value="">-- Selecciona ubicación --</option>' +
             ubicaciones.map(u =>
@@ -754,6 +1017,7 @@ window.pintarPuertasParte = async function(clienteId, _unused, intervenidasPrev)
   const ubicacionId = selUbic?.value || '';
   if(!clienteId || clienteId === '__incidencia__'){
     lista.innerHTML = '<small style="color:var(--text-muted)">Selecciona un cliente para ver sus puertas</small>';
+    ptOcultar('pt_puertas_group', true);
     return;
   }
   let puertas = [];
@@ -766,8 +1030,10 @@ window.pintarPuertasParte = async function(clienteId, _unused, intervenidasPrev)
   if(!puertas.length){
     lista.innerHTML = '<small style="color:var(--text-muted)">' +
       (tipoPuerta ? 'Este cliente no tiene puertas de tipo "' + escapeHtml(tipoPuerta) + '"' : 'Este cliente no tiene puertas dadas de alta') + '</small>';
+    ptOcultar('pt_puertas_group', true);                      // sin puertas de ese tipo, el campo no se muestra
     return;
   }
+  ptOcultar('pt_puertas_group', false);
   const prev = intervenidasPrev || p_prevPuertas || [];
   const detallePrev = window.__puertasDetalle || {};
   lista.innerHTML = puertas.map(pu => {

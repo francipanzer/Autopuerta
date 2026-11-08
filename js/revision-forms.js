@@ -299,7 +299,7 @@ function renderEquiposLista() {
     <section class="equipo-card">
       <div class="section-header">
         <h4>Equipo ${index + 1}</h4>
-        ${formularioEquipos.length > 1 ? `<button type="button" class="btn btn-outline btn-sm" onclick="quitarEquipo(${index})"><i class="fas fa-trash"></i> Quitar</button>` : ''}
+        ${formularioEquipos.length > 1 ? `<button type="button" class="btn btn-danger btn-sm" onclick="quitarEquipo(${index})"><i class="fas fa-trash"></i> Quitar</button>` : ''}
       </div>
       <div class="form-grid">
         <div class="form-group">

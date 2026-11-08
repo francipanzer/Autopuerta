@@ -5,6 +5,7 @@ window.render_clientes = async function(el){
     '<div class="search-bar">'+
       '<input type="text" placeholder="Buscar cliente..." id="searchCliente" oninput="window.__cliPagina=0;renderClientes()">'+
       '<select id="filterTipo" onchange="window.__cliPagina=0;renderClientes()"><option value="">Todos</option><option value="empresa">Empresa</option><option value="particular">Particular</option></select>'+
+      '<select id="filterModo" onchange="window.__cliPagina=0;renderClientes()"><option value="">Todos los clientes</option><option value="individual">Individuales</option><option value="central">Centrales (varias ubicaciones)</option><option value="mantenimiento">Con mantenimiento</option></select>'+
       '<select id="filterProvincia" onchange="window.__cliPagina=0;renderClientes()"><option value="">Todas las provincias</option></select></div>'+
     '<div class="card"><div  class="table-wrapper"><table><thead>'+
       '<tr><th>Nombre</th></tr>'+
@@ -26,11 +27,12 @@ window.__provinciaDeCliente = function(c){
 
 window.__cliPagina = 0; // índice de bloque de 20
 window.renderClientes = async function(){
-  const [clientes, cadenas, rutas] = await Promise.all([
-    dbGetAll('clientes'), dbGetAll('cadenas'), dbGetAll('rutas')
-  ]);
+  const [clientes, ubicaciones] = await Promise.all([ dbGetAll('clientes'), dbGetAll('ubicaciones') ]);
+  const nUbic = new Map();
+  ubicaciones.forEach(u=>{ const k=String(u.clienteId); nUbic.set(k,(nUbic.get(k)||0)+1); });
   const q = (document.getElementById('searchCliente')?.value||'').toLowerCase();
   const tipo = document.getElementById('filterTipo')?.value||'';
+  const modo = document.getElementById('filterModo')?.value||'';
   const provSel = document.getElementById('filterProvincia');
   const prov = provSel?.value||'';
   window.__bindCliNav?.();
@@ -40,8 +42,11 @@ window.renderClientes = async function(){
   }
   const filtered = clientes
     .filter(c=>{
-      if(q && !JSON.stringify(c).toLowerCase().includes(q)) return false;
+      if(q && !(JSON.stringify(c).toLowerCase().includes(q) || ubicaciones.some(u=>String(u.clienteId)===String(c.id) && JSON.stringify(u).toLowerCase().includes(q)))) return false;
       if(tipo && c.tipo!==tipo) return false;
+      if(modo==='central' && c.central!==true) return false;
+      if(modo==='individual' && c.central===true) return false;
+      if(modo==='mantenimiento' && c.mantenimiento!==true) return false;
       if(prov && window.__provinciaDeCliente(c)!==prov) return false;
       return true;
     })
@@ -55,7 +60,10 @@ window.renderClientes = async function(){
   const tbody = document.getElementById('clientesBody');
   if(!tbody) return;
   tbody.innerHTML = visibles.map(c=>
-    '<tr data-cliente-row="'+escapeHtml(c.id)+'" style="cursor:pointer"><td style="padding:9px 14px"><strong>'+escapeHtml(c.nombre)+'</strong></td></tr>'
+    '<tr data-cliente-row="'+escapeHtml(c.id)+'" style="cursor:pointer"><td style="padding:9px 14px"><strong>'+escapeHtml(c.nombre)+'</strong>'+
+      (c.central===true ? ' <span class="badge badge-blue badge-sm"><i class="fas fa-sitemap"></i> Central · '+(nUbic.get(String(c.id))||0)+' ubicaci'+((nUbic.get(String(c.id))||0)===1?'ón':'ones')+'</span>' : '')+
+      (c.mantenimiento===true ? ' <span class="badge badge-green badge-sm"><i class="fas fa-screwdriver-wrench"></i> Mantenimiento</span>' : '')+
+      '</td></tr>'
   ).join('') || '<tr><td style="text-align:center;padding:30px;color:var(--text-muted)">Sin clientes</td></tr>';
 
   // Botones mostrar más / menos
@@ -90,80 +98,69 @@ window.verFichaCliente = async function(id){
   const c = await dbGet('clientes', id);
   if(!c) return;
   const dir = String(c.direccion||'');
+  const central = c.central===true;
+  const [ubics, rutas, puertas] = await Promise.all([ window.Central.ubicacionesDe(id), window.Central.rutasDe(id), window.Central.puertasDe(id) ]);
+  const admin = window.isAdmin?.();
+  const cid = escapeHtml(c.id);
+  const resumenUbic = central
+    ? '<div style="grid-column:1/-1"><small style="color:var(--text-muted)">Ubicaciones ('+ubics.length+') · Rutas ('+rutas.length+')</small><div>'+
+        (ubics.length ? ubics.map(u=>'<span class="badge badge-blue" style="margin:2px">📍 '+escapeHtml(u.denominacion)+' · '+puertas.filter(p=>String(p.ubicacionId)===String(u.id)).length+' 🚪</span>').join('') : '<em style="color:var(--text-muted)">Aún sin ubicaciones</em>')+
+      '</div></div>'
+    : '';
+  const fila = (k,v)=>'<div><small style="color:var(--text-muted)">'+k+'</small><div>'+v+'</div></div>';
   openModal('👤 ' + (c.nombre || 'Cliente'),
     '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:14px">'+
-      '<div><small style="color:var(--text-muted)">ID</small><div><strong>'+escapeHtml(c.id)+'</strong></div></div>'+
-      '<div><small style="color:var(--text-muted)">Tipo</small><div>'+(c.tipo==='empresa'?'Empresa':'Particular')+'</div></div>'+
-      '<div><small style="color:var(--text-muted)">DNI / CIF</small><div><strong>'+escapeHtml(c.dni||'—')+'</strong></div></div>'+
-      '<div><small style="color:var(--text-muted)">Contacto</small><div>'+escapeHtml(c.contacto||'—')+'</div></div>'+
-      '<div><small style="color:var(--text-muted)">Teléfono</small><div>'+escapeHtml(c.telefono||'—')+'</div></div>'+
-      '<div><small style="color:var(--text-muted)">Email</small><div>'+escapeHtml(c.email||'—')+'</div></div>'+
+      fila('ID','<strong>'+escapeHtml(c.id)+'</strong>')+
+      fila('Tipo',c.tipo==='empresa'?'Empresa':'Particular')+
+      fila('Modalidad',central?'Central (varias ubicaciones)':'Individual (una nave)')+
+      fila('Mantenimiento',c.mantenimiento===true?'<span class="badge badge-green">Contratado</span>':'<span class="badge badge-gray">No contratado</span>')+
+      fila('DNI / CIF','<strong>'+escapeHtml(c.dni||'—')+'</strong>')+
+      fila('Contacto',escapeHtml(c.contacto||'—'))+
+      fila('Teléfono',escapeHtml(c.telefono||'—'))+
+      fila('Email',escapeHtml(c.email||'—'))+
       '<div style="grid-column:1/-1"><small style="color:var(--text-muted)">Dirección</small><div>'+escapeHtml(dir||'—')+'</div></div>'+
-      (c.lat ? '<div style="grid-column:1/-1"><small style="color:var(--text-muted)">Coordenadas</small><div>📍 '+c.lat.toFixed(5)+', '+c.lng.toFixed(5)+'</div></div>' : '')+
+      (c.lat ? '<div style="grid-column:1/-1"><small style="color:var(--text-muted)">Coordenadas</small><div>📍 '+Number(c.lat).toFixed(5)+', '+Number(c.lng).toFixed(5)+'</div></div>' : '')+
+      resumenUbic+
     '</div>',
     '<button class="btn btn-outline btn-sm" onclick="closeModal()">Cerrar</button>'+
-    '<button class="btn btn-primary btn-sm" onclick="closeModal();showClienteForm(\''+escapeHtml(c.id)+'\')"><i class="fas fa-pen"></i> Editar ficha</button>'+
-    '<button class="btn btn-primary btn-sm" onclick="closeModal();gestionarUbicaciones(\''+escapeHtml(c.id)+'\')"><i class="fas fa-map-marker-alt"></i> Ubicaciones</button>'+
-    '<button class="btn btn-primary btn-sm" onclick="closeModal();gestionarPuertas(\''+escapeHtml(c.id)+'\')"><i class="fas fa-door-open"></i> Puertas</button>'+
-    '<button class="btn btn-primary btn-sm" onclick="closeModal();verHistoricoPuertas(\''+escapeHtml(c.id)+'\')"><i class="fas fa-clock-rotate-left"></i> Histórico</button>'+
-    '<button class="btn btn-primary btn-sm" onclick="closeModal();generatePDF_clientes(\''+escapeHtml(c.id)+'\')"><i class="fas fa-file-pdf"></i> PDF</button>'+
-    '<button class="btn btn-danger btn-sm" onclick="closeModal();confirmDelete(\'Cliente '+escapeHtml(c.nombre)+'\', ()=>deleteCliente(\''+escapeHtml(c.id)+'\'))"><i class="fas fa-trash"></i> Eliminar</button>');
+    (admin?'<button class="btn btn-primary btn-sm" onclick="closeModal();showClienteForm(\''+cid+'\')"><i class="fas fa-pen"></i> Editar ficha</button>':'')+
+    (central?'<button class="btn btn-primary btn-sm" onclick="Central.verUbicaciones(\''+cid+'\')"><i class="fas fa-map-marker-alt"></i> Ubicaciones</button>':'')+
+    (central?'<button class="btn btn-primary btn-sm" onclick="Central.verRutas(\''+cid+'\')"><i class="fas fa-route"></i> Rutas</button>':'')+
+    '<button class="btn btn-primary btn-sm" onclick="gestionarPuertas(\''+cid+'\')"><i class="fas fa-door-open"></i> Puertas ('+puertas.length+')</button>'+
+    '<button class="btn btn-primary btn-sm" onclick="closeModal();verHistoricoPuertas(\''+cid+'\')"><i class="fas fa-clock-rotate-left"></i> Histórico</button>'+
+    '<button class="btn btn-primary btn-sm" onclick="closeModal();generatePDF_clientes(\''+cid+'\')"><i class="fas fa-file-pdf"></i> PDF</button>'+
+    (admin?'<button class="btn btn-danger btn-sm" onclick="closeModal();confirmDelete(\'Cliente '+escapeHtml(c.nombre)+'\', ()=>deleteCliente(\''+cid+'\'))"><i class="fas fa-trash"></i> Eliminar</button>':''));
 };
 async function showClienteForm(editId = null, opts = {}) {
   const id = editId ? String(editId) : null;
   const c = id ? (await dbGet('clientes', id)) || {} : {};
-
-  // Solo cadenas padre para el selector "Pertenece a"
-  const allClientes = await dbGetAll('clientes');
-  const cadenasPadre = allClientes.filter(x => x.esCadena);
   const nextId = c.id || window.db.nextId('CLI');
-
-  // Cadenas de mantenimiento (store 'cadenas') + sus rutas
-  const cadenasMant = await getAllCadenas();
-  let rutasCache = [];
-  if (c.cadenaId) {
-    try { rutasCache = await getRutasByCadena(String(c.cadenaId)); } catch(e){ rutasCache = []; }
-  }
-
-  const opcionesCadenaMant = '<option value="">— Sin cadena</option>' +
-    cadenasMant.map(cm => `<option value="${cm.id}" ${c.cadenaId==cm.id?'selected':''}>${escapeHtml(cm.nombre)}</option>`).join('');
-
-  const opcionesRuta = '<option value="">— Sin ruta</option>' +
-    rutasCache.map(r => `<option value="${r.id}" ${c.rutaId==r.id?'selected':''}>${escapeHtml(r.nombre)}</option>`).join('');
-
-  const opcionesPadre = '<option value="">— Ninguno (cliente suelto)</option>' +
-    cadenasPadre.map(p => `<option value="${p.id}" ${c.padreId==p.id?'selected':''}>${escapeHtml(p.nombre)}</option>`).join('');
-
-  const esCadenaChecked = (opts?.nuevoPadre === true || c.esCadena) ? 'checked' : '';
+  const esCentral = opts?.central === true || c.central === true;
+  const nUbic = id ? (await window.Central.ubicacionesDe(id)).length : 0;
 
   const form = '<div class="form-grid">'+
-    '<div class="form-group"><label>ID</label><input id="cf_id" value="'+escapeHtml(nextId)+'"></div>'+
-    '<div class="form-group"><label>Tipo</label><select id="cf_tipo"><option value="empresa" '+(c.tipo==='empresa'?'selected':'')+'>Empresa</option><option value="particular" '+(c.tipo==='particular'?'selected':'')+'>Particular</option></select></div>'+
-    '<div class="form-group full"><label><input type="checkbox" id="cf_escadena" '+esCadenaChecked+'> Es empresa / cadena principal (agrupa sucursales)</label></div>'+
-    '<div class="form-group"><label>Pertenece a (cadena principal)</label>'+
-      '<select id="cf_padre">'+opcionesPadre+'</select>'+
-      '<div style="margin-top:6px;font-size:12px;">'+
-        '<a href="#" onclick="event.preventDefault(); document.getElementById(\'cf_escadena\').checked=true; document.getElementById(\'cf_nombre\').focus(); return false;" style="color:var(--primary);text-decoration:none;">+ Marcar como empresa/cadena principal</a>'+
-      '</div>'+
+    '<div class="form-group"><label>ID</label><input id="cf_id" value="'+escapeHtml(nextId)+'"'+(id?' readonly':'')+'></div>'+
+    '<div class="form-group"><label>Tipo</label><select id="cf_tipo"><option value="empresa" '+(c.tipo!=='particular'?'selected':'')+'>Empresa</option><option value="particular" '+(c.tipo==='particular'?'selected':'')+'>Particular</option></select></div>'+
+    '<div class="form-group full" style="border:1px solid var(--border);border-radius:10px;padding:12px;background:var(--surface-alt)">'+
+      '<label style="display:block;margin-bottom:6px"><strong>¿Cuántas naves tiene?</strong></label>'+
+      '<select id="cf_modo" onchange="document.getElementById(\'cf_modo_ayuda\').style.display=this.value===\'central\'?\'\':\'none\'">'+
+        '<option value="individual" '+(esCentral?'':'selected')+'>Individual: una sola nave (las puertas cuelgan del cliente)</option>'+
+        '<option value="central" '+(esCentral?'selected':'')+'>Central: varias naves / ubicaciones</option></select>'+
+      '<small id="cf_modo_ayuda" style="display:'+(esCentral?'':'none')+';color:var(--text-muted);display:'+(esCentral?'block':'none')+'">Tras guardar podrás añadir sus ubicaciones (cada una con sus datos y sus puertas) y agruparlas en rutas.'+(nUbic?' Ahora tiene '+nUbic+' ubicación(es): no se puede volver a «Individual» mientras las tenga.':'')+'</small>'+
+      '<label style="display:block;margin-top:10px"><input type="checkbox" id="cf_mant" '+(c.mantenimiento===true?'checked':'')+'> Tiene contratado el <strong>mantenimiento (revisiones periódicas)</strong> con nosotros</label>'+
     '</div>'+
-    '<div class="form-group"><label>Nombre / Razón social *</label><input id="cf_nombre" value="'+escapeHtml(c.nombre||'')+'" required></div>'+
-    '<div class="form-group"><label>Cadena de mantenimiento</label><select id="cf_cadena">'+opcionesCadenaMant+'</select></div>'+
-    '<div class="form-group"><label>Ruta</label><select id="cf_ruta">'+opcionesRuta+'</select></div>'+
+    '<div class="form-group full"><label>Nombre / Razón social *</label><input id="cf_nombre" value="'+escapeHtml(c.nombre||'')+'" required></div>'+
     '<div class="form-group"><label>Persona de contacto</label><input id="cf_contacto" value="'+escapeHtml(c.contacto||'')+'"></div>'+
     '<div class="form-group"><label>Email</label><input id="cf_email" type="email" value="'+escapeHtml(c.email||'')+'"></div>'+
     '<div class="form-group"><label>DNI / CIF</label><input id="cf_dni" oninput="this.value=this.value.toUpperCase()" value="'+escapeHtml(c.dni||'')+'" placeholder="12345678Z o B12345678"></div>'+
-    '<div class="form-group"><label>Teléfono</label><input id="cf_telefono" class="only-num" value="'+(c.telefono ? c.telefono.replace(/\D/g,'') : '')+'"></div>'+
-    '<div class="form-group"><label>Dirección</label>'+
+    '<div class="form-group"><label>Teléfono</label><input id="cf_telefono" class="only-num" value="'+(c.telefono ? String(c.telefono).replace(/\D/g,'') : '')+'"></div>'+
+    '<div class="form-group full"><label>Dirección</label>'+
       '<div style="display:flex;gap:6px">'+
         '<input id="cf_direccion" value="'+escapeHtml(c.direccion||'')+'" style="flex:1">'+
-        '<button type="button" class="btn btn-outline btn-sm" onclick="geolocalizarCliente()" title="Buscar coordenadas">'+
-          '<i class="fas fa-map-marker-alt"></i></button>'+
-        '<button type="button" id="cf_btn_gps" class="btn btn-outline btn-sm" onclick="usarUbicacionActualCliente()" title="Usar mi ubicación actual">'+
-          '<i class="fas fa-location-crosshairs"></i></button>'+
+        '<button type="button" class="btn btn-outline btn-sm" onclick="geolocalizarCliente()" title="Buscar coordenadas"><i class="fas fa-map-marker-alt"></i></button>'+
+        '<button type="button" id="cf_btn_gps" class="btn btn-outline btn-sm" onclick="usarUbicacionActualCliente()" title="Usar mi ubicación actual"><i class="fas fa-location-crosshairs"></i></button>'+
       '</div>'+
-      '<small id="cf_geo_estado" style="color:var(--text-muted);font-size:11px">'+
-        (c.lat ? 'o. '+c.lat.toFixed(4)+', '+c.lng.toFixed(4) : '📍 Sin coordenadas (pulsa el mapa)')+
-      '</small>'+
+      '<small id="cf_geo_estado" style="color:var(--text-muted);font-size:11px">'+(c.lat ? '📍 '+Number(c.lat).toFixed(4)+', '+Number(c.lng).toFixed(4) : '📍 Sin coordenadas (pulsa el mapa)')+'</small>'+
     '</div>'+
     '<div class="form-group full"><label>Notas</label><textarea id="cf_nota">'+escapeHtml(c.nota||'')+'</textarea></div>'+
   '</div>';
@@ -171,23 +168,19 @@ async function showClienteForm(editId = null, opts = {}) {
   const footer = '<button class="btn btn-outline" onclick="closeModal()">Cancelar</button>'+
     '<button class="btn btn-primary btn-save-cliente" data-action="save-cliente" data-id="'+(id ? escapeHtml(id) : '')+'"><i class="fas fa-save"></i> Guardar</button>';
 
+  window.__geoCliente = null;
   openModal(id?'Editar Cliente':'Nuevo Cliente',form,footer);
-
-  // Al cambiar la cadena de mantenimiento, recargar rutas
-  document.getElementById('cf_cadena').addEventListener('change', async (e) => {
-    const sel = document.getElementById('cf_ruta');
-    const cid = e.target.value;
-    sel.innerHTML = '<option value="">— Sin ruta</option>';
-    if (!cid) return;
-    const rutas = await getRutasByCadena(cid);
-    sel.innerHTML += rutas.map(r => `<option value="${r.id}">${escapeHtml(r.nombre)}</option>`).join('');
-  });
 }
 
 window.saveCliente = async function(id){
   id = id ? String(id) : null;
   try {
     const existing = id ? await dbGet('clientes', id) : null;
+    const central = document.getElementById('cf_modo').value === 'central';
+    if(existing && existing.central===true && !central){
+      const n = (await window.Central.ubicacionesDe(id)).length;
+      if(n){ showToast('No se puede pasar a «Individual»: tiene '+n+' ubicación(es). Elimínalas antes.','error'); return; }
+    }
     const data = {
       id: document.getElementById('cf_id').value.trim(),
       tipo: document.getElementById('cf_tipo').value,
@@ -200,25 +193,23 @@ window.saveCliente = async function(id){
       lat: window.__geoCliente?.lat || existing?.lat || null,
       lng: window.__geoCliente?.lng || existing?.lng || null,
       nota: document.getElementById('cf_nota').value.trim(),
-      esCadena: document.getElementById('cf_escadena')?.checked || false,
-      padreId: document.getElementById('cf_padre')?.value || null,
-      cadenaId: document.getElementById('cf_cadena')?.value || null,
-      rutaId:   document.getElementById('cf_ruta')?.value || null,
+      central,
+      mantenimiento: document.getElementById('cf_mant').checked
     };
 
-    // Validación en línea
     let ok = true;
     ok &= setFieldError('cf_nombre',   validators.required(data.nombre, 'El nombre'));
     ok &= setFieldError('cf_email',    validators.email(data.email));
     ok &= setFieldError('cf_telefono', validators.telefono9(data.telefono));
-
     if(!ok){ showToast('Revisa los campos marcados','error'); return; }
 
     await dbPut('clientes', data);
-    closeModal();
     window.__geoCliente = null;
     showToast('Cliente guardado');
-    navigateTo('clientes');
+    if(central && !(existing && existing.central===true)){
+      navigateTo('clientes');
+      await window.Central.verUbicaciones(data.id);   // cliente central nuevo: a añadir sus ubicaciones
+    } else { closeModal(); navigateTo('clientes'); }
   } catch(err){
     console.error('Error al guardar cliente:', err);
     showToast('Error al guardar: '+err.message,'error');
@@ -265,6 +256,13 @@ window.usarUbicacionActualCliente = function(){
 };
 
 window.deleteCliente = async function(id){
+  const [ubics, rutas, puertas] = await Promise.all([ window.Central.ubicacionesDe(id), window.Central.rutasDe(id), window.Central.puertasDe(id) ]);
+  if(ubics.length || rutas.length || puertas.length){
+    if(!confirm('Este cliente tiene '+ubics.length+' ubicación(es), '+rutas.length+' ruta(s) y '+puertas.length+' puerta(s). Se eliminarán también (los partes y revisiones ya hechos se conservan). ¿Continuar?')) return;
+    for(const p of puertas) await dbDelete('puertas', p.id);
+    for(const r of rutas) await dbDelete('rutas', r.id);
+    for(const u of ubics) await dbDelete('ubicaciones', u.id);
+  }
   await dbDelete('clientes',id);
   showToast('Cliente eliminado');navigateTo('clientes');
 };
@@ -337,6 +335,9 @@ window.fusionarDuplicadosClientes = async function(){
         }
         for(const ub of ubicaciones.filter(x=>String(x.clienteId)===String(d.id))){
           await dbPut('ubicaciones', {...ub, clienteId: conservar.id});
+        }
+        for(const rt of (await dbGetAll('rutas')).filter(x=>String(x.clienteId)===String(d.id))){
+          await dbPut('rutas', {...rt, clienteId: conservar.id});
         }
         for(const pt of partes.filter(x=>String(x.clienteId)===String(d.id))){
           await dbPut('partesTrabajo', {...pt, clienteId: conservar.id, clienteNombre: fusion.nombre});

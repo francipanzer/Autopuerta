@@ -1,4 +1,4 @@
-// ⛳ MÓDULO DIFERIDO: Estadísticas + Revisiones (fusionados por dependencia mutua: rutas/cadenas)
+// ⛳ MÓDULO DIFERIDO: Estadísticas + Revisiones (formulario de revisión por ubicaciones)
 window.render_estadisticas = async function(el){
   el.innerHTML =
     '<div class="page-header"><div><h2>Estadísticas</h2><p>Análisis de actividad y rendimiento</p></div></div>'+
@@ -331,793 +331,221 @@ window.exportReportCSV = async function(dateStr = fechaLocalHoy()) {
   URL.revokeObjectURL(url);
   showToast('Informe exportado como CSV');
 };
-/* ========================================
-   Cadenas y Rutas (PASO B)
-   ======================================== */
-
-// ==================== CADENAS: Lista ====================
-async function renderCadenasList() {
-  const list = document.getElementById('cadenas-list');
-  if (!list) return;
-
-  const cadenas = await getAllCadenas();
-
-  if (cadenas.length === 0) {
-    list.innerHTML = '<div class="empty-state"><i class="fas fa-link"></i><p>No hay cadenas creadas.</p></div>';
-    return;
-  }
-
-  // o. Usar la clase .card para que coincida con el resto de la app
-  list.innerHTML = cadenas.map(c => `
-    <div class="card chain-row" data-cadena-id="${c.id}">
-      <div class="card-header">
-        <strong>${escapeHtml(c.nombre)}</strong>
-        <div class="chain-row-actions">
-          <span class="badge badge-blue" id="ruta-count-${c.id}">0 rutas</span>
-          <button type="button" class="btn btn-sm btn-outline" onclick="event.stopPropagation();render_rutas('${c.id}')"><i class="fas fa-route"></i> Rutas</button>
-          <button type="button" class="btn btn-sm btn-danger" aria-label="Eliminar cadena ${escapeHtml(c.nombre)}" onclick="event.stopPropagation();deleteCadena('${c.id}')"><i class="fas fa-trash"></i></button>
-        </div>
-      </div>
-    </div>
-  `).join('');
-
-  // Conteo de rutas por cadena
-  for (const c of cadenas) {
-    try {
-      const rutas = await getRutasByCadena(c.id);
-      const badge = document.getElementById('ruta-count-' + c.id);
-      if (badge) badge.textContent = rutas.length + (rutas.length === 1 ? ' ruta' : ' rutas');
-    } catch (e) {
-      console.warn('Error contando rutas para', c.id, e);
-    }
-  }
-
-  // Click en la tarjeta → ver rutas (SIEMPRE pasar string id)
-  document.querySelectorAll('#cadenas-list .card').forEach(el => {
-    el.addEventListener('click', async () => {
-      el.style.boxShadow = 'var(--shadow-lg)';
-      const id = String(el.dataset.cadenaId || '');   // ? dataset siempre devuelve string
-      if (!id) return;
-      await render_rutas(id);                          // ? directo, sin showRutasForCadena
-    });
-  });
-}
-
-
-//  CADENAS — BORRADO EN CASCADA
-
-/**
- * deleteCadenaWithDependencies(id)
- * Cascada: borra rutas y clientes de la cadena.
- */
-async function deleteCadenaWithDependencies(id){
-  const [clientes,rutas]=await Promise.all([dbGetAll('clientes'),dbGetAll('rutas')]);
-  for(const cliente of clientes.filter(item=>String(item.cadenaId??item.cadenaid)===String(id))){
-    await dbDelete('clientes',cliente.id);
-  }
-  for(const ruta of rutas.filter(item=>String(item.cadenaId??item.cadenaid)===String(id))){
-    await dbDelete('rutas',ruta.id);
-  }
-  await dbDelete('cadenas',id);
-}
-
-async function deleteRuta(id, cadenaId) {
-  const ruta = await getRutaById(id);
-  if (!ruta) return;
-
-  window.confirmDelete(ruta.nombre, async () => {
-    await deleteRutaDb(id, true);
-  });
-}
-
-// ==================== RUTAS: Formulario Modal ====================
-
-/**
- * showRutaForm(editId, defaultCadenaId) → Promise<void>
- * Muestra modal con campos: nombre, cadenaid, frecuenciameses, orden, ultimorevision.
- */
-async function showRutaForm(editId = null, defaultCadenaId = null) {
-  const overlay = document.getElementById('modalOverlay');
-  const title = document.getElementById('modalTitle');
-  const body = document.getElementById('modalBody');
-  const footer = document.getElementById('modalFooter');
-
-  let ruta = {};
-  let cadenas = [];
-
-  if (editId) {
-    ruta = await getRutaById(editId);
-    if (!ruta) return;
-  }
-  
-  try {
-    cadenas = await getAllCadenas();
-  } catch (e) {
-    console.error('Error cargando cadenas en showRutaForm:', e);
-    cadenas = [];
-  }
-
-  const selectedCadenaId = defaultCadenaId ?? window.getCurrentCadenId() ?? localStorage.getItem('cadenaId') ?? (ruta.cadenaId ?? ruta.cadenaid ?? null);
-  const selectedCadenaValue = selectedCadenaId ? String(selectedCadenaId) : '';
-  if (selectedCadenaValue) window.setCurrentCadenId(selectedCadenaValue);
-
-  const cadenasOptions = cadenas.map(c => {
-    const cadenaId = ruta.cadenaId ?? ruta.cadenaid ?? selectedCadenaValue;
-    const selected = String(cadenaId) === String(c.id) ? 'selected' : '';
-    return `<option value="${c.id}" ${selected}>${escapeHtml(c.nombre)} (${c.id})</option>`;
-  }).join('');
-
-  // Normalizar valores para el formulario (versión vieja vs nueva)
-  const rutaNombre = ruta.nombre || '';
-  const rutaFrecuencia = ruta.frecuenciameses ?? ruta.frecuenciaMeses ?? 6;
-  const rutaOrden = ruta.orden ?? 0;
-  const rutaUltimaRevision = ruta.ultimorevision ?? ruta.ultimaRevision ?? null;
-  const rutaUltimaDate = rutaUltimaRevision ? rutaUltimaRevision.slice(0, 10) : '';
-
-  title.textContent = editId ? 'Editar ruta' : 'Nueva ruta';
-  
-  body.innerHTML = `
-    <div style="display:flex;flex-direction:column;gap:16px;">
-      <input id="form-ruta-id" type="hidden" value="${editId || ''}">
-      <div>
-        <label style="display:block;font-size:13px;color:var(--gray);margin-bottom:4px;">Nombre *</label>
-        <input id="form-ruta-nombre" type="text" class="input" value="${escapeHtml(rutaNombre)}" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:6px;font-size:15px;">
-      </div>
-      <div>
-        <label style="display:block;font-size:13px;color:var(--gray);margin-bottom:4px;">Cadena *</label>
-        <select id="form-ruta-cadena" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:6px;font-size:15px;">
-          <option value="">— Seleccionar</option>
-          ${cadenasOptions}
-        </select>
-      </div>
-      <div style="display:flex;gap:16px;">
-        <div style="flex:1;">
-          <label style="display:block;font-size:13px;color:var(--gray);margin-bottom:4px;">Frecuencia (meses)</label>
-          <input id="form-ruta-frecuencia" type="number" class="input only-num" min="1" value="${rutaFrecuencia}" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:6px;font-size:15px;">
-        </div>
-        <div style="flex:1;">
-          <label style="display:block;font-size:13px;color:var(--gray);margin-bottom:4px;">Orden</label>
-          <input id="form-ruta-orden" type="number" class="input only-num" min="0" value="${rutaOrden}" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:6px;font-size:15px;">
-        </div>
-      </div>
-      <div>
-        <label style="display:block;font-size:13px;color:var(--gray);margin-bottom:4px;">ultima revisión</label>
-        <input id="form-ruta-ultima" type="date" value="${rutaUltimaDate}" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:6px;font-size:15px;">
-      </div>
-    </div>`;
-  
-  footer.innerHTML = `
-    <button class="btn btn-outline" onclick="closeModal()">Cancelar</button>
-    <button class="btn btn-primary" id="btn-save-ruta">${editId ? 'Actualizar' : 'Crear'}</button>`;
-
-  overlay.classList.add('open');
-
-  document.getElementById('btn-save-ruta').onclick = async () => {
-  const selectCadena = document.getElementById('form-ruta-cadena');
-  if (selectCadena && selectCadena.value) {
-    window.setCurrentCadenId(selectCadena.value);
-    localStorage.setItem('cadenaId', String(selectCadena.value));
-  }
-
-  const exito = await window.saveRuta();
-  if (exito) {
-    closeModal();
-    // Recargar vista si estamos en la pantalla de rutas de una cadena
-    if (typeof render_rutas === 'function' && selectCadena && selectCadena.value) {
-      render_rutas(selectCadena.value);
-    }
-  }
-};
-}
-
-
-//  REVISIONES — el panel de "Revisiones Programadas" fue eliminado.
-//  Toda la funcionalidad vive en la página única "Revisiones"
-//  (js/informe-revisiones-cliente.js): pestañas Próximas/Historial,
-//  botón Nueva revisión y buscador. Esta redirección mantiene
-//  compatibles los accesos antiguos a 'revisionesProgramadas'.
-
-window.render_revisionesProgramadas = async function(main) {
-  return window.render_revisionesCliente(main);
-};
-
-//  REVISIONES PROGRAMADAS - VISTA DE RUTAS (NIVEL 2)
-window.render_revisiones_rutas = async function(cadenaId, cadenaNombre) {
-  const main = document.getElementById('mainContent');
-  if (!main) return;
-
-  try {
-    const rutas = await getRutasByCadena(cadenaId);
-    
-    main.innerHTML = `
-      <div class="page-revisiones">
-        <div class="page-header">
-          <div>
-            <button class="btn btn-outline btn-sm" onclick="navigateTo('revisionesProgramadas')"><i class="fas fa-arrow-left"></i> Volver</button>
-          </div>
-          <div>
-            <h2 class="page-revisiones-title"><i class="fas fa-route"></i> Rutas · ${escapeHtml(cadenaNombre)}</h2>
-            <p class="page-revisiones-subtitle">Selecciona una ruta para ver sus tiendas</p>
-          </div>
-        </div>
-        <div id="rutas-container" class="stats-grid"></div>
-      </div>`;
-
-    const container = document.getElementById('rutas-container');
-    
-    if (rutas.length === 0) {
-      container.innerHTML = '<p style="padding:20px;text-align:center;color:var(--gray);grid-column:1/-1;">No hay rutas para esta cadena.</p>';
-      return;
-    }
-
-    // Usar estilos de stat-card para las rutas
-    for (const ruta of rutas) {
-      let puertas = [];
-      try {
-        puertas = await window.getPuertasDeRuta(ruta.id, cadenaId);
-      } catch(e) {
-        console.error('Error cargando puertas de ruta:', e);
-        puertas = [];
-      }
-      
-      // Calcular días hasta próxima revisión
-      let diasHastaRevision = null;
-      let bordeColor = '#22c55e'; // verde por defecto
-      
-      if (ruta.proximaRevision || ruta.proximarevision) {
-        try {
-          const proximaStr = ruta.proximaRevision || ruta.proximarevision;
-          const proxima = new Date(proximaStr);
-          const hoy = new Date();
-          const diffTime = proxima - hoy;
-          diasHastaRevision = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-          
-          // Rojo si faltan 30 días o menos (coherente con getEstadoPuerta), verde si más
-          if (diasHastaRevision <= 30) {
-            bordeColor = '#ef4444'; // rojo
-          }
-        } catch(e) {
-          console.error('Error calculando días hasta revisión:', e);
-        }
-      }
-      
-      const card = document.createElement('div');
-      card.className = 'stat-card';
-      card.style.cursor = 'pointer';
-      card.style.border = `2px solid ${bordeColor}`;
-      card.innerHTML = `
-        <div class="stat-icon" style="background:#dbeafe;color:#2563eb"><i class="fas fa-route"></i></div>
-        <div class="stat-info">
-          <h3>${escapeHtml(ruta.nombre)}</h3>
-          <p>${puertas.length} puerta${puertas.length>1?'s':''}</p>
-          ${diasHastaRevision !== null ? `<small style="color:${bordeColor}">Próxima revisión: ${diasHastaRevision} día${diasHastaRevision!==1?'s':''}</small>` : ''}
-          ${ruta.frecuenciaMeses ? `<small>cada ${ruta.frecuenciaMeses} mes${ruta.frecuenciaMeses>1?'es':''}</small>` : ''}
-        </div>
-      `;
-      card.addEventListener('click', () => window.render_revisiones_tiendas(ruta.id, ruta.nombre, cadenaId, cadenaNombre));
-      container.appendChild(card);
-    }
-  } catch(e) {
-    console.error('Error en render_revisiones_rutas:', e);
-    main.innerHTML = '<div class="empty-state"><i class="fas fa-triangle-exclamation"></i><h3>Error al cargar rutas</h3><p>'+escapeHtml(e.message)+'</p></div>';
-  }
-};
-
-//  REVISIONES PROGRAMADAS - VISTA DE TIENDAS (NIVEL 3)
-const ordenarTiendasRuta = lista => [...lista].sort((a, b) => {
-  const oa = a.ordenRuta ?? Infinity, ob = b.ordenRuta ?? Infinity;
-  return oa !== ob ? oa - ob : String(a.nombre || '').localeCompare(String(b.nombre || ''), 'es');
-});
-
-/** Mejor orden de visita saliendo y volviendo a Ceutí. pts: [{lat,lng}] → {orden:[índices], km} */
-function calcularOrdenOptimo(pts) {
-  const n = pts.length;
-  const nodos = [BASE_CEUTI, ...pts];
-  const d = nodos.map(a => nodos.map(b => kmEntreCoordenadasCore(a.lat, a.lng, b.lat, b.lng) * getFactorCarretera()));
-  const largo = t => {
-    let s = d[0][t[0]];
-    for (let i = 1; i < t.length; i++) s += d[t[i - 1]][t[i]];
-    return s + d[t[t.length - 1]][0];
-  };
-  let mejor = null, mejorLen = Infinity;
-  const probar = t => { const l = largo(t); if (l < mejorLen - 1e-9) { mejor = t.slice(); mejorLen = l; } };
-
-  if (n <= 8) {
-    const permutar = (t, k) => {
-      if (k === t.length) return probar(t);
-      for (let i = k; i < t.length; i++) {
-        [t[k], t[i]] = [t[i], t[k]];
-        permutar(t, k + 1);
-        [t[k], t[i]] = [t[i], t[k]];
-      }
-    };
-    permutar(Array.from({ length: n }, (_, i) => i + 1), 0);
-  } else {
-    // Vecino más cercano desde cada punto de partida + mejora 2-opt
-    for (let inicio = 1; inicio <= n; inicio++) {
-      const t = [inicio], libres = new Set(Array.from({ length: n }, (_, i) => i + 1));
-      libres.delete(inicio);
-      while (libres.size) {
-        let sig = null, dm = Infinity;
-        for (const c of libres) if (d[t[t.length - 1]][c] < dm) { dm = d[t[t.length - 1]][c]; sig = c; }
-        t.push(sig); libres.delete(sig);
-      }
-      let mejora = true;
-      while (mejora) {
-        mejora = false;
-        for (let i = 0; i < n - 1; i++) for (let j = i + 1; j < n; j++) {
-          const nuevo = [...t.slice(0, i), ...t.slice(i, j + 1).reverse(), ...t.slice(j + 1)];
-          if (largo(nuevo) < largo(t) - 1e-9) { t.splice(0, n, ...nuevo); mejora = true; }
-        }
-      }
-      probar(t);
-    }
-  }
-  return { orden: mejor.map(i => i - 1), km: Math.round(mejorLen) };
-}
-
-/** Ordena las tiendas de una ruta para hacer los mínimos km posibles (Ceutí → tiendas → Ceutí) y guarda el orden. */
-window.optimizarRutaTiendas = async function(rutaId, cadenaId, rutaNombre, cadenaNombre) {
-  try {
-    const todos = await dbGetAll('clientes');
-    const tiendas = ordenarTiendasRuta(todos.filter(c => String(c.rutaId ?? c.rutaid ?? '') === String(rutaId)));
-    if (tiendas.length < 2) return showToast('La ruta necesita al menos 2 tiendas para optimizarla', 'warning');
-    showToast('Calculando el recorrido más corto?');
-
-    const sinCoord = [];
-    for (const t of tiendas) {
-      if (Number(t.lat) && Number(t.lng)) continue;
-      const g = t.direccion ? await geocodificar(t.direccion) : null;
-      if (g) {
-        t.lat = g.lat; t.lng = g.lng;
-        await dbPut('clientes', t);
-      } else sinCoord.push(t);
-      if (t.direccion) await new Promise(r => setTimeout(r, 1100)); // límite de Nominatim
-    }
-
-    const conCoord = tiendas.filter(t => !sinCoord.includes(t));
-    if (conCoord.length < 2) return showToast('Faltan coordenadas: revisa las direcciones de las tiendas', 'error');
-
-    const puntos = conCoord.map(t => ({ lat: Number(t.lat), lng: Number(t.lng) }));
-    const kmAntes = Math.round(kmCircuitoOrden(puntos));
-    const { orden, km } = calcularOrdenOptimo(puntos);
-    const nuevoOrden = [...orden.map(i => conCoord[i]), ...sinCoord];
-
-    for (let i = 0; i < nuevoOrden.length; i++) {
-      if (nuevoOrden[i].ordenRuta !== i + 1) await dbPut('clientes', { ...nuevoOrden[i], ordenRuta: i + 1 });
-    }
-
-    showToast(`Ruta optimizada: ${km} km (antes ${kmAntes} km)` + (sinCoord.length ? ` · ${sinCoord.length} sin ubicar al final` : ''), sinCoord.length ? 'warning' : 'success');
-
-    if (document.getElementById('tiendas-container')) await window.render_revisiones_tiendas(rutaId, rutaNombre, cadenaId, cadenaNombre);
-    else if (document.getElementById('rev-lista-tiendas')) await window.verTiendasDeRuta(cadenaId, rutaId);
-    else if (document.getElementById('clientes-ruta-lista')) await render_clientes_ruta(rutaId);
-  } catch (e) {
-    console.error('optimizarRutaTiendas falló:', e);
-    showToast('No se pudo guardar el orden. ¿Has ejecutado SUPABASE_ORDEN_RUTA.sql? ' + (e.message || ''), 'error');
-  }
-};
-
-function kmCircuitoOrden(pts) {
-  const nodos = [BASE_CEUTI, ...pts, BASE_CEUTI];
-  let s = 0;
-  for (let i = 1; i < nodos.length; i++) s += kmEntreCoordenadasCore(nodos[i - 1].lat, nodos[i - 1].lng, nodos[i].lat, nodos[i].lng) * getFactorCarretera();
-  return s;
-}
-
-window.render_revisiones_tiendas = async function(rutaId, rutaNombre, cadenaId, cadenaNombre) {
-  const main = document.getElementById('mainContent');
-  if (!main) return;
-
-  const tiendas = await window.getTiendasDeRuta(rutaId, cadenaId);
-  
-  main.innerHTML = `
-    <div class="page-revisiones">
-      <div class="page-header">
-        <div>
-          <button class="btn btn-back btn-sm" onclick="window.render_revisiones_rutas('${escapeAttr(cadenaId)}', '${escapeAttr(cadenaNombre)}')"><i class="fas fa-arrow-left"></i> Volver a rutas</button>
-        </div>
-        <div>
-          <h2 class="page-revisiones-title"><i class="fas fa-store"></i> Tiendas · ${escapeHtml(rutaNombre)}</h2>
-          <p class="page-revisiones-subtitle">${tiendas.length} tienda${tiendas.length>1?'s':''} en esta ruta</p>
-        </div>
-        <div class="header-actions">
-          <button class="btn btn-primary btn-sm" onclick="window.optimizarRutaTiendas('${escapeAttr(rutaId)}', '${escapeAttr(cadenaId)}', '${escapeAttr(rutaNombre)}', '${escapeAttr(cadenaNombre)}')"><i class="fas fa-route"></i> Optimizar ruta</button>
-          <button class="btn btn-success btn-sm" onclick="window.abrirFormularioRevisionRuta('${escapeAttr(rutaId)}', '${escapeAttr(rutaNombre)}', '${escapeAttr(cadenaId)}', '${escapeAttr(cadenaNombre)}')"><i class="fas fa-clipboard-check"></i> Formulario de revisión</button>
-        </div>
-      </div>
-      <div id="tiendas-container" class="stats-grid"></div>
-      <div id="clientes-ruta-lista" hidden></div>
-    </div>`;
-
-  const container = document.getElementById('tiendas-container');
-
-  if (tiendas.length === 0) {
-    container.innerHTML = '<p style="padding:20px;text-align:center;color:var(--gray);grid-column:1/-1;">No hay tiendas asignadas a esta ruta.</p>';
-    return;
-  }
-
-  // Usar estilos de stat-card para las tiendas
-  tiendas.forEach((tienda, index) => {
-    const esUltimaTienda = index === tiendas.length - 1;
-    const card = document.createElement('div');
-    card.className = 'stat-card tienda-card';
-    card.style.cursor = 'pointer';
-    card.innerHTML = `
-      <div class="stat-icon" style="background:#dbeafe;color:#2563eb"><i class="fas fa-store"></i></div>
-      <div class="stat-info">
-        <h3>${index + 1}. ${escapeHtml(tienda.nombre)}</h3>
-        <p>${escapeHtml(tienda.direccion || 'Sin dirección')}</p>
-        ${esUltimaTienda ? '<small style="color:var(--warning)">ultima tienda de la ruta</small>' : ''}
-      </div>
-      <div class="stat-actions">
-        <button class="btn btn-sm btn-outline" onclick="event.stopPropagation(); abrirGoogleMaps('${escapeAttr(tienda.direccion)}')"><i class="fas fa-map-marker-alt"></i> Maps</button>
-        <button class="btn btn-sm btn-primary" onclick="event.stopPropagation(); abrirInformeRevisionRuta('${escapeAttr(rutaId)}', '${escapeAttr(rutaNombre)}', '${escapeAttr(cadenaId)}', '${escapeAttr(cadenaNombre)}', '${escapeAttr(tienda.id)}', '${escapeAttr(tienda.nombre)}', ${esUltimaTienda})"><i class="fas fa-clipboard-check"></i> Informe</button>
-      </div>
-    `;
-    card.addEventListener('click', () => abrirInformeRevisionRuta(rutaId, rutaNombre, cadenaId, cadenaNombre, tienda.id, tienda.nombre, esUltimaTienda));
-    container.appendChild(card);
-  });
-};
-
-// Abre el formulario de revisión de TODA la ruta, con el checklist por puerta
-// (Hallazgo / Correctivo / Resultado + fotos). Reutiliza el formulario HIPERBER
-// con todas las tiendas de la ruta, sin duplicar lógica ni botones.
-window.abrirFormularioRevisionRuta = async function(rutaId, rutaNombre, cadenaId, cadenaNombre) {
-  try {
-    // DOTICS usa su propio formulario (checkboxes de estado con colores:
-    // Bueno / Operativo / No usar por equipo). El resto de cadenas y clientes
-    // usan el formulario genérico de checklist por puerta.
-    const esDotics=String(cadenaNombre||'').trim().toLocaleUpperCase()==='DOTICS';
-    if(esDotics) return window.openDoticsMaintenanceForm(cadenaId,null,new Date().toISOString().slice(0,10));
-
-    const tiendas = await window.getTiendasDeRuta(rutaId, cadenaId);
-    if (!tiendas.length) return showToast('Esta ruta no tiene tiendas asignadas', 'warning');
-
-    const stores = [];
-    for (const tienda of tiendas) {
-      const doors = await dbGetByIndex('puertas', 'clienteId', tienda.id);
-      stores.push({
-        clienteId: tienda.id,
-        nombre: tienda.nombre,
-        direccion: tienda.direccion || '',
-        rutaId: String(rutaId),
-        rutaNombre: rutaNombre,
-        puertas: doors.length ? doors.map(door => ({
-          id: door.id,
-          nombre: door.nombre || door.tipoPuerta || door.tipo || 'Puerta',
-          tipo: door.tipoPuerta || door.tipo || '',
-          hallazgo: null, hallazgoTexto: '', hallazgoFotos: [],
-          correctivo: null, correctivoTexto: '', resultado: null
-        })) : [{
-          id: null, nombre: '', tipo: '',
-          hallazgo: null, hallazgoTexto: '', hallazgoFotos: [],
-          correctivo: null, correctivoTexto: '', resultado: null, nueva: true
-        }]
-      });
-    }
-
-    window.__hiperberReviewDraft = {
-      id: window.db.nextId('REV'),
-      chainId: String(rutaId),
-      chainName: cadenaNombre ? cadenaNombre + ' · ' + rutaNombre : rutaNombre,
-      stores
-    };
-
-    const form = '<div class="hiperber-form">' +
-      '<div class="form-group hiperber-date"><label for="hiperber-review-date">Fecha de revisión</label><input id="hiperber-review-date" type="date" value="' + new Date().toISOString().slice(0, 10) + '"></div>' +
-      '<div id="hiperber-stores" class="hiperber-stores"></div>' +
-      '</div>';
-    const footer = '<button type="button" class="btn btn-outline" onclick="cerrarFormularioRevision()">Cerrar</button>' +
-      '<button type="button" class="btn btn-primary" onclick="saveHiperberReviewForm()"><i class="fas fa-save"></i> Guardar revisión</button>';
-
-    openModal('Formulario de revisión · ' + rutaNombre, form, footer);
-    renderHiperberStores();
-  } catch (e) {
-    console.error('abrirFormularioRevisionRuta falló:', e);
-    showToast('No se pudo abrir el formulario: ' + e.message, 'error');
-  }
-};
+// ═══════════════════════════════════════════════════════════
+//  REVISIONES — formularios (cliente → ubicaciones → puertas)
+//  El listado y las rutas están en informe-revisiones-cliente.js
+//  y central.js; aquí solo el formulario de revisión y su guardado.
+// ═══════════════════════════════════════════════════════════
 
 // Función para abrir Google Maps con la dirección
 window.abrirGoogleMaps = function(direccion) {
-  if (!direccion) {
-    showToast('La tienda no tiene dirección', 'warning');
-    return;
-  }
-  const url = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(direccion)}`;
-  window.open(url, '_blank');
-};
-
-// Función para generar PDF consolidado de toda la ruta
-window.generarPDFRutaCompleta = async function(rutaId, rutaNombre, cadenaId, cadenaNombre) {
-  showToast('Generando PDF de la ruta...', 'info');
-  
-  try {
-    // Buscar todas las revisiones de esta ruta
-    const todasRevisiones = await dbGetAll('revisiones');
-    const revisionesRuta = todasRevisiones.filter(rev => {
-      try {
-        const notas = JSON.parse(rev.notas || '{}');
-        // El formulario HIPERBER guarda el id de la ruta en cadenaId
-        return [notas.rutaId, notas.cadenaId].some(value => value && String(value) === String(rutaId));
-      } catch(e) {
-        return false;
-      }
-    });
-    
-    if (revisionesRuta.length === 0) {
-      showToast('No hay revisiones guardadas para esta ruta', 'warning');
-      return;
-    }
-    
-    await window.generatePDF_ruta(revisionesRuta, { rutaNombre, cadenaNombre });
-    
-  } catch(error) {
-    console.error('Error generando PDF de ruta:', error);
-    showToast('Error al generar PDF de ruta: ' + error.message, 'error');
-  }
-};
-
-// Función para abrir el informe de revisión de la ruta (usando formulario HIPERBER)
-window.abrirInformeRevisionRuta = async function(rutaId, rutaNombre, cadenaId, cadenaNombre, tiendaId, tiendaNombre, esUltimaTienda = false) {
-  // Buscar la tienda real para tener su dirección correcta
-  let tiendaReal = null;
-  try { tiendaReal = await dbGet('clientes', tiendaId); } catch (e) { console.warn('No se pudo cargar la tienda:', e); }
-
-  // Crear un draft temporal para HIPERBER con solo esta tienda
-  const tienda = {
-    clienteId: tiendaId,
-    nombre: tiendaNombre,
-    direccion: tiendaReal?.direccion || '',
-    rutaId: rutaId,
-    rutaNombre: rutaNombre,
-    puertas: [] // Se cargarán las puertas de esta tienda
-  };
-
-  // Buscar las puertas de esta tienda
-  dbGetByIndex('puertas', 'clienteId', tiendaId).then(puertas => {
-    tienda.puertas = puertas.map(door => ({
-      id: door.id,
-      nombre: door.nombre || door.tipoPuerta || door.tipo || 'Puerta',
-      tipo: door.tipoPuerta || door.tipo || '',
-      hallazgo: null, hallazgoTexto: '', hallazgoFotos: [],
-      correctivo: null, correctivoTexto: '', resultado: null
-    }));
-
-    window.__hiperberReviewDraft = {
-      id: window.db.nextId('REV'),
-      chainId: rutaId,
-      chainName: rutaNombre,
-      stores: [tienda],
-      esUltimaTienda: esUltimaTienda
-    };
-
-    const form = '<div class="hiperber-form">' +
-      '<div class="form-group hiperber-date"><label for="hiperber-review-date">Fecha de revisión</label><input id="hiperber-review-date" type="date" value="' + new Date().toISOString().slice(0, 10) + '"></div>' +
-      '<div id="hiperber-stores" class="hiperber-stores"></div>' +
-      '</div>';
-    
-    const footer = '<button type="button" class="btn btn-outline" onclick="cerrarFormularioRevision()">Cerrar</button>' +
-      '<button type="button" class="btn btn-primary" onclick="saveHiperberReviewForm()"><i class="fas fa-save"></i> Guardar revisión</button>';
-
-    openModal('Revisión · ' + tiendaNombre, form, footer);
-    renderHiperberStores();
-  });
+  if (!direccion) { showToast('La ubicación no tiene dirección', 'warning'); return; }
+  window.open('https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(direccion), '_blank');
 };
 
 function revisionHistoryMetadata(revision){
   let notes={};
   try{notes=JSON.parse(revision.notas||'{}');}catch(e){notes={texto:revision.notas||''};}
-  const stores=Array.isArray(notes.supermercados)?notes.supermercados:[];
-  const chainId=String(notes.cadenaId||revision.cadenaId||revision.cadenaid||'');
-  const clientIds=[revision.clienteId,...stores.map(store=>store.id),...(revision.items||[]).map(item=>item.clienteId)].filter(Boolean).map(String);
+  const stores=Array.isArray(notes.ubicaciones)?notes.ubicaciones:(Array.isArray(notes.supermercados)?notes.supermercados:[]);
+  const clientName=notes.cliente||notes.clienteNombre||'';
+  const clientId=String(notes.clienteId||revision.clienteId||'');
   const clientNames=[...stores.map(store=>store.nombre),notes.clienteNombre,notes.cliente].filter(Boolean);
-  const lineNames=(revision.items||[]).map(item=>item.clienteNombre).filter(Boolean);
+  const lineNames=(revision.items||[]).map(item=>item.ubicacionNombre||item.clienteNombre).filter(Boolean);
   return{
-    chainId,chainName:notes.cadena||'',clientIds,clientNames:[...new Set([...clientNames,...lineNames])],
+    clientId,clientName,chainId:String(notes.cadenaId||''),chainName:notes.cadena||'',
+    clientIds:[revision.clienteId,notes.clienteId,...(revision.items||[]).map(item=>item.clienteId)].filter(Boolean).map(String),
+    clientNames:[...new Set([...clientNames,...lineNames])],rutaNombre:notes.rutaNombre||'',
     technician:notes.tecnicos||revision.tecnicoNombre||revision.tecnicoId||'—',
     contract:notes.contrato||'',intervention:notes.intervencion||'',notes,rawNotes:revision.notas||''
   };
 }
+window.revisionHistoryMetadata=revisionHistoryMetadata;
 
-window.buscarHistorialRevisiones=async function(){
-  const body=document.getElementById('hist-rev-resultados');
-  if(!body) return;
-  const [revisiones,cadenas,clientes]=await Promise.all([dbGetAll('revisiones'),dbGetAll('cadenas'),dbGetAll('clientes')]);
-  const chainNames=new Map(cadenas.map(chain=>[String(chain.id),chain.nombre]));
-  const clientNames=new Map(clientes.map(client=>[String(client.id),client.nombre]));
-  const desde=document.getElementById('hist-rev-desde').value;
-  const hasta=document.getElementById('hist-rev-hasta').value;
-  const cadenaFilter=document.getElementById('hist-rev-cadena').value;
-  const clienteFilter=document.getElementById('hist-rev-cliente').value;
-  const textFilter=document.getElementById('hist-rev-buscar').value.trim().toLocaleLowerCase();
-  const filtered=revisiones.map(revision=>({revision,meta:revisionHistoryMetadata(revision)})).filter(({revision,meta})=>{
-    const revisionDate=String(revision.fecha||'').slice(0,10);
-    const chainName=meta.chainName||chainNames.get(meta.chainId)||'';
-    const matchesDate=(!desde||revisionDate>=desde)&&(!hasta||revisionDate<=hasta);
-    const matchesChain=!cadenaFilter||meta.chainId===cadenaFilter;
-    const matchesClient=!clienteFilter||meta.clientIds.includes(clienteFilter)||String(revision.clienteId||'')===clienteFilter;
-    const searchable=[revision.id,chainName,meta.clientNames.join(' '),meta.technician,meta.contract,meta.intervention,meta.rawNotes,...(revision.items||[]).map(item=>[item.concepto,item.hallazgoTexto,item.correctivoTexto].join(' '))].join(' ').toLocaleLowerCase();
-    return matchesDate&&matchesChain&&matchesClient&&(!textFilter||searchable.includes(textFilter));
-  }).sort((a,b)=>String(b.revision.fecha||'').localeCompare(String(a.revision.fecha||'')));
-  if(!filtered.length){
-    body.innerHTML='<tr><td colspan="7" class="revision-history-empty">No hay revisiones que coincidan con los filtros.</td></tr>';
-    return;
-  }
-  body.innerHTML=filtered.map(({revision,meta})=>{
-    const chainName=meta.chainName||chainNames.get(meta.chainId)||'—';
-    const names=meta.clientNames.length?meta.clientNames.join(', '):(revision.clienteId?clientNames.get(String(revision.clienteId)):'—');
-    const rawResult=revision.estadoTrasRevision||((revision.items||[]).some(item=>item.resultadoEstado==='x')?'Fuera de servicio':'Operativa');
-    const result=String(rawResult).replace(/_/g,' ');
-    const resultLabel=result.charAt(0).toLocaleUpperCase()+result.slice(1);
-    return '<tr><td data-label="Fecha">'+escapeHtml(formatDate(revision.fecha))+'</td><td data-label="Cadena">'+escapeHtml(chainName)+'</td><td data-label="Cliente / supermercado">'+escapeHtml(names||'—')+'</td><td data-label="Técnico">'+escapeHtml(meta.technician)+'</td><td data-label="Equipos">'+(revision.items||[]).length+'</td><td data-label="Resultado">'+escapeHtml(resultLabel)+'</td><td data-label="PDF"><button type="button" class="btn btn-primary btn-sm btn-hist-rev-pdf" data-revision-id="'+escapeHtml(revision.id)+'" aria-label="Descargar PDF de revisión"><i class="fas fa-file-pdf"></i> PDF</button></td></tr>';
-  }).join('');
-  body.querySelectorAll('.btn-hist-rev-pdf').forEach(button=>button.addEventListener('click',()=>window.generatePDF_revision(button.dataset.revisionId)));
-};
-
-//  HELPERS PARA REVISIONES PROGRAMADAS
-
-async function getPuertasPorRuta(rutaId) {
-  // Delegado en el helper único (utils.js) para que panel, vistas y formulario
-  // usen exactamente el mismo criterio de tiendas/puertas.
-  return window.getPuertasDeRuta ? window.getPuertasDeRuta(rutaId) : [];
-}
-
-function getEstadoPuerta(puerta) {
-  if (!puerta.proximaRevision) {
-    return { texto: 'Sin programar', clase: 'badge-yellow' };
-  }
-
-  const proxima = new Date(puerta.proximaRevision);
-  const hoy = new Date();
-  const diffDias = Math.ceil((proxima - hoy) / (1000 * 60 * 60 * 24));
-
-  if (diffDias < 0) {
-    return { texto: `Vencida ${Math.abs(diffDias)}d`, clase: 'badge-red' };
-  } else if (diffDias === 0) {
-    return { texto: 'Vence hoy', clase: 'badge-red' };
-  } else if (diffDias <= 30) {
-    return { texto: `En ${diffDias}d`, clase: 'badge-yellow' };
-  } else {
-    return { texto: 'OK', clase: 'badge-green' };
-  }
-}
-
-async function openHiperberReviewForm(chainId, fechaPreseleccionada, opciones={}) {
-  const chain = await getCadenaById(chainId);
-  if (!chain) return showToast('No se encontró la cadena', 'error');
-
-  const [clients, routes] = await Promise.all([
-    dbGetAll('clientes'),
-    getRutasByCadena(chain.id)
-  ]);
-
-  // Si el usuario pidió revisar una ruta concreta, SOLO sus tiendas (por rutaId)
-  const rutaFiltro=opciones&&opciones.rutaId?String(opciones.rutaId):null;
-  const rutasVisibles=rutaFiltro?routes.filter(r=>String(r.id)===rutaFiltro):routes;
-  const routeIds = new Set(rutasVisibles.map(r => String(r.id)));
-  // Clientes: si hay filtro de ruta, exclusivamente los vinculados a esa ruta;
-  // si no, los de toda la cadena (cadenaId/padreId o pertenecientes a sus rutas).
-  const supermarkets = rutaFiltro
-    ? ordenarTiendasRuta(clients.filter(c=>String(c.rutaId??c.rutaid??'')===rutaFiltro))
-    : ordenarTiendasRuta(clients.filter(client =>
-      String(client.cadenaId ?? client.cadenaid ?? '') === String(chain.id) ||
-      String(client.padreId ?? client.padreid ?? '') === String(chain.id) ||
-      routeIds.has(String(client.rutaId ?? client.rutaid ?? ''))
-    ));
-
-  // Mapa rutaId → nombre de ruta
-  const routeNameById = {};
-  rutasVisibles.forEach(r => { routeNameById[String(r.id)] = r.nombre; });
-
-  const stores = [];
-  for (const client of supermarkets) {
-    const doors = await dbGetByIndex('puertas', 'clienteId', client.id);
-    const rid = String(client.rutaId ?? client.rutaid ?? '');
-    stores.push({
-      clienteId: client.id,
-      nombre: client.nombre,
-      direccion: client.direccion || '',
-      rutaId: rid,
-      rutaNombre: routeNameById[rid] || '📍 Sin ruta asignada',
-      puertas: doors.length ? doors.map(door => ({
-        id: door.id,
-        nombre: door.nombre || door.tipoPuerta || door.tipo || 'Puerta',
-        tipo: door.tipoPuerta || door.tipo || '',
-        hallazgo: null, hallazgoTexto: '', hallazgoFotos: [],
-        correctivo: null, correctivoTexto: '', resultado: null
-      })) : [{
-        id: null, nombre: '', tipo: '',
-        hallazgo: null, hallazgoTexto: '', hallazgoFotos: [],
-        correctivo: null, correctivoTexto: '', resultado: null, nueva: true
-      }]
-    });
-  }
-
-  window.__hiperberReviewDraft = {
-    id: window.db.nextId('REV'),
-    chainId: String(chain.id),
-    chainName: chain.nombre,
-    rutaId: rutaFiltro,
-    stores
-  };
-
-  const form = '<div class="hiperber-form">' +
-    '<div class="form-group hiperber-date"><label for="hiperber-review-date">Fecha de revisión</label><input id="hiperber-review-date" type="date" value="' + (fechaPreseleccionada || new Date().toISOString().slice(0, 10)) + '"></div>' +
-    '<div id="hiperber-stores" class="hiperber-stores"></div>' +
-    '</div>';
-  const footer = '<button type="button" class="btn btn-outline" onclick="cerrarFormularioRevision()">Cerrar</button>' +
-    '<button type="button" class="btn btn-primary" onclick="saveHiperberReviewForm()"><i class="fas fa-save"></i> Guardar revisión</button>';
-
-  openModal('Revisión · ' + chain.nombre + (rutaFiltro?' · '+(routeNameById[rutaFiltro]||'Ruta'):''), form, footer);
-  renderHiperberStores();
-}
-window.openHiperberReviewForm = openHiperberReviewForm;
-// snico punto de cierre: lo usan el botón Cerrar, la o. de la cabecera y Escape.
+// Único punto de cierre: lo usan el botón Cerrar, la X de la cabecera y Escape.
 window.cerrarFormularioRevision = function() {
+  if (window.__hiperberReviewDraft?.esRuta) { try { window.guardarBorradorRevision(true); } catch (e) { /* sin borrador */ } }
   window.__hiperberReviewDraft = null;
+  if (window.__doticsRoute?.esRuta) { try { window.drGuardarBorrador(true); } catch (e) { /* sin borrador */ } }
   window.__doticsVisitDraft = null;
-  // Cierra el modal estándar y, por si acaso, cualquier overlay de revisión que quede abierto
+  window.__doticsRoute = null;
   closeModal();
   document.getElementById('overlayRevision')?.remove();
   document.getElementById('modal-revision-overlay')?.remove();
   if (typeof revisionPuertaActual !== 'undefined') revisionPuertaActual = null;
 };
 
-// Formulario de revisión para un CLIENTE sNICO """"""
-// Reutiliza el motor del formulario Hiperber (checklist por puerta:
-// Hallazgo / Correctivo / Resultado + fotos) con las puertas del cliente.
-window.abrirFormularioRevisionCliente = async function(clienteId, fechaPreseleccionada) {
+const puertaParaFormulario = door => ({
+  id: door.id,
+  nombre: door.nombre || door.tipoPuerta || door.tipo || 'Puerta',
+  tipo: door.tipoPuerta || door.tipo || '',
+  hallazgo: null, hallazgoTexto: '', hallazgoFotos: [],
+  correctivo: null, correctivoTexto: '', resultado: null
+});
+
+// ── Borrador: el progreso se guarda al marcar cada tienda (y poco después de cada cambio) ──
+let __borradorTimer = null;
+function resumenBorrador(draft){
+  return { hechas: draft.stores.filter(s => s.completada).length, total: draft.stores.length };
+}
+window.guardarBorradorRevision = function(inmediato){
+  const draft = window.__hiperberReviewDraft;
+  if (!draft || !draft.esRuta || !draft.borradorKey) return Promise.resolve();
+  clearTimeout(__borradorTimer);
+  const escribir = async () => {
+    const d = window.__hiperberReviewDraft;
+    if (!d || !d.esRuta) return;
+    try {
+      const fecha = document.getElementById('hiperber-review-date')?.value || null;
+      await window.Central.Borradores.guardar(d.borradorKey, d.opts, { draft: d, fecha }, resumenBorrador(d));
+      d.guardadoEn = Date.now();
+      const el = document.getElementById('hs-guardado');
+      if (el) el.textContent = '💾 Progreso guardado en este dispositivo · ' + new Date(d.guardadoEn).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
+    } catch (e) {
+      console.warn('No se pudo guardar el borrador:', e);
+      const el = document.getElementById('hs-guardado');
+      if (el) el.textContent = '⚠️ No se pudo guardar el progreso en este dispositivo';
+    }
+  };
+  if (inmediato) return escribir();
+  return new Promise(res => { __borradorTimer = setTimeout(() => escribir().then(res), 700); });
+};
+
+// Mezcla lo guardado con las ubicaciones/puertas actuales (por id): si se añadió una puerta, esa tienda vuelve a pendiente
+function fusionarBorradorRevision(draft, guardado){
+  const prev = guardado && guardado.draft;
+  if (!prev) return null;
+  draft.id = prev.id || draft.id;
+  const prevStores = new Map((prev.stores || []).map(s => [String(s.ubicacionId), s]));
+  draft.stores.forEach(store => {
+    const p = prevStores.get(String(store.ubicacionId));
+    if (!p) return;
+    const prevDoors = new Map((p.puertas || []).filter(d => d.id).map(d => [String(d.id), d]));
+    store.puertas.forEach(door => {
+      const pd = door.id && prevDoors.get(String(door.id));
+      if (pd) Object.assign(door, { hallazgo: pd.hallazgo, hallazgoTexto: pd.hallazgoTexto || '', hallazgoFotos: pd.hallazgoFotos || [], correctivo: pd.correctivo, correctivoTexto: pd.correctivoTexto || '', resultado: pd.resultado });
+    });
+    store.completada = !!p.completada && !store.puertas.some(hiperberPuertaIncompleta);
+  });
+  Object.keys(prev.rutasCompletas || {}).forEach(k => { draft.rutasCompletas[k] = !!prev.rutasCompletas[k]; });
+  draft.guardadoEn = prev.guardadoEn || null;
+  return guardado.fecha || null;
+}
+
+window.descartarBorradorRevision = async function(){
+  const draft = window.__hiperberReviewDraft;
+  if (!draft) return;
+  if (!confirm('¿Empezar la ruta de cero? Se borrará el progreso guardado y las fotos hechas hasta ahora.')) return;
+  clearTimeout(__borradorTimer);
+  try { await window.Central.Borradores.borrar(draft.borradorKey); } catch (e) { /* nada que borrar */ }
+  const opts = { ...draft.opts, fecha: document.getElementById('hiperber-review-date')?.value || null };
+  window.__hiperberReviewDraft = null;
+  await window.abrirFormularioRevision(opts);
+};
+
+/**
+ * Abre el formulario de revisión.
+ *   opts.clienteId     cliente (individual o central)
+ *   opts.rutaId        solo las ubicaciones de esa ruta   (central)
+ *   opts.ubicacionIds  solo esas ubicaciones              (central)
+ *   opts.fecha         fecha preseleccionada
+ * Individual → sus puertas. Central → ubicaciones (ordenadas por ruta) con sus puertas.
+ */
+window.abrirFormularioRevision = async function(opts) {
+  opts = opts || {};
   try {
-    const cliente = await dbGet('clientes', clienteId);
+    const cliente = await dbGet('clientes', opts.clienteId);
     if (!cliente) return showToast('No se encontró el cliente', 'error');
-    const puertas = await dbGetByIndex('puertas', 'clienteId', clienteId);
-    if (!puertas.length) return showToast('Este cliente no tiene puertas registradas', 'warning');
+    if (String(cliente.nombre || '').toLocaleUpperCase().includes('DOTICS')) {
+      return window.abrirRevisionDotics(opts);
+    }
+    const [ubics, rutas, puertas] = await Promise.all([
+      window.Central.ubicacionesDe(cliente.id), window.Central.rutasDe(cliente.id), window.Central.puertasDe(cliente.id)
+    ]);
+    const central = cliente.central === true || ubics.length > 0;
+    const rutaPorId = new Map(rutas.map(r => [String(r.id), r]));
+    let stores = [], titulo = cliente.nombre;
 
-    const store = {
-      clienteId: String(clienteId),
-      nombre: cliente.nombre,
-      direccion: cliente.direccion || '',
-      rutaId: null,
-      rutaNombre: '',
-      puertas: puertas.map(door => ({
-        id: door.id,
-        nombre: door.nombre || door.tipoPuerta || door.tipo || 'Puerta',
-        tipo: door.tipoPuerta || door.tipo || '',
-        hallazgo: null, hallazgoTexto: '', hallazgoFotos: [],
-        correctivo: null, correctivoTexto: '', resultado: null
-      }))
-    };
+    if (!central) {
+      if (!puertas.length) return showToast('Este cliente no tiene puertas registradas', 'warning');
+      stores = [{
+        clienteId: String(cliente.id), ubicacionId: null, nombre: cliente.nombre, direccion: cliente.direccion || '',
+        rutaId: null, rutaNombre: cliente.nombre, puertas: puertas.map(puertaParaFormulario)
+      }];
+    } else {
+      let lista = ubics.filter(u => u.activa !== false);
+      if (opts.ubicacionIds) lista = lista.filter(u => opts.ubicacionIds.map(String).includes(String(u.id)));
+      else if (opts.rutaId) lista = lista.filter(u => String(u.rutaId) === String(opts.rutaId));
+      if (opts.rutaId && rutaPorId.get(String(opts.rutaId))) titulo += ' · ' + rutaPorId.get(String(opts.rutaId)).nombre;
+      else if (opts.ubicacionIds && opts.ubicacionIds.length === 1 && lista[0]) titulo += ' · ' + lista[0].denominacion;
+      // Orden: por ruta (orden de la ruta) y dentro de ella por orden de visita
+      lista.sort((a, b) => {
+        const ra = rutaPorId.get(String(a.rutaId))?.orden ?? Infinity, rb = rutaPorId.get(String(b.rutaId))?.orden ?? Infinity;
+        return ra - rb || window.Central.porOrden(a, b);
+      });
+      if (!lista.length) return showToast('No hay ubicaciones que revisar en esta selección', 'warning');
+      stores = lista.map(u => {
+        const ps = puertas.filter(p => String(p.ubicacionId) === String(u.id));
+        const ruta = rutaPorId.get(String(u.rutaId));
+        return {
+          clienteId: String(cliente.id), ubicacionId: String(u.id), nombre: u.denominacion, direccion: u.direccion || '',
+          rutaId: ruta ? String(ruta.id) : null, rutaNombre: ruta ? ruta.nombre : '📍 Sin ruta asignada',
+          puertas: ps.length ? ps.map(puertaParaFormulario) : [{
+            id: null, nombre: '', tipo: '', hallazgo: null, hallazgoTexto: '', hallazgoFotos: [],
+            correctivo: null, correctivoTexto: '', resultado: null, nueva: true
+          }]
+        };
+      });
+    }
 
-    window.__hiperberReviewDraft = {
+    const draftNuevo = {
       id: window.db.nextId('REV'),
-      chainId: String(clienteId),
-      chainName: cliente.nombre,
-      esClienteUnico: true,
-      stores: [store]
+      clienteId: String(cliente.id), clienteNombre: cliente.nombre, central,
+      rutaId: opts.rutaId ? String(opts.rutaId) : null,
+      rutaNombre: opts.rutaId ? (rutaPorId.get(String(opts.rutaId))?.nombre || '') : '',
+      esRuta: central && stores.length > 1,      // varias tiendas: check por tienda + check final de ruta
+      rutasCompletas: {},
+      stores,
+      opts: { clienteId: String(cliente.id), rutaId: opts.rutaId || null, ubicacionIds: opts.ubicacionIds || null }
     };
-
+    let fechaForm = opts.fecha || new Date().toISOString().slice(0, 10);
+    draftNuevo.borradorKey = window.Central.Borradores.clave(draftNuevo.opts);
+    // ¿Hay una revisión de esta ruta a medias en este dispositivo? → retomarla
+    if (draftNuevo.esRuta) {
+      try {
+        const guardado = await window.Central.Borradores.obtener(draftNuevo.borradorKey);
+        if (guardado) {
+          const r = guardado.resumen || {};
+          const cuando = new Date(guardado.savedAt).toLocaleString('es-ES', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+          if (confirm('Hay una revisión de esta ruta en curso: ' + (r.hechas ?? '?') + ' de ' + (r.total ?? '?') + ' tiendas revisadas (guardada el ' + cuando + ').\n\nAceptar = continuar donde la dejaste\nCancelar = empezar de nuevo (se descarta lo guardado)')) {
+            fechaForm = fusionarBorradorRevision(draftNuevo, guardado.datos) || fechaForm;
+            showToast('Revisión retomada: ' + draftNuevo.stores.filter(s => s.completada).length + ' de ' + draftNuevo.stores.length + ' tiendas ya revisadas');
+          } else {
+            await window.Central.Borradores.borrar(draftNuevo.borradorKey);
+          }
+        }
+      } catch (e) { console.warn('No se pudo leer el borrador de la revisión:', e); }
+    }
+    window.__hiperberReviewDraft = draftNuevo;
     const form = '<div class="hiperber-form">' +
-      '<div class="form-group hiperber-date"><label for="hiperber-review-date">Fecha de revisión</label><input id="hiperber-review-date" type="date" value="' + (fechaPreseleccionada || new Date().toISOString().slice(0, 10)) + '"></div>' +
-      '<div id="hiperber-stores" class="hiperber-stores"></div>' +
-      '</div>';
-    const footer = '<button type="button" class="btn btn-outline" onclick="cerrarFormularioRevision()">Cerrar</button>' +
+      '<div class="form-group hiperber-date"><label for="hiperber-review-date">Fecha de revisión</label><input id="hiperber-review-date" type="date" value="' + fechaForm + '" onchange="guardarBorradorRevision()"></div>' +
+      '<div id="hiperber-stores" class="hiperber-stores"></div></div>';
+    const footer = '<button type="button" class="btn btn-outline" onclick="cerrarFormularioRevision()">' + (draftNuevo.esRuta ? 'Cerrar (se guarda el progreso)' : 'Cerrar') + '</button>' +
+      (draftNuevo.esRuta ? '<button type="button" class="btn btn-danger" onclick="descartarBorradorRevision()" title="Borra lo guardado y empieza la ruta de cero"><i class="fas fa-rotate-left"></i> Empezar de nuevo</button>' : '') +
       '<button type="button" class="btn btn-primary" onclick="saveHiperberReviewForm()"><i class="fas fa-save"></i> Guardar revisión</button>';
-
-    openModal('Revisión · ' + cliente.nombre, form, footer);
+    openModal('Revisión · ' + titulo, form, footer);
     renderHiperberStores();
   } catch (e) {
-    console.error('abrirFormularioRevisionCliente falló:', e);
+    console.error('abrirFormularioRevision falló:', e);
     showToast('No se pudo abrir el formulario: ' + e.message, 'error');
   }
 };
+
 function renderHiperberStores() {
   const draft = window.__hiperberReviewDraft;
   const container = document.getElementById('hiperber-stores');
   if (!draft || !container) return;
   if (!draft.stores.length) {
-    container.innerHTML = '<div class="empty-state"><p>No hay clientes asignados a esta revisión. Asigna clientes a la cadena para completar el formulario.</p></div>';
+    container.innerHTML = '<div class="empty-state"><p>No hay ubicaciones ni puertas en esta revisión. Añade las ubicaciones del cliente (y sus puertas) para completar el formulario.</p></div>';
     return;
   }
 
@@ -1134,12 +562,15 @@ function renderHiperberStores() {
   });
 
   const storeHtml = (store, storeIndex) =>
-    '<section class="hiperber-store" style="margin-left:18px;">' +
-      '<div class="hiperber-store-head"><h4>' + escapeHtml(store.nombre) + '</h4>' +
+    '<section class="hiperber-store' + (store.completada ? ' hiperber-store-done' : '') + '" id="hs-store-' + storeIndex + '" style="margin-left:18px;' + (store.completada ? 'border-left:4px solid #16a34a;padding-left:10px;' : '') + '">' +
+      '<div class="hiperber-store-head" style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;"><div><h4>' + (draft.esRuta ? (storeIndex + 1) + '. ' : '') + escapeHtml(store.nombre) + '</h4>' +
       (store.direccion ? '<span class="hiperber-store-addr"><i class="fas fa-location-dot"></i> ' + escapeHtml(store.direccion) + '</span>' : '') + '</div>' +
+      (draft.esRuta ? '<label class="hiperber-store-check" style="display:flex;align-items:center;gap:8px;font-weight:600;cursor:pointer;padding:6px 12px;border-radius:10px;border:1px solid ' + (store.completada ? '#16a34a' : 'var(--border)') + ';background:' + (store.completada ? 'rgba(22,163,74,.12)' : 'var(--surface-alt)') + ';">' +
+        '<input type="checkbox" id="hs-chk-' + storeIndex + '" ' + (store.completada ? 'checked' : '') + ' style="width:20px;height:20px;" onchange="toggleStoreCompletada(' + storeIndex + ',this.checked)"> ' +
+        '<span id="hs-chk-txt-' + storeIndex + '">' + (store.completada ? 'Revisada ✔' : 'Marcar como revisada') + '</span></label>' : '') + '</div>' +
       '<div class="table-wrapper hiperber-table-wrapper"><table class="hiperber-checklist"><thead><tr><th>Puerta</th><th>HALLAZGO</th><th>CORRECTIVO</th><th>RESULTADO</th></tr></thead><tbody>' +
         store.puertas.map((door, doorIndex) =>
-          '<tr><td data-label="Puerta"><input class="hiperber-door-name" type="text" readonly' + (door.nombre ? '' : ' data-empty="1"') + ' aria-label="Puerta de ' + escapeHtml(store.nombre) + '" value="' + escapeHtml(door.nombre) + '" placeholder="Sin nombre"' + '>' + '<small>' + escapeHtml(door.tipo || '') + '</small></td>' +
+          '<tr><td data-label="Puerta"><input class="hiperber-door-name" type="text" readonly data-sin-voz' + (door.nombre ? '' : ' data-empty="1"') + ' aria-label="Puerta de ' + escapeHtml(store.nombre) + '" value="' + escapeHtml(door.nombre) + '" placeholder="Sin nombre"' + '>' + '<small>' + escapeHtml(door.tipo || '') + '</small></td>' +
             hiperberDecisionCell(storeIndex, doorIndex, door, 'hallazgo', [['ok','OK'],['x','X']]) +
             hiperberDecisionCell(storeIndex, doorIndex, door, 'correctivo', [['ok','OK'],['hecho','✔'],['x','X']]) +
             hiperberDecisionCell(storeIndex, doorIndex, door, 'resultado', [['ok','OK'],['x','X']]) + '</tr>'
@@ -1148,14 +579,93 @@ function renderHiperberStores() {
       '' +
     '</section>';
 
-  container.innerHTML = groups.map(g =>
+  const finalHtml = g => {
+    const key = g.items[0].store.rutaId || 'sin';
+    const ok = !!(draft.rutasCompletas && draft.rutasCompletas[key]);
+    return '<label id="hs-final-' + key + '" class="hiperber-route-final" style="display:flex;align-items:center;gap:10px;margin:14px 0 0 18px;padding:12px 14px;border-radius:12px;font-weight:700;cursor:pointer;border:2px solid ' + (ok ? '#16a34a' : 'var(--border)') + ';background:' + (ok ? 'rgba(22,163,74,.12)' : 'var(--surface-alt)') + ';">' +
+      '<input type="checkbox" id="hs-final-chk-' + key + '" ' + (ok ? 'checked' : '') + ' style="width:22px;height:22px;" onchange="toggleRutaCompletada(\'' + key + '\',this.checked)"> ' +
+      '<span><i class="fas fa-flag-checkered"></i> ' + escapeHtml(g.name) + ' completada <small style="font-weight:400;color:var(--text-muted)">(marca esto en la última tienda para cerrar la ruta)</small></span></label>';
+  };
+
+  container.innerHTML =
+    (draft.esRuta ? '<div id="hs-progreso" style="position:sticky;top:0;z-index:5;background:var(--surface);padding:10px 0 12px;margin-bottom:12px;border-bottom:1px solid var(--border);"></div>' : '') +
+    groups.map(g =>
     '<div class="hiperber-route-group" style="margin-bottom:26px;border-left:4px solid var(--primary);padding-left:14px;">' +
       '<h3 style="color:var(--primary);margin:0 0 12px;">' + escapeHtml(g.name) +
         ' <span class="badge badge-info">' + g.items.length + '</span></h3>' +
       g.items.map(it => storeHtml(it.store, it.index)).join('') +
+      (draft.esRuta && g.items[0].store.rutaId ? finalHtml(g) : '') +
     '</div>'
   ).join('');
+  actualizarProgresoRevision();
 }
+
+// ── Progreso de la ruta: check por tienda + check final ──
+function hiperberPuertaIncompleta(door){
+  if(!door.id) return false;                         // las filas vacías «nueva» no cuentan
+  if(!door.hallazgo||!door.correctivo||!door.resultado) return true;
+  if(door.hallazgo==='x'&&!String(door.hallazgoTexto||'').trim()) return true;
+  if(door.correctivo==='hecho'&&!String(door.correctivoTexto||'').trim()) return true;
+  return false;
+}
+const hiperberClaveRuta = store => store.rutaId || 'sin';
+
+function actualizarProgresoRevision(){
+  const draft=window.__hiperberReviewDraft;
+  if(!draft||!draft.esRuta) return;
+  const total=draft.stores.length, hechas=draft.stores.filter(s=>s.completada).length;
+  const pct=Math.round(hechas/total*100);
+  const box=document.getElementById('hs-progreso');
+  if(box) box.innerHTML='<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:6px;font-weight:700;">'+
+    '<span><i class="fas fa-route"></i> '+hechas+' de '+total+' tiendas revisadas</span>'+
+    '<span style="color:'+(hechas===total?'#16a34a':'var(--text-muted)')+';">'+(hechas===total?'¡Todas revisadas!':pct+'%')+'</span></div>'+
+    '<div id="hs-guardado" style="font-size:12px;color:var(--text-muted);margin-bottom:6px;">'+(draft.guardadoEn?'💾 Progreso guardado en este dispositivo · '+new Date(draft.guardadoEn).toLocaleTimeString('es-ES',{hour:'2-digit',minute:'2-digit'}):'💾 Se guarda solo en este dispositivo al marcar cada tienda')+'</div>'+
+    '<div style="height:8px;border-radius:99px;background:var(--border);overflow:hidden;"><div style="height:100%;width:'+pct+'%;background:#16a34a;transition:width .25s;"></div></div>';
+  draft.stores.forEach((s,i)=>{
+    const sec=document.getElementById('hs-store-'+i);
+    if(sec){ sec.classList.toggle('hiperber-store-done',!!s.completada); sec.style.borderLeft=s.completada?'4px solid #16a34a':''; sec.style.paddingLeft=s.completada?'10px':'18px'; }
+    const chk=document.getElementById('hs-chk-'+i); if(chk) chk.checked=!!s.completada;
+    const txt=document.getElementById('hs-chk-txt-'+i); if(txt) txt.textContent=s.completada?'Revisada ✔':'Marcar como revisada';
+    const lab=chk?.closest('label'); if(lab){ lab.style.borderColor=s.completada?'#16a34a':'var(--border)'; lab.style.background=s.completada?'rgba(22,163,74,.12)':'var(--surface-alt)'; }
+  });
+  // El check final de cada ruta solo se puede marcar con todas sus tiendas revisadas
+  const claves=[...new Set(draft.stores.map(hiperberClaveRuta))];
+  claves.forEach(k=>{
+    const chk=document.getElementById('hs-final-chk-'+k); if(!chk) return;
+    const todas=draft.stores.filter(s=>hiperberClaveRuta(s)===k).every(s=>s.completada);
+    if(!todas&&draft.rutasCompletas[k]) draft.rutasCompletas[k]=false;
+    chk.checked=!!draft.rutasCompletas[k];
+    chk.disabled=!todas;
+    const lab=document.getElementById('hs-final-'+k);
+    if(lab){ lab.style.opacity=todas?'1':'.55'; lab.style.borderColor=draft.rutasCompletas[k]?'#16a34a':'var(--border)'; lab.style.background=draft.rutasCompletas[k]?'rgba(22,163,74,.12)':'var(--surface-alt)'; }
+  });
+}
+
+window.toggleStoreCompletada=function(storeIndex,checked){
+  const draft=window.__hiperberReviewDraft; const store=draft?.stores[storeIndex];
+  if(!store) return;
+  if(checked){
+    const pendientes=store.puertas.filter(hiperberPuertaIncompleta);
+    if(pendientes.length){
+      store.completada=false; actualizarProgresoRevision();
+      showToast('Completa Hallazgo, Correctivo y Resultado en '+pendientes.length+' puerta'+(pendientes.length===1?'':'s')+' de «'+store.nombre+'» (y describe los X)','error');
+      return;
+    }
+  }
+  store.completada=!!checked;
+  actualizarProgresoRevision();
+  guardarBorradorRevision(true);                    // tienda a tienda: se guarda al momento
+  if(checked){ const sig=document.getElementById('hs-store-'+(storeIndex+1)); if(sig) sig.scrollIntoView({behavior:'smooth',block:'start'}); }
+};
+
+window.toggleRutaCompletada=function(clave,checked){
+  const draft=window.__hiperberReviewDraft; if(!draft) return;
+  const todas=draft.stores.filter(s=>hiperberClaveRuta(s)===clave).every(s=>s.completada);
+  if(checked&&!todas){ showToast('Primero marca como revisadas todas las tiendas de la ruta','error'); }
+  draft.rutasCompletas[clave]=!!checked&&todas;
+  actualizarProgresoRevision();
+  guardarBorradorRevision(true);
+};
 
 function hiperberDecisionCell(storeIndex,doorIndex,door,field,options){
   const state=door[field]||'';
@@ -1174,7 +684,7 @@ function hiperberDecisionCell(storeIndex,doorIndex,door,field,options){
 
 window.updateHiperberDoor=function(storeIndex,doorIndex,field,value){
   const door=window.__hiperberReviewDraft?.stores[storeIndex]?.puertas[doorIndex];
-  if(door) door[field]=value;
+  if(door){ door[field]=value; guardarBorradorRevision(); }
 };
 
 window.updateHiperberDoorDecision=function(storeIndex,doorIndex,field,value,input){
@@ -1208,6 +718,7 @@ window.updateHiperberDoorDecision=function(storeIndex,doorIndex,field,value,inpu
       }
     }
   });
+  guardarBorradorRevision();
 };
 
 window.openHiperberFindingCamera=function(storeIndex,doorIndex){
@@ -1232,6 +743,7 @@ window.addHiperberFindingPhoto=async function(storeIndex,doorIndex,file){
     door.hallazgoFotos=door.hallazgoFotos||[];
     door.hallazgoFotos.push(await compressDoticsPhoto(file));
     renderHiperberStores();
+    guardarBorradorRevision(true);
   }catch(error){showToast(error.message||'No se pudo procesar la foto','error');}
 };
 
@@ -1239,6 +751,7 @@ window.removeHiperberFindingPhoto=function(storeIndex,doorIndex,photoIndex){
   const door=window.__hiperberReviewDraft?.stores[storeIndex]?.puertas[doorIndex];
   door?.hallazgoFotos?.splice(photoIndex,1);
   renderHiperberStores();
+  guardarBorradorRevision(true);
 };
 
 window.addHiperberDoor=function(storeIndex){
@@ -1288,68 +801,22 @@ async function downloadRevisionPDFAfterSave(revisionId){
 }
 
 /**
- * Reprograma las puertas y rutas que cubre una revisión HIPERBER guardada.
- * Para cada puerta revisada: ultimaRevision = fecha, proximaRevision = fecha + frecuencia de su ruta.
- * Para cada ruta con todas sus tiendas revisadas: ultimaRevision/proximaRevision de la ruta.
+ * Tras guardar una revisión: cada puerta revisada queda con su última revisión y
+ * la próxima según SU periodicidad (tabla por uso/criterio), no la de una ruta.
  */
-// Reprogramación de puertas para revisión de CLIENTE sNICO (sin cadena/ruta):
-// actualiza últimaRevision y calcula la próxima según la frecuencia de cada puerta.
-async function reprogramarPuertasClientes(stores, fecha){
+async function reprogramarTrasRevision(stores, fecha, estadoPorPuerta){
+  const fechaBase=String(fecha||'').slice(0,10);
+  let fallos=0;
   for(const store of stores){
     for(const door of store.puertas){
       try{
         const puerta=await dbGet('puertas',door.id);
         if(!puerta) continue;
-        const frecuencia=puerta.frecuenciaMeses||puerta.frecuencia||12;
-        const proxima=new Date(fecha);
-        proxima.setMonth(proxima.getMonth()+Number(frecuencia)||12);
-        await dbPut('puertas',{
-          ...puerta,
-          ultimaRevision:fecha,
-          fechaRevision:fecha,
-          proximaRevision:proxima.toISOString().slice(0,10)
-        });
-      }catch(e){ console.warn('No se pudo reprogramar puerta',door.id,e); }
+        await window.Central.reprogramarPuerta(puerta,fechaBase,estadoPorPuerta[door.id]||null);
+      }catch(e){ fallos++; console.warn('No se pudo reprogramar la puerta',door.id,e); }
     }
   }
-}
-
-async function reprogramarTrasRevisionHIPERBER(draft, fecha){
-  try{
-    const fechaBase=String(fecha||'').slice(0,10);
-    if(!fechaBase) return;
-    const clientes=await dbGetAll('clientes');
-    const rutas=await dbGetAll('rutas');
-    const clienteById=new Map(clientes.map(c=>[String(c.id),c]));
-    const rutaById=new Map(rutas.map(r=>[String(r.id),r]));
-    const rutaIds=new Set();
-    // 1) Puertas: marcar la última revisión y calcular la próxima según la frecuencia de la ruta
-    for(const store of draft.stores||[]){
-      const cliente=clienteById.get(String(store.clienteId));
-      const rutaId=String(cliente?.rutaId??cliente?.rutaid??'');
-      const ruta=rutaId?rutaById.get(rutaId):null;
-      const frecuencia=Number(ruta?.frecuenciaMeses??ruta?.frecuenciameses)||6;
-      const puertas=await dbGetByIndex('puertas','clienteId',store.clienteId);
-      for(const puerta of puertas){
-        await dbPut('puertas',{...puerta,ultimaRevision:fechaBase,proximaRevision:calcularProximaRevision(fechaBase,frecuencia)});
-      }
-      if(rutaId) rutaIds.add(rutaId);
-    }
-    // 2) Rutas: si todas las tiendas de la ruta fueron revisadas, avanzar la programación de la ruta
-    for(const rutaId of rutaIds){
-      const ruta=rutaById.get(rutaId);
-      if(!ruta) continue;
-      const tiendasRuta=clientes.filter(c=>String(c.rutaId??c.rutaid??'')===String(rutaId));
-      const revisadas=new Set((draft.stores||[]).map(store=>String(store.clienteId)));
-      const todasRevisadas=tiendasRuta.every(t=>revisadas.has(String(t.id)));
-      if(!todasRevisadas) continue;
-      const frecuencia=Number(ruta.frecuenciaMeses??ruta.frecuenciameses)||6;
-      await dbPut('rutas',{...ruta,ultimaRevision:fechaBase,proximaRevision:calcularProximaRevision(fechaBase,frecuencia)});
-    }
-  }catch(error){
-    console.error('reprogramarTrasRevisionHIPERBER falló:',error);
-    showToast('Revisión guardada, pero no se pudo reprogramar puertas/rutas: '+error.message,'warning');
-  }
+  if(fallos) showToast('Revisión guardada, pero '+fallos+' puerta(s) no se pudieron reprogramar','warning');
 }
 
 window.saveHiperberReviewForm=async function(){
@@ -1359,10 +826,24 @@ window.saveHiperberReviewForm=async function(){
   if(!fecha) return showToast('Selecciona la fecha de revisión','error');
   // El nombre de la puerta es de solo lectura: solo se consideran puertas existentes en BD
   const stores=draft.stores.map(store=>({...store,puertas:store.puertas.filter(door=>door.id)}));
-  const doors=stores.flatMap(store=>store.puertas.map(door=>({...door,clienteId:store.clienteId,clienteNombre:store.nombre})));
+  const doors=stores.flatMap(store=>store.puertas.map(door=>({...door,clienteId:store.clienteId,ubicacionId:store.ubicacionId,ubicacionNombre:store.ubicacionId?store.nombre:'',clienteNombre:store.nombre})));
   if(!doors.length){
-    showToast('No hay puertas registradas en estas tiendas todavía','error');
+    showToast('No hay puertas registradas en esta revisión todavía','error');
     return;
+  }
+  if(draft.esRuta){
+    const sinMarcar=draft.stores.filter(s=>!s.completada);
+    if(sinMarcar.length){
+      showToast('Faltan por marcar como revisadas: '+sinMarcar.slice(0,3).map(s=>s.nombre).join(', ')+(sinMarcar.length>3?' y '+(sinMarcar.length-3)+' más':''),'error');
+      document.getElementById('hs-store-'+draft.stores.indexOf(sinMarcar[0]))?.scrollIntoView({behavior:'smooth',block:'start'});
+      return;
+    }
+    const rutasSinCerrar=[...new Set(draft.stores.filter(s=>s.rutaId).map(s=>s.rutaId))].filter(k=>!draft.rutasCompletas[k]);
+    if(rutasSinCerrar.length){
+      showToast('Marca el check final «ruta completada» en la última tienda','error');
+      document.getElementById('hs-final-'+rutasSinCerrar[0])?.scrollIntoView({behavior:'smooth',block:'center'});
+      return;
+    }
   }
   if(doors.some(door=>!door.hallazgo||!door.correctivo||!door.resultado)){
     showToast('Completa Hallazgo, Correctivo y Resultado en cada puerta','error');
@@ -1379,56 +860,49 @@ window.saveHiperberReviewForm=async function(){
   // Subir fotos a storage antes de guardar
   await guardarFotosRevision();
   const items=doors.map(door=>({
-    concepto:door.clienteNombre+' · '+door.nombre,clienteId:door.clienteId,clienteNombre:door.clienteNombre,puertaId:door.id,tipoPuerta:door.tipo,
+    concepto:door.clienteNombre+' · '+door.nombre,clienteId:door.clienteId,clienteNombre:door.clienteNombre,
+    ubicacionId:door.ubicacionId||null,ubicacionNombre:door.ubicacionNombre||'',
+    puertaId:door.id,tipoPuerta:door.tipo,
     hallazgo:door.hallazgo==='ok'?'OK':'X',hallazgoEstado:door.hallazgo,hallazgoTexto:door.hallazgoTexto,hallazgoFotos:door.hallazgoFotos||[],
     correctivo:door.correctivo==='hecho'?door.correctivoTexto:door.correctivo==='x'?'X':'OK',correctivoEstado:door.correctivo,correctivoTexto:door.correctivoTexto,
     resultado:door.resultado==='ok'?'OK':'X',resultadoEstado:door.resultado
   }));
-  const notas=JSON.stringify({form:'HIPERBER_REVISION_V1',cadenaId:draft.chainId,cadena:draft.chainName,supermercados:stores.map(store=>({id:store.clienteId,nombre:store.nombre,rutaId:store.rutaId||null})),rutaId:draft.chainId,rutaNombre:draft.chainName,tecnicos:window.authState?.employee?.nombre||''});
+  const tecnicoNombre=window.authState?.employee?.nombre||'';
+  const notas=JSON.stringify({
+    form:'REVISION_CENTRAL_V2',
+    clienteId:draft.clienteId,cliente:draft.clienteNombre,
+    rutaId:draft.rutaId||null,rutaNombre:draft.rutaNombre||'',
+    ubicaciones:stores.filter(s=>s.ubicacionId).map(s=>({id:s.ubicacionId,nombre:s.nombre,rutaId:s.rutaId||null})),
+    // claves antiguas: las siguen leyendo el historial y los PDF
+    cadenaId:draft.central?draft.clienteId:null,cadena:draft.central?draft.clienteNombre:'',
+    tecnicos:tecnicoNombre
+  });
+  const estadoPorPuerta={};
+  doors.forEach(door=>{ estadoPorPuerta[door.id]=door.resultado==='x'?'fuera_servicio':'operativa'; });
   try{
     await dbAdd('revisiones',{
-      id:draft.id,puertaId:null,clienteId:null,fecha,tecnicoId:window.authState?.employee?.id||null,tecnicoNombre:window.authState?.employee?.nombre||null,items,
+      id:draft.id,puertaId:null,clienteId:draft.clienteId,fecha,tecnicoId:window.authState?.employee?.id||null,tecnicoNombre:window.authState?.employee?.nombre||null,items,
       hallazgos:doors.filter(door=>door.hallazgo==='x').map(door=>door.clienteNombre+' · '+door.nombre+': '+door.hallazgoTexto).join(' | '),
       correctivo:doors.filter(door=>door.correctivo==='hecho').map(door=>door.clienteNombre+' · '+door.nombre+': '+door.correctivoTexto).join(' | '),
       estadoTrasRevision:doors.some(door=>door.resultado==='x')?'fuera_servicio':'operativa',notas,createdAt:new Date().toISOString()
     });
+    clearTimeout(__borradorTimer);
+    if(draft.borradorKey){ try{ await window.Central.Borradores.borrar(draft.borradorKey); }catch(e){ console.warn('No se pudo borrar el borrador:',e); } }
     window.__hiperberReviewDraft=null;
     closeModal();
     showToast('Revisión guardada');
-    if(window.__revRefrescar){
-      try{ await window.__revRefrescar(); }catch(e){}
-    }
-  // Si es una revisión de cliente único (sin cadena), se reprograma solo la puerta del cliente.
-  if(draft.esClienteUnico){
-    try{
-      await reprogramarPuertasClientes(draft.stores, fecha);
-    }catch(e){ console.warn('Reprogramación cliente único falló:', e); }
-  }
-  // Reprogramar puertas y rutas afectadas por la revisión completada
-  else await reprogramarTrasRevisionHIPERBER(draft, fecha);
-  await downloadRevisionPDFAfterSave(draft.id);
-
-    // Si es la última tienda, generar PDF consolidado de la ruta
-    if(draft.esUltimaTienda && draft.chainId) {
-      try {
-        await window.generarPDFRutaCompleta(draft.chainId, draft.chainName, draft.chainId, draft.chainName);
-      } catch(e) {
-        console.error('Error generando PDF de ruta:', e);
-        showToast('Revisión guardada, pero no se pudo generar el PDF de ruta', 'warning');
-      }
-    }
+    await reprogramarTrasRevision(stores,fecha,estadoPorPuerta);
+    window.actualizarBadgeRevisiones?.();
+    if(window.__revRefrescar){ try{ await window.__revRefrescar(); }catch(e){} }
+    await downloadRevisionPDFAfterSave(draft.id);
   }catch(error){
     showToast('No se pudo guardar la revisión: '+error.message,'error');
   }
 };
 
-window.openDoticsMaintenanceForm = async function(chainId, doorId=null, fechaPreseleccionada=null){
-  let chain=await getCadenaById(chainId);
-  if(!chain){
-    const client=await dbGet('clientes',chainId);
-    if(client?.nombre?.trim().toLocaleUpperCase()==='DOTICS') chain={id:client.id,nombre:client.nombre};
-  }
-  if(!chain) return showToast('No se encontró la cadena DOTICS','error');
+window.openDoticsMaintenanceForm = async function(chainId, doorId=null, fechaPreseleccionada=null, ctx=null){
+  const chain=await dbGet('clientes',chainId);   // el cliente (central) DOTICS
+  if(!chain) return showToast('No se encontró el cliente DOTICS','error');
   const door=doorId ? await dbGet('puertas',doorId) : null;
   const client=door?.clienteId ? await dbGet('clientes',door.clienteId) : null;
   const employees=window.isTechnician?.()
@@ -1438,31 +912,442 @@ window.openDoticsMaintenanceForm = async function(chainId, doorId=null, fechaPre
   await window.TiposPuerta.cargar().catch(()=>{});
   const productTypes=window.TiposPuerta.lista().map(t=>t.codigo);   // mismos tipos que en plantillas y puertas
   const doorType=window.TiposPuerta.resolver(door?.tipoPuerta||door?.tipo)?.codigo||'';
-  window.__doticsVisitDraft={
-    id,chainId:String(chain.id),chainName:chain.nombre,doorId:door?.id||null,productTypes,
-    lines:[{
+  // Un informe por ubicación: sus puertas llegan ya escritas (tipo, nombre, nº de serie);
+  // el técnico solo indica el estado y, si no está bien, las observaciones.
+  const tipoCodigo=d=>{const code=window.TiposPuerta.resolver(d.tipoPuerta||d.tipo)?.codigo||'';return productTypes.includes(code)?code:'';};
+  const lineas=ctx?.puertas?.length
+    ? ctx.puertas.map(d=>({puertaId:d.id,tipoProducto:tipoCodigo(d),denominacionCliente:d.nombre||'',numeroSerie:d.numeroSerie||d.serie||d.serial||'',estado:'',observaciones:'',fotos:[]}))
+    : [{
+      puertaId:door?.id||null,
       tipoProducto:productTypes.includes(doorType)?doorType:'',
       denominacionCliente:door?.nombre||client?.nombre||'',
       numeroSerie:door?.numeroSerie||door?.serie||door?.serial||'',
       estado:'',observaciones:'',fotos:[]
-    }]
+    }];
+  const queue=null;                                    // el informe suelto no pertenece a ninguna ruta
+  window.__doticsVisitDraft={
+    id,chainId:String(chain.id),chainName:chain.nombre,doorId:door?.id||null,productTypes,
+    ubicacionId:ctx?.ubicacion?String(ctx.ubicacion.id):null,ubicacionNombre:ctx?.ubicacion?.denominacion||'',rutaNombre:ctx?.rutaNombre||'',
+    enCola:!!queue,
+    lines:lineas
   };
   const today=new Date().toISOString().slice(0,10);
   const form='<div class="dotics-form revision-form">'+
-    '<div class="form-header"><div class="form-header-icon"><i class="fas fa-clipboard-check"></i></div><div class="form-header-text"><strong>'+escapeHtml(chain.nombre)+'</strong><span>Informe visita de mantenimiento</span></div></div>'+
+    '<div class="form-header"><div class="form-header-icon"><i class="fas fa-clipboard-check"></i></div><div class="form-header-text"><strong>'+escapeHtml(chain.nombre)+(ctx?.ubicacion?' · '+escapeHtml(ctx.ubicacion.denominacion):'')+'</strong><span>Informe visita de mantenimiento'+(queue?' · Ubicación '+(queue.pos+1)+' de '+queue.items.length+' ('+queue.items.filter(i=>i.hecha).length+' hechas)':'')+(ctx?.ubicacion?.direccion?' · '+escapeHtml(ctx.ubicacion.direccion):'')+'</span></div></div>'+
     '<div class="form-grid">'+
-      '<div class="form-group"><label for="dotics-contract">N.º contrato mantenimiento</label><input id="dotics-contract" type="text" class="input" autocomplete="off" placeholder="Opcional"></div>'+
+      '<div class="form-group"><label for="dotics-contract">N.º contrato mantenimiento</label><input id="dotics-contract" type="text" class="input" autocomplete="off" placeholder="Opcional" value="'+escapeHtml(queue?.comun?.contrato||'')+'"></div>'+
       '<div class="form-group"><label for="dotics-intervention">N.º intervención</label><input id="dotics-intervention" type="text" class="input" autocomplete="off" placeholder="Escribe el número de intervención"></div>'+
-      '<div class="form-group"><label for="dotics-technicians">Técnico/s</label><input id="dotics-technicians" type="text" class="input" list="dotics-employees" placeholder="Nombre/s del técnico" '+(window.isTechnician?.()?'value="'+escapeHtml(window.authState.employee?.nombre||'')+'" readonly':'')+'><datalist id="dotics-employees">'+employees.map(e=>'<option value="'+escapeHtml(e.nombre)+'">').join('')+'</datalist></div>'+
+      '<div class="form-group"><label for="dotics-technicians">Técnico/s</label><input id="dotics-technicians" type="text" class="input" list="dotics-employees" placeholder="Nombre/s del técnico" '+(window.isTechnician?.()?'value="'+escapeHtml(window.authState.employee?.nombre||'')+'" readonly':'value="'+escapeHtml(queue?.comun?.tecnicos||'')+'"')+'><datalist id="dotics-employees">'+employees.map(e=>'<option value="'+escapeHtml(e.nombre)+'">').join('')+'</datalist></div>'+
       '<div class="form-group"><label for="dotics-date">Fecha</label><input id="dotics-date" type="date" class="input" value="'+(fechaPreseleccionada||today)+'"></div>'+
     '</div>'+
-    '<div class="section-header"><div><h3>Equipos revisados</h3><p>Indica un estado por equipo; añade foto si está operativo o no se debe usar.</p></div><button type="button" class="btn btn-outline btn-sm" onclick="addDoticsVisitLine()"><i class="fas fa-plus"></i> Añadir equipo</button></div>'+
+    '<div class="section-header"><div><h3>Equipos revisados</h3><p>Indica un estado por equipo; añade foto si está operativo o no se debe usar.</p></div><div style="display:flex;gap:6px;flex-wrap:wrap"><button type="button" class="btn btn-outline btn-sm" onclick="marcarDoticsTodoBueno()"><i class="fas fa-check-double"></i> Todo bueno</button><button type="button" class="btn btn-outline btn-sm" onclick="addDoticsVisitLine()"><i class="fas fa-plus"></i> Añadir equipo</button></div></div>'+
     '<div id="dotics-visit-lines" class="dotics-line-list"></div>'+
     '<div class="form-group"><label for="dotics-notes">Observaciones generales</label><textarea id="dotics-notes" rows="3" class="input" placeholder="Observaciones de la visita"></textarea></div>'+
   '</div>';
+  const esUltima=queue&&queue.items.filter((i,k)=>!i.hecha&&k!==queue.pos).length===0;
   const footer='<button type="button" class="btn btn-outline" onclick="cerrarFormularioRevision()">Cerrar</button>'+
-    '<button type="button" class="btn btn-primary" onclick="saveDoticsMaintenanceForm()"><i class="fas fa-save"></i> Guardar informe</button>';
-  openModal('Informe visita de mantenimiento',form,footer);
+    '<button type="button" class="btn btn-primary" onclick="saveDoticsMaintenanceForm()"><i class="fas fa-'+(queue&&esUltima?'flag-checkered':'save')+'"></i> '+(queue?(esUltima?'Guardar y finalizar ruta':'Guardar y siguiente'):'Guardar informe')+'</button>';
+  openModal('Informe visita de mantenimiento'+(ctx?.ubicacion?' · '+ctx.ubicacion.denominacion:''),form,footer);
+  renderDoticsVisitLines();
+};
+
+// ═══════════════════════════════════════════════════════════
+//  DOTICS · revisión de ruta (formato «Informe visita de mantenimiento»)
+//  Una sola pantalla con todas las tiendas, igual que Hiperber. Cada tienda tiene su
+//  informe: Cliente = la tienda, nº de intervención, equipos con tipo / denominación /
+//  nº de serie ya escritos (el técnico solo marca Bueno, Operativo o No usar y escribe
+//  observaciones) y una casilla «tienda finalizada». Al marcarla SE GUARDA ese informe
+//  como su propio parte (revisión + PDF). Al final, casilla «ruta completada».
+//  Lo escrito y sin finalizar se guarda como borrador en el dispositivo.
+// ═══════════════════════════════════════════════════════════
+const drEsc = s => escapeHtml(s);
+const DR_ESTADOS = [['bueno', 'Bueno'], ['operativo', 'Operativo'], ['no_usar', 'No usar']];
+const DR_ICONOS = { bueno: 'circle-check', operativo: 'triangle-exclamation', no_usar: 'circle-xmark' };
+let __drTimer = null;
+const drClave = store => store.rutaId || 'sin';
+
+window.abrirRevisionDotics = async function(opts){
+  opts = opts || {};
+  const cliente = await dbGet('clientes', opts.clienteId);
+  if (!cliente) return showToast('No se encontró el cliente', 'error');
+  const fecha = String(opts.fecha || new Date().toISOString().slice(0, 10)).slice(0, 10);
+  const soloTecnico = !!window.isTechnician?.();
+  const [ubics, rutas, puertas, empleados, revisiones] = await Promise.all([
+    window.Central.ubicacionesDe(cliente.id), window.Central.rutasDe(cliente.id), window.Central.puertasDe(cliente.id),
+    soloTecnico ? Promise.resolve(window.authState?.employee ? [window.authState.employee] : []) : dbGetAll('empleados'),
+    dbGetAll('revisiones')
+  ]);
+  let lista = ubics.filter(u => u.activa !== false);
+  if (opts.ubicacionIds) lista = lista.filter(u => opts.ubicacionIds.map(String).includes(String(u.id)));
+  else if (opts.rutaId) lista = lista.filter(u => String(u.rutaId) === String(opts.rutaId));
+  // Sin ubicaciones: el propio cliente hace de única «tienda» con todas sus puertas
+  const sinUbicaciones = !lista.length;
+  if (sinUbicaciones) lista = [{ id: '', denominacion: cliente.nombre, direccion: cliente.direccion || '', rutaId: null }];
+  const soloPuerta = opts.puertaId ? String(opts.puertaId) : null;   // revisión de una única puerta
+  await window.TiposPuerta.cargar().catch(() => {});
+  const productTypes = window.TiposPuerta.lista().map(t => t.codigo);
+  const tipoCodigo = d => { const c = window.TiposPuerta.resolver(d.tipoPuerta || d.tipo)?.codigo || ''; return productTypes.includes(c) ? c : ''; };
+  const lineaDe = d => ({ puertaId: d.id, tipoProducto: tipoCodigo(d), denominacionCliente: d.nombre || '', numeroSerie: d.numeroSerie || d.serie || d.serial || '', estado: '', observaciones: '', fotos: [] });
+  const lineaVacia = () => ({ puertaId: null, tipoProducto: '', denominacionCliente: '', numeroSerie: '', estado: '', observaciones: '', fotos: [] });
+
+  const rutaPorId = new Map(rutas.map(r => [String(r.id), r]));
+  lista.sort((a, b) => {
+    const ra = rutaPorId.get(String(a.rutaId))?.orden ?? Infinity, rb = rutaPorId.get(String(b.rutaId))?.orden ?? Infinity;
+    return ra - rb || window.Central.porOrden(a, b);
+  });
+  // Informes DOTICS ya guardados de esa fecha (uno por tienda)
+  const guardadas = new Map();
+  if (!soloPuerta) revisiones.forEach(r => {
+    let n = {}; try { n = JSON.parse(r.notas || '{}'); } catch (e) { /* sin notas */ }
+    if (n.form === 'DOTICS_VISITA_V1' && (n.ubicacionId || sinUbicaciones) && String(r.fecha || '').slice(0, 10) === fecha && String(r.clienteId) === String(cliente.id)) guardadas.set(String(n.ubicacionId || ''), { r, n });
+  });
+  const stores = lista.map(u => {
+    let ps = sinUbicaciones ? puertas : puertas.filter(p => String(p.ubicacionId) === String(u.id));
+    if (soloPuerta) ps = ps.filter(p => String(p.id) === soloPuerta);
+    const ruta = rutaPorId.get(String(u.rutaId));
+    const st = {
+      ubicacionId: String(u.id), nombre: u.denominacion, direccion: u.direccion || '',
+      rutaId: ruta ? String(ruta.id) : null, rutaNombre: ruta ? ruta.nombre : '📍 Sin ruta asignada',
+      intervencion: '', observaciones: '', completada: false, revisionId: null, abierta: false,
+      lines: ps.length ? ps.map(lineaDe) : [lineaVacia()]
+    };
+    const g = guardadas.get(String(u.id));
+    if (g) {
+      st.completada = true; st.revisionId = g.r.id; st.intervencion = g.n.intervencion || ''; st.observaciones = g.n.observaciones || '';
+      st.lines = (g.r.items || []).map(it => ({ puertaId: it.puertaId || null, tipoProducto: it.tipoProducto || '', denominacionCliente: it.denominacionCliente || '', numeroSerie: it.numeroSerie || '', estado: it.estadoEquipo || '', observaciones: it.observaciones || '', fotos: it.fotos || [] }));
+    }
+    return st;
+  });
+  const g0 = [...guardadas.values()][0];
+  const route = {
+    clienteId: String(cliente.id), nombre: cliente.nombre,
+    opts: { clienteId: String(cliente.id), rutaId: opts.rutaId || null, ubicacionIds: opts.ubicacionIds || null, puertaId: soloPuerta },
+    esRuta: true,                       // siempre: casilla por tienda + casilla final, aunque haya una sola
+    multi: stores.length > 1,           // varias tiendas: numeración, grupos por ruta y barra de progreso
+    productTypes, empleados,
+    comun: { fecha, contrato: g0 ? g0.n.contrato || '' : '', tecnicos: soloTecnico ? (window.authState?.employee?.nombre || '') : (g0 ? g0.n.tecnicos || '' : '') },
+    rutasCompletas: {}, stores
+  };
+  if (!soloPuerta) {                                     // la revisión de una sola puerta no usa borrador
+    route.borradorKey = window.Central.Borradores.clave(route.opts) + '|dotics';
+    await drRecuperarBorrador(route);
+  }
+  const primera = stores.findIndex(s => !s.completada);
+  if (primera !== -1) stores[primera].abierta = true;
+  if (guardadas.size) showToast(guardadas.size + ' tienda(s) ya tienen su informe de esta fecha');
+  window.__doticsRoute = route;
+  drAbrirModal();
+};
+
+// ── Borrador (lo escrito y sin finalizar) ──
+async function drRecuperarBorrador(route){
+  try {
+    const guardado = await window.Central.Borradores.obtener(route.borradorKey);
+    if (!guardado) return;
+    const d = guardado.datos || {};
+    const pendientes = (d.stores || []).filter(s => !s.completada && (s.intervencion || s.lines?.some(l => l.estado))).length;
+    if (!pendientes) { await window.Central.Borradores.borrar(route.borradorKey); return; }
+    const cuando = new Date(guardado.savedAt).toLocaleString('es-ES', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+    if (!confirm('Hay datos de esta ruta escritos y sin finalizar (guardados el ' + cuando + ').\n\nAceptar = continuar donde lo dejaste\nCancelar = descartarlos')) {
+      await window.Central.Borradores.borrar(route.borradorKey); return;
+    }
+    Object.assign(route.comun, { contrato: d.comun?.contrato ?? route.comun.contrato, tecnicos: route.comun.tecnicos || d.comun?.tecnicos || '' });
+    const prev = new Map((d.stores || []).map(s => [String(s.ubicacionId), s]));
+    route.stores.forEach(st => {
+      const p = prev.get(String(st.ubicacionId));
+      if (!p || st.completada) return;
+      st.intervencion = p.intervencion || ''; st.observaciones = p.observaciones || '';
+      if (Array.isArray(p.lines) && p.lines.length) st.lines = p.lines;
+    });
+  } catch (e) { console.warn('No se pudo leer el borrador de DOTICS:', e); }
+}
+
+function drGuardarBorrador(inmediato){
+  const R = window.__doticsRoute;
+  if (!R || !R.esRuta || !R.borradorKey) return Promise.resolve();
+  clearTimeout(__drTimer);
+  const escribir = async () => {
+    const r = window.__doticsRoute; if (!r) return;
+    try {
+      await window.Central.Borradores.guardar(r.borradorKey, r.opts,
+        { comun: r.comun, stores: r.stores.map(s => ({ ubicacionId: s.ubicacionId, completada: s.completada, intervencion: s.intervencion, observaciones: s.observaciones, lines: s.completada ? [] : s.lines })) },
+        { hechas: r.stores.filter(s => s.completada).length, total: r.stores.length });
+      const el = document.getElementById('dr-guardado');
+      if (el) el.textContent = '💾 Guardado en este dispositivo · ' + new Date().toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
+    } catch (e) { console.warn('No se pudo guardar el borrador de DOTICS:', e); }
+  };
+  if (inmediato) return escribir();
+  return new Promise(res => { __drTimer = setTimeout(() => escribir().then(res), 700); });
+}
+window.drGuardarBorrador = drGuardarBorrador;
+
+// ── Pantalla ──
+function drAbrirModal(){
+  const R = window.__doticsRoute; if (!R) return;
+  const emp = R.empleados.map(e => '<option value="' + drEsc(e.nombre) + '">').join('');
+  const body = '<div class="dotics-form">' +
+    '<div class="dotics-intro"><span>Informe visita de mantenimiento · ' + R.stores.length + ' tienda' + (R.stores.length === 1 ? '' : 's') + '</span></div>' +
+    (R.multi ? '<div id="dr-progreso" class="dotics-progreso"></div>' : '') +
+    '<div class="dotics-comun">' +
+      '<div class="form-group"><label for="dr-fecha">Fecha</label><input id="dr-fecha" type="date" value="' + drEsc(R.comun.fecha) + '" oninput="drComun(\'fecha\',this.value)"></div>' +
+      '<div class="form-group"><label for="dr-contrato">Nº contrato mantenimiento</label><input id="dr-contrato" type="text" autocomplete="off" placeholder="Opcional" value="' + drEsc(R.comun.contrato) + '" oninput="drComun(\'contrato\',this.value)"></div>' +
+      '<div class="form-group"><label for="dr-tecnicos">Técnico/s</label><input id="dr-tecnicos" type="text" list="dr-empleados" placeholder="Nombre/s del técnico" value="' + drEsc(R.comun.tecnicos) + '"' + (window.isTechnician?.() ? ' readonly' : '') + ' oninput="drComun(\'tecnicos\',this.value)"><datalist id="dr-empleados">' + emp + '</datalist></div>' +
+    '</div>' +
+    '<div id="dr-container"></div></div>';
+  const footer = '<button type="button" class="btn btn-outline" onclick="cerrarFormularioRevision()" title="Lo escrito se guarda en este dispositivo">Cerrar</button>' +
+    (R.esRuta ? '<button type="button" class="btn btn-outline" onclick="drDescartarBorrador()" title="Borra lo escrito y sin finalizar; los informes ya guardados no se tocan"><i class="fas fa-rotate-left"></i> Descartar borrador</button>'
+              : '<button type="button" class="btn btn-primary" onclick="drGuardarSolo()"><i class="fas fa-save"></i> Guardar informe</button>');
+  openModal('Revisión · ' + R.nombre, body, footer);
+  drPintar();
+}
+
+function drLineHtml(si, li, line, locked){
+  const dis = locked ? ' disabled' : '';
+  const fotos = (line.fotos || []).map((f, pi) => '<div class="dotics-photo-preview"><img src="' + f + '" alt="Foto del equipo ' + (li + 1) + '">' +
+    (locked ? '' : '<button type="button" class="btn btn-danger btn-icon" aria-label="Quitar foto" onclick="drQuitarFoto(' + si + ',' + li + ',' + pi + ')"><i class="fas fa-trash"></i></button>') + '</div>').join('');
+  const campoFoto = (line.estado === 'operativo' || line.estado === 'no_usar') && (!locked || fotos)
+    ? '<div class="dotics-photo-field"><label>Fotos del equipo</label>' + (locked ? '' :
+        '<div class="dotics-photo-actions"><button type="button" class="btn btn-primary btn-sm" onclick="drCamara(' + si + ',' + li + ')"><i class="fas fa-camera"></i> Hacer foto</button>' +
+        '<button type="button" class="btn btn-primary btn-sm" onclick="drArchivo(' + si + ',' + li + ')"><i class="fas fa-image"></i> Seleccionar archivo</button>' +
+        '<input id="dr-cam-' + si + '-' + li + '" class="dotics-file-input" type="file" accept="image/*" capture="environment" onchange="drFoto(' + si + ',' + li + ',this)">' +
+        '<input id="dr-file-' + si + '-' + li + '" class="dotics-file-input" type="file" accept="image/*" onchange="drFoto(' + si + ',' + li + ',this)"></div>') +
+      '<div class="dotics-photo-previews">' + fotos + '</div></div>' : '';
+  const R = window.__doticsRoute;
+  const tipos = '<option value="">Tipo</option>' + R.productTypes.map(t => '<option value="' + drEsc(t) + '"' + (line.tipoProducto === t ? ' selected' : '') + '>' + drEsc(t) + '</option>').join('');
+  const quitar = !locked && R.stores[si].lines.length > 1
+    ? '<button type="button" class="btn btn-danger btn-icon dotics-eq-del" aria-label="Eliminar equipo ' + (li + 1) + '" onclick="drQuitarLinea(' + si + ',' + li + ')"><i class="fas fa-trash"></i></button>'
+    : '<span></span>';
+  const estados = DR_ESTADOS.map(([v, label]) => '<label class="dotics-state-option dotics-state-' + v + '" title="' + label + '">' +
+    '<input type="radio" name="dr-est-' + si + '-' + li + '" value="' + v + '" aria-label="' + label + '"' + dis + (line.estado === v ? ' checked' : '') + ' onchange="drEstado(' + si + ',' + li + ',this.value)">' +
+    '<i class="fas fa-' + DR_ICONOS[v] + '" aria-hidden="true"></i><span class="dotics-state-text">' + label + '</span></label>').join('');
+  return '<section class="dotics-eq" data-estado="' + (line.estado || '') + '"><div class="dotics-eq-row">' +
+      '<span class="dotics-eq-n">' + (li + 1) + '</span>' +
+      '<select class="dotics-eq-tipo" aria-label="Tipo producto"' + dis + ' onchange="drLinea(' + si + ',' + li + ',\'tipoProducto\',this.value)">' + tipos + '</select>' +
+      '<input class="dotics-eq-den" type="text" data-sin-voz aria-label="Denominación cliente" placeholder="Denominación cliente"' + dis + ' value="' + drEsc(line.denominacionCliente) + '" oninput="drLinea(' + si + ',' + li + ',\'denominacionCliente\',this.value)">' +
+      '<input class="dotics-eq-serie" type="text" data-sin-voz aria-label="Nº de serie" placeholder="Nº de serie"' + dis + ' value="' + drEsc(line.numeroSerie) + '" oninput="drLinea(' + si + ',' + li + ',\'numeroSerie\',this.value)">' +
+      '<div class="dotics-state-options dotics-eq-estado" role="radiogroup" aria-label="Estado del equipo ' + (li + 1) + '">' + estados + '</div>' +
+      '<input class="dotics-eq-obs" type="text" aria-label="Observaciones" placeholder="Observaciones (si no está bien)"' + dis + ' value="' + drEsc(line.observaciones) + '" oninput="drLinea(' + si + ',' + li + ',\'observaciones\',this.value)">' +
+      quitar +
+    '</div>' + campoFoto + '</section>';
+}
+
+function drStoreHtml(st, si, R){
+  const locked = st.completada && R.esRuta;
+  const hechos = st.lines.filter(l => l.estado).length;
+  const head = '<div class="dotics-store-head" onclick="drToggleStore(' + si + ')">' +
+      '<div class="dotics-store-title"><h4>' + (R.multi ? (si + 1) + '. ' : '') + drEsc(st.nombre) + '</h4>' +
+      (st.direccion ? '<small><i class="fas fa-location-dot"></i> ' + drEsc(st.direccion) + '</small>' : '') + '</div>' +
+      '<div class="dotics-store-actions" onclick="event.stopPropagation()">' +
+        '<label class="dotics-check' + (st.completada ? ' on' : '') + '"><input type="checkbox" id="dr-chk-' + si + '"' + (st.completada ? ' checked' : '') + ' onchange="drCheckTienda(' + si + ',this.checked)"> <span>' + (st.completada ? 'Finalizada ✔' : 'Marcar finalizada') + '</span></label>' +
+        '<button type="button" class="dotics-chevron" aria-label="Abrir o cerrar" onclick="drToggleStore(' + si + ')"><i class="fas fa-chevron-' + (st.abierta ? 'up' : 'down') + '"></i></button>' +
+      '</div></div>';
+  const resumen = '<div class="dotics-store-sub">' + (st.completada ? 'Parte guardado' : hechos + ' de ' + st.lines.length + ' equipos con estado') + '</div>';
+  const cuerpo = !st.abierta ? '' : '<div class="dotics-store-body">' +
+    '<div class="dotics-paper-head">' +
+      '<div class="form-group"><label>Cliente</label><input type="text" value="' + drEsc(st.nombre) + '" readonly></div>' +
+      '<div class="form-group"><label>Nº de intervención *</label><input type="text" id="dr-int-' + si + '"' + (locked ? ' disabled' : '') + ' autocomplete="off" placeholder="Nº de intervención" value="' + drEsc(st.intervencion) + '" oninput="drSet(' + si + ',\'intervencion\',this.value)"></div>' +
+    '</div>' +
+    '<div class="dotics-lines-heading"><div><h3>Equipos revisados</h3><p>Marca el estado de cada equipo: <span class="dotics-ico-bueno"><i class="fas fa-circle-check"></i> Bueno</span> · <span class="dotics-ico-operativo"><i class="fas fa-triangle-exclamation"></i> Operativo</span> · <span class="dotics-ico-no_usar"><i class="fas fa-circle-xmark"></i> No usar</span>. Si no está bien, escribe la observación.</p></div>' +
+      (locked ? '' : '<div class="dotics-lines-actions"><button type="button" class="btn btn-primary btn-sm" onclick="drTodoBueno(' + si + ')"><i class="fas fa-check-double"></i> Todo bueno</button><button type="button" class="btn btn-primary btn-sm" onclick="drAnadirLinea(' + si + ')"><i class="fas fa-plus"></i> Añadir equipo</button></div>') + '</div>' +
+    '<div class="dotics-eq-cols" aria-hidden="true"><span></span><span>Tipo producto</span><span>Denominación cliente</span><span>Nº de serie</span><span>Estado</span><span>Observaciones</span><span></span></div>' +
+    '<div class="dotics-line-list">' + st.lines.map((l, li) => drLineHtml(si, li, l, locked)).join('') + '</div>' +
+    '<div class="form-group"><label>Observaciones generales</label><textarea rows="3"' + (locked ? ' disabled' : '') + ' placeholder="Observaciones de la visita a esta tienda" oninput="drSet(' + si + ',\'observaciones\',this.value)">' + drEsc(st.observaciones) + '</textarea></div>' +
+    (st.completada && st.revisionId ? '<div><button type="button" class="btn btn-primary btn-sm" onclick="generatePDF_revision(\'' + drEsc(st.revisionId) + '\')"><i class="fas fa-file-pdf"></i> PDF del parte</button></div>' : '') +
+  '</div>';
+  return '<section class="dotics-store' + (st.completada ? ' done' : '') + '" id="dr-store-' + si + '">' + head + resumen + cuerpo + '</section>';
+}
+
+function drPintar(){
+  const R = window.__doticsRoute, cont = document.getElementById('dr-container');
+  if (!R || !cont) return;
+  const mb = document.getElementById('modalBody'), y = mb ? mb.scrollTop : 0;
+  const grupos = [];
+  R.stores.forEach((st, i) => {
+    let g = grupos.find(x => x.key === drClave(st));
+    if (!g) { g = { key: drClave(st), nombre: st.rutaNombre, items: [] }; grupos.push(g); }
+    g.items.push({ st, i });
+  });
+  const final = g => {
+    const ok = !!R.rutasCompletas[g.key];
+    const titulo = g.key === 'sin' ? (R.multi ? 'Tiendas sin ruta completadas' : 'Revisión completada') : drEsc(g.nombre) + ' completada';
+    return '<label class="dotics-final' + (ok ? ' on' : '') + '" id="dr-final-' + g.key + '"><input type="checkbox" id="dr-final-chk-' + g.key + '"' + (ok ? ' checked' : '') + ' onchange="drCheckRuta(\'' + g.key + '\',this.checked)"> ' +
+      '<span><i class="fas fa-flag-checkered"></i> ' + titulo + ' <small>(se activa al finalizar la última tienda)</small></span></label>';
+  };
+  cont.innerHTML = grupos.map(g =>
+    '<div class="dotics-group">' + (R.multi ? '<h3 class="dotics-group-title">' + drEsc(g.nombre) + ' <span class="badge badge-info">' + g.items.length + '</span></h3>' : '') +
+    g.items.map(x => drStoreHtml(x.st, x.i, R)).join('') +
+    final(g) + '</div>').join('');
+  if (mb) mb.scrollTop = y;
+  drProgreso();
+}
+
+function drPintarTienda(si){
+  const R = window.__doticsRoute, el = document.getElementById('dr-store-' + si);
+  if (!R || !el) return;
+  el.outerHTML = drStoreHtml(R.stores[si], si, R);
+}
+
+function drProgreso(){
+  const R = window.__doticsRoute; if (!R) return;
+  const total = R.stores.length, hechas = R.stores.filter(s => s.completada).length, pct = Math.round(hechas / total * 100);
+  const box = document.getElementById('dr-progreso');
+  if (box && R.multi) box.innerHTML = '<div class="dotics-progreso-top"><span><i class="fas fa-route"></i> ' + hechas + ' de ' + total + ' tiendas finalizadas</span><span>' + (hechas === total ? '¡Todas!' : pct + '%') + '</span></div>' +
+    '<div class="dotics-barra"><div style="width:' + pct + '%"></div></div>' +
+    '<div id="dr-guardado" class="dotics-guardado">💾 Cada tienda finalizada se guarda como su propio parte; lo que escribes se guarda solo en este dispositivo</div>';
+  new Set(R.stores.map(drClave)).forEach(k => {
+    const chk = document.getElementById('dr-final-chk-' + k); if (!chk) return;
+    const todas = R.stores.filter(s => drClave(s) === k).every(s => s.completada);
+    chk.disabled = !todas;
+    const lab = document.getElementById('dr-final-' + k); if (lab) lab.style.opacity = todas ? '1' : '.55';
+  });
+}
+
+// ── Cambios de datos (sin repintar todo) ──
+window.drComun = function(campo, valor){ const R = window.__doticsRoute; if (R) { R.comun[campo] = valor; drGuardarBorrador(); } };
+window.drSet = function(si, campo, valor){ const st = window.__doticsRoute?.stores[si]; if (st) { st[campo] = valor; drGuardarBorrador(); } };
+window.drLinea = function(si, li, campo, valor){ const l = window.__doticsRoute?.stores[si]?.lines[li]; if (l) { l[campo] = valor; drGuardarBorrador(); } };
+window.drEstado = function(si, li, valor){
+  const l = window.__doticsRoute?.stores[si]?.lines[li]; if (!l) return;
+  l.estado = valor; drPintarTienda(si); drProgreso(); drGuardarBorrador();
+  if (valor === 'no_usar') window.drCamara(si, li);
+};
+window.drTodoBueno = function(si){
+  const st = window.__doticsRoute?.stores[si]; if (!st) return;
+  st.lines.forEach(l => { if (!l.estado) l.estado = 'bueno'; });
+  drPintarTienda(si); drGuardarBorrador();
+};
+window.drAnadirLinea = function(si){
+  const st = window.__doticsRoute?.stores[si]; if (!st) return;
+  st.lines.push({ puertaId: null, tipoProducto: '', denominacionCliente: '', numeroSerie: '', estado: '', observaciones: '', fotos: [] });
+  drPintarTienda(si);
+};
+window.drQuitarLinea = function(si, li){ const st = window.__doticsRoute?.stores[si]; if (st) { st.lines.splice(li, 1); drPintarTienda(si); drGuardarBorrador(); } };
+window.drCamara = function(si, li){ document.getElementById('dr-cam-' + si + '-' + li)?.click(); };
+window.drArchivo = function(si, li){ document.getElementById('dr-file-' + si + '-' + li)?.click(); };
+window.drFoto = async function(si, li, input){
+  const file = input.files?.[0], l = window.__doticsRoute?.stores[si]?.lines[li];
+  if (!file || !l) return;
+  try {
+    l.fotos = l.fotos || [];
+    if (l.fotos.length >= 10) { showToast('Máximo 10 fotos por equipo', 'error'); return; }
+    l.fotos.push(await compressDoticsPhoto(file));
+    drPintarTienda(si); drGuardarBorrador(true);
+  } catch (e) { showToast(e.message || 'No se pudo procesar la foto', 'error'); input.value = ''; }
+};
+window.drQuitarFoto = function(si, li, pi){ const l = window.__doticsRoute?.stores[si]?.lines[li]; if (l) { l.fotos.splice(pi, 1); drPintarTienda(si); drGuardarBorrador(true); } };
+window.drToggleStore = function(si){ const st = window.__doticsRoute?.stores[si]; if (st) { st.abierta = !st.abierta; drPintarTienda(si); } };
+
+// ── Guardar el informe de UNA tienda como su propio parte ──
+async function drGuardarUna(si){
+  const R = window.__doticsRoute, st = R.stores[si], c = R.comun;
+  if (!c.fecha || !String(c.tecnicos).trim()) throw new Error('Completa la fecha y el técnico en los datos de la visita.');
+  if (!String(st.intervencion).trim()) throw new Error('Escribe el nº de intervención de «' + st.nombre + '».');
+  const lines = st.lines.filter(l => l.tipoProducto || l.denominacionCliente || l.numeroSerie);
+  if (!lines.length || lines.some(l => !l.estado)) throw new Error('Indica el estado de todos los equipos de «' + st.nombre + '».');
+  const tecnicos = String(c.tecnicos).trim();
+  const lead = R.empleados.find(e => tecnicos.toLocaleLowerCase().includes(String(e.nombre || '').toLocaleLowerCase()));
+  const items = lines.map(l => ({
+    concepto: [l.tipoProducto, l.denominacionCliente, l.numeroSerie].filter(Boolean).join(' · '),
+    tipoProducto: l.tipoProducto, denominacionCliente: l.denominacionCliente, numeroSerie: l.numeroSerie,
+    estado: l.estado === 'bueno' ? 'ok' : l.estado === 'operativo' ? 'desgaste' : 'correctivo',
+    estadoEquipo: l.estado, hallazgo: l.observaciones, observaciones: l.observaciones, fotos: l.fotos || [],
+    puertaId: l.puertaId || null, ubicacionId: st.ubicacionId || null, ubicacionNombre: st.nombre
+  }));
+  const notas = JSON.stringify({
+    form: 'DOTICS_VISITA_V1', cadenaId: R.clienteId, clienteId: R.clienteId, cliente: R.nombre,
+    ubicacionId: st.ubicacionId || null, ubicacion: st.nombre, rutaNombre: st.rutaId ? st.rutaNombre : '',
+    contrato: String(c.contrato || '').trim(), intervencion: String(st.intervencion).trim(), tecnicos, observaciones: String(st.observaciones || '').trim()
+  });
+  const id = st.revisionId || window.db.nextId('REV');
+  const rec = {
+    id, puertaId: null, clienteId: R.clienteId, fecha: c.fecha, tecnicoId: lead?.id || null, items,
+    hallazgos: items.filter(i => i.estadoEquipo !== 'bueno' && i.hallazgo).map(i => i.concepto + ': ' + i.hallazgo).join(' | '),
+    correctivo: '', estadoTrasRevision: items.some(i => i.estadoEquipo === 'no_usar') ? 'fuera_servicio' : 'operativa', notas
+  };
+  if (st.revisionId) await dbPut('revisiones', rec);
+  else await dbAdd('revisiones', { ...rec, createdAt: new Date().toISOString() });
+  st.revisionId = id;
+  for (const it of items) {                         // cada puerta revisada, reprogramada según SU periodicidad
+    if (!it.puertaId) continue;
+    try {
+      const puerta = await dbGet('puertas', it.puertaId);
+      if (puerta) await window.Central.reprogramarPuerta(puerta, c.fecha, it.estadoEquipo === 'no_usar' ? 'fuera_servicio' : 'operativa');
+    } catch (e) { console.warn('No se pudo reprogramar la puerta', it.puertaId, e); }
+  }
+  return id;
+}
+
+window.drCheckTienda = async function(si, checked){
+  const R = window.__doticsRoute, st = R?.stores[si]; if (!st) return;
+  const chk = document.getElementById('dr-chk-' + si);
+  if (checked) {
+    try { await drGuardarUna(si); }
+    catch (e) { if (chk) chk.checked = false; showToast(e.message || 'No se pudo guardar el informe', 'error'); return; }
+    st.completada = true; st.abierta = false;
+    const sig = R.stores.findIndex((s, k) => k > si && !s.completada);
+    if (sig !== -1) R.stores[sig].abierta = true;
+    drPintar();
+    showToast('Parte de «' + st.nombre + '» guardado (' + R.stores.filter(s => s.completada).length + '/' + R.stores.length + ')');
+    if (sig !== -1) document.getElementById('dr-store-' + sig)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    window.actualizarBadgeRevisiones?.();
+    drGuardarBorrador(true);
+  } else {
+    if (!confirm('¿Reabrir el informe de «' + st.nombre + '»? Podrás corregirlo y, al volver a marcarlo, se actualizará su parte.')) { if (chk) chk.checked = true; return; }
+    st.completada = false; st.abierta = true; R.rutasCompletas[drClave(st)] = false;
+    drPintar(); drGuardarBorrador(true);
+  }
+};
+
+window.drCheckRuta = async function(clave, checked){
+  const R = window.__doticsRoute; if (!R) return;
+  const todas = R.stores.filter(s => drClave(s) === clave).every(s => s.completada);
+  if (checked && !todas) { showToast('Primero finaliza todas las tiendas de la ruta', 'error'); drPintar(); return; }
+  R.rutasCompletas[clave] = !!checked;
+  drPintar();
+  const rutas = new Set(R.stores.map(drClave));
+  if (checked && R.stores.every(s => s.completada) && [...rutas].every(k => R.rutasCompletas[k])) await drResumen();
+};
+
+// Informe único (una sola tienda): se guarda y se ofrece el PDF
+window.drGuardarSolo = async function(){
+  const R = window.__doticsRoute; if (!R) return;
+  try {
+    const id = await drGuardarUna(0);
+    R.stores[0].completada = true;
+    window.__doticsRoute = null;
+    closeModal();
+    showToast('Informe DOTICS guardado');
+    window.actualizarBadgeRevisiones?.();
+    await downloadRevisionPDFAfterSave(id);
+  } catch (e) { showToast(e.message || 'No se pudo guardar el informe', 'error'); }
+};
+
+window.drDescartarBorrador = async function(){
+  const R = window.__doticsRoute; if (!R) return;
+  if (!confirm('¿Descartar lo escrito y sin finalizar? Los informes de tiendas ya finalizadas se conservan.')) return;
+  clearTimeout(__drTimer);
+  try { await window.Central.Borradores.borrar(R.borradorKey); } catch (e) { /* nada que borrar */ }
+  const o = { ...R.opts, fecha: R.comun.fecha };
+  window.__doticsRoute = null;
+  await window.abrirRevisionDotics(o);
+};
+
+async function drResumen(){
+  const R = window.__doticsRoute; if (!R) return;
+  clearTimeout(__drTimer);
+  try { await window.Central.Borradores.borrar(R.borradorKey); } catch (e) { /* sin borrador */ }
+  const body = '<div class="dotics-resumen"><div class="dotics-resumen-icono"><i class="fas fa-flag-checkered"></i></div><h3>Ruta completada</h3>' +
+    '<p>' + R.stores.filter(s => s.completada).length + ' de ' + R.stores.length + ' tiendas con su parte guardado.</p></div>' +
+    R.stores.map(s => '<div class="ubic-item"><div><strong>' + (s.completada ? '✔ ' : '○ ') + drEsc(s.nombre) + '</strong><br><small>' + drEsc(s.intervencion ? 'Intervención ' + s.intervencion : '') + '</small></div>' +
+      (s.revisionId ? '<button class="btn btn-primary btn-sm" onclick="generatePDF_revision(\'' + drEsc(s.revisionId) + '\')"><i class="fas fa-file-pdf"></i> PDF</button>' : '') + '</div>').join('');
+  window.__doticsRoute = null;
+  openModal('DOTICS · ' + R.nombre, body, '<button class="btn btn-primary" onclick="cerrarFormularioRevision();if(window.__revRefrescar)window.__revRefrescar()">Cerrar</button>');
+  window.actualizarBadgeRevisiones?.();
+}
+
+window.marcarDoticsTodoBueno=function(){
+  const d=window.__doticsVisitDraft; if(!d) return;
+  d.lines.forEach(l=>{ if(!l.estado) l.estado='bueno'; });
   renderDoticsVisitLines();
 };
 
@@ -1482,7 +1367,7 @@ function renderDoticsVisitLines(){
           '<input id="dotics-file-'+index+'" class="dotics-file-input" type="file" accept="image/*" onchange="addDoticsVisitPhoto('+index+',this)">'+
         '</div><div class="dotics-photo-previews">'+photos+'</div></div>'
       : '';
-    return '<section class="dotics-line-card"><div class="dotics-line-title"><h4>Equipo '+(index+1)+'</h4>'+(draft.lines.length>1?'<button type="button" class="btn btn-outline btn-icon" aria-label="Eliminar equipo '+(index+1)+'" onclick="removeDoticsVisitLine('+index+')"><i class="fas fa-trash"></i></button>':'')+'</div>'+
+    return '<section class="dotics-line-card"><div class="dotics-line-title"><h4>Equipo '+(index+1)+'</h4>'+(draft.lines.length>1?'<button type="button" class="btn btn-danger btn-icon" aria-label="Eliminar equipo '+(index+1)+'" onclick="removeDoticsVisitLine('+index+')"><i class="fas fa-trash"></i></button>':'')+'</div>'+
       '<div class="dotics-line-fields">'+
         '<div class="form-group"><label for="dotics-type-'+index+'">Tipo producto</label><select id="dotics-type-'+index+'" onchange="updateDoticsVisitLine('+index+',\'tipoProducto\',this.value)"><option value="">— Seleccionar</option>'+draft.productTypes.map(type=>'<option value="'+type+'" '+(line.tipoProducto===type?'selected':'')+'>'+type+'</option>').join('')+'</select></div>'+
         '<div class="form-group"><label for="dotics-name-'+index+'">Denominación cliente</label><input id="dotics-name-'+index+'" type="text" value="'+escapeHtml(line.denominacionCliente)+'" oninput="updateDoticsVisitLine('+index+',\'denominacionCliente\',this.value)"></div>'+
@@ -1604,31 +1489,23 @@ window.saveDoticsMaintenanceForm=async function(){
     concepto:[line.tipoProducto,line.denominacionCliente,line.numeroSerie].filter(Boolean).join(' · '),
     tipoProducto:line.tipoProducto,denominacionCliente:line.denominacionCliente,numeroSerie:line.numeroSerie,
     estado:line.estado==='bueno'?'ok':line.estado==='operativo'?'desgaste':'correctivo',
-    estadoEquipo:line.estado,hallazgo:line.observaciones,observaciones:line.observaciones,fotos:line.fotos
+    estadoEquipo:line.estado,hallazgo:line.observaciones,observaciones:line.observaciones,fotos:line.fotos,
+    puertaId:line.puertaId||null,ubicacionId:draft.ubicacionId||null,ubicacionNombre:draft.ubicacionNombre||''
   }));
-  const notes=JSON.stringify({form:'DOTICS_VISITA_V1',cadenaId:draft.chainId,cliente:draft.chainName,contrato:contract,intervencion:intervention,tecnicos:technicians,observaciones:generalNotes});
+  const notes=JSON.stringify({form:'DOTICS_VISITA_V1',cadenaId:draft.chainId,clienteId:draft.chainId,cliente:draft.chainName,ubicacionId:draft.ubicacionId||null,ubicacion:draft.ubicacionNombre||'',rutaNombre:draft.rutaNombre||'',contrato:contract,intervencion:intervention,tecnicos:technicians,observaciones:generalNotes});
   try{
     await dbAdd('revisiones',{
-      id:draft.id,puertaId:draft.doorId,clienteId:null,fecha:date,tecnicoId:lead?.id||null,items,
+      id:draft.id,puertaId:draft.doorId,clienteId:draft.chainId,fecha:date,tecnicoId:lead?.id||null,items,
       hallazgos:items.filter(item=>item.estadoEquipo!=='bueno'&&item.hallazgo).map(item=>item.concepto+': '+item.hallazgo).join(' | '),
       correctivo:'',estadoTrasRevision:items.some(item=>item.estadoEquipo==='no_usar')?'fuera_servicio':'operativa',notas:notes,createdAt:new Date().toISOString()
     });
-    if(draft.doorId && window.isTechnician?.()){
-      const door=await dbGet('puertas',draft.doorId);
-      const { error } = await window.supabaseDB.rpc('update_door_revision_schedule', {
-        p_id: String(draft.doorId), p_last_revision: date,
-        p_state: null
-      });
-      if(error) throw error;
-    }else if(draft.doorId){
-      const door=await dbGet('puertas',draft.doorId);
-      if(door){
-        const client=door.clienteId ? await dbGet('clientes',door.clienteId) : null;
-        const routeId=client?.rutaId??client?.rutaid;
-        const route=routeId ? await dbGet('rutas',routeId) : null;
-        const frequency=Number(route?.frecuenciaMeses??route?.frecuenciameses)||6;
-        await dbPut('puertas',{...door,ultimaRevision:date,proximaRevision:calcularProximaRevision(date,frequency)});
-      }
+    // Cada puerta revisada queda reprogramada según SU periodicidad
+    for(const item of items){
+      if(!item.puertaId) continue;
+      try{
+        const door=await dbGet('puertas',item.puertaId);
+        if(door) await window.Central.reprogramarPuerta(door,date,item.estadoEquipo==='no_usar'?'fuera_servicio':'operativa');
+      }catch(e){ console.warn('No se pudo reprogramar la puerta',item.puertaId,e); }
     }
     window.__doticsVisitDraft=null;
     closeModal();
@@ -1638,437 +1515,3 @@ window.saveDoticsMaintenanceForm=async function(){
     showToast('No se pudo guardar el informe: '+error.message,'error');
   }
 };
-// Bloque final de pages.js
-// IMPORTANTE: Object.assign para fusionar (no sobreescribir) lo que db.js ya expuso
-// (render_informesKms, verMensual, verDetalleVehiculo, generarPDF expuestos desde pages_informesKms.js)
-
-// ============================================
-// CADENAS - CRUD completo
-// ============================================
-
-// ==================== CADENAS: Formulario y Guardado ====================
-
-/**
- * showCadenaForm(editId) → Promise<void>
- * Muestra modal para crear/editar cadena con campos: nombre, descripcion.
- */
-async function showCadenaForm(editId = null) {
-  const overlay = document.getElementById('modalOverlay');
-  const title = document.getElementById('modalTitle');
-  const body = document.getElementById('modalBody');
-  const footer = document.getElementById('modalFooter');
-
-  let cadena = {};
-  if (editId) {
-    cadena = await getCadenaById(editId);
-    if (!cadena) return;
-  }
-
-  title.textContent = editId ? 'Editar cadena' : 'Nueva cadena';
-  body.innerHTML = `
-    <div style="display:flex;flex-direction:column;gap:16px;">
-      <input id="form-cadena-id" type="hidden" value="${editId || ''}">
-      <div>
-        <label style="display:block;font-size:13px;color:var(--gray);margin-bottom:4px;">Nombre *</label>
-        <input id="form-cadena-nombre" type="text" class="input" value="${escapeHtml(cadena.nombre || '')}" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:6px;font-size:15px;">
-      </div>
-      <div>
-        <label style="display:block;font-size:13px;color:var(--gray);margin-bottom:4px;">Descripción</label>
-        <textarea id="form-cadena-descripcion" class="input" rows="3" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:6px;font-size:15px;">${escapeHtml(cadena.descripcion || cadena.nota || '')}</textarea>
-      </div>
-    </div>`;
-
-  footer.innerHTML = `
-    <button class="btn btn-outline" onclick="closeModal()">Cancelar</button>
-    <button class="btn btn-primary" id="btn-save-cadena">${editId ? 'Actualizar' : 'Crear'}</button>`;
-
-  overlay.classList.add('open');
-
-  document.getElementById('btn-save-cadena').onclick = async () => {
-    const idExistente = document.getElementById('form-cadena-id')?.value || null;
-    const nombre = document.getElementById('form-cadena-nombre')?.value.trim();
-    const descripcion = document.getElementById('form-cadena-descripcion')?.value.trim();
-
-    if (!nombre) {
-      mostrarToast('El nombre es obligatorio', 'error');
-      return;
-    }
-
-    const ahora = new Date().toISOString();
-    const cadenaData = {
-      id: idExistente || window.db.nextId('CAD'),
-      nombre,
-      descripcion,
-      updatedat: ahora
-    };
-
-    if (!idExistente) cadenaData.createdat = ahora;
-    try {
-      await dbPut('cadenas', { ...cadenaData });
-    } catch (e) {
-      console.error('showCadenaForm falló:', e);
-      mostrarToast('Error guardando la cadena', 'error');
-      return;
-    }
-
-    closeModal();
-    mostrarToast(idExistente ? 'Cadena actualizada' : 'Cadena creada', 'success');
-    render_cadenas();
-  };
-}
-
-/**
- * getCadenaById(id) → Promise<Cadena | null>
- */
-async function getCadenaById(id) {
-  try {
-    const data=await dbGet('cadenas',id);
-    return data ? normalizarCadena(data) : null;
-  } catch (e) {
-    console.warn('getCadenaById falló:', e.message);
-    return null;
-  }
-}
-
-/**
- * normalizarCadena(c) → Cadena
- */
-function normalizarCadena(c) {
-  if (!c) return null;
-  return {
-    id: c.id,
-    nombre: c.nombre || '',
-    descripcion: c.descripcion || c.nota || '',
-    createdat: c.createdat || c.created_at || new Date().toISOString(),
-    updatedat: c.updatedat || new Date().toISOString()
-  };
-}
-
-// ==================== RUTAS: Acceso a datos ====================
-
-/**
- * getAllRutas(cadenaid) → Promise<Array<Ruta>>
- * Si cadenaid se pasa, filtra por cadena.
- */
-async function getAllRutas(cadenaid) {
-  const all=await dbGetAll('rutas');
-  return all
-    .filter(r=>!cadenaid||String(r.cadenaid??r.cadenaId)===String(cadenaid))
-    .map(normalizarRuta)
-    .sort((a,b)=>(a.orden||0)-(b.orden||0));
-}
-
-/**
- * getRutaById(id) → Promise<Ruta | null>
- */
-async function getRutaById(id) {
-  try {
-    const data=await dbGet('rutas',id);
-    return data ? normalizarRuta(data) : null;
-  } catch (e) {
-    console.warn('getRutaById falló:', e.message);
-    return null;
-  }
-}
-
-/**
- * normalizarRuta(r) → Ruta
- * Asegura campos consistentes independientemente del origen.
- */
-function normalizarRuta(r) {
-  if (!r) return null;
-  const ultimaRevision = r.ultimaRevision ?? r.ultimorevision ?? null;
-  const frecuencia = r.frecuenciaMeses ?? r.frecuenciameses ?? 6;
-  const proxima = r.proximaRevision ?? r.proximarevision ?? calcularProximaRevision(ultimaRevision, frecuencia);
-  return {
-    id: r.id,
-    nombre: r.nombre || '',
-    cadenaid: r.cadenaid ?? r.cadenaId ?? null,
-    cadenaId: r.cadenaId ?? r.cadenaid ?? null,
-    frecuenciaMeses: frecuencia,
-    frecuenciameses: frecuencia,
-    orden: r.orden ?? 0,
-    ultimaRevision,
-    ultimorevision: ultimaRevision,
-    proximaRevision: proxima,
-    proximarevision: proxima,
-    createdat: r.createdat || r.created_at || new Date().toISOString(),
-    updatedat: r.updatedat || r.updated_at || new Date().toISOString()
-  };
-}
-
-// ==================== RUTAS: Borrar ====================
-
-/**
- * deleteRutaDb(id) → Promise<boolean>
- * Borra ruta en Supabase + IndexedDB. Cascada: limpia rutaid en clientes.
- */
-window.deleteRutaDb = async function (id, confirmed=false) {
-  if (!id) return false;
-
-  if(!confirmed){
-    if(window.confirmDelete){
-      return new Promise(resolve=>window.confirmDelete('la ruta seleccionada',async()=>resolve(await window.deleteRutaDb(id,true))));
-    }
-    if(!window.confirm('¿Borrar esta ruta? Los clientes asociados perderán la referencia a la ruta.')) return false;
-  }
-
-  try {
-    const ruta=await dbGet('rutas',id);
-    const clientes=await dbGetAll('clientes');
-    for(const cliente of clientes.filter(item=>String(item.rutaid??item.rutaId)===String(id))){
-      await dbPut('clientes',{...cliente,rutaid:null,rutaId:null});
-    }
-    await dbDelete('rutas',id);
-    mostrarToast('Ruta borrada', 'success');
-    const currentChain=localStorage.getItem('cadenaId')||ruta?.cadenaid||ruta?.cadenaId;
-    if(currentChain&&typeof render_rutas==='function') render_rutas(currentChain);
-  } catch (e) {
-    console.error('deleteRutaDb falló:', e);
-    mostrarToast('No se pudo borrar la ruta', 'error');
-    return false;
-  }
-
-  return true;
-};
-
-// ==================== RUTAS: Render de Página ====================
-
-/**
- * render_rutas(cadenaid) → Promise<void>
- * Renderiza lista de rutas de una cadena en .main-content.
- */
-async function render_rutas(mainOrChainId, requestedChainId) {
-  const main=mainOrChainId?.nodeType===1 ? mainOrChainId : document.getElementById('mainContent');
-  let cadenaId=requestedChainId || (mainOrChainId?.nodeType===1 ? localStorage.getItem('cadenaId') : mainOrChainId);
-  if(cadenaId && typeof cadenaId==='object') cadenaId=cadenaId.target?.value??cadenaId.value??null;
-  if (cadenaId) {
-    cadenaId = String(cadenaId);
-    window.setCurrentCadenId(cadenaId);
-    localStorage.setItem('cadenaId', cadenaId);
-  } else {
-    cadenaId = window.getCurrentCadenId() || localStorage.getItem('cadenaId') || null;
-  }
-
-  if (!cadenaId) {
-    main.innerHTML = '<p style="text-align:center;color:var(--gray);margin-top:40px;">Selecciona una cadena primero.</p>';
-    return;
-  }
-  // Leer nombre de la cadena para el título
-  let cadenaNombre = '';
-  try {
-    const cadena=await getCadenaById(cadenaId);
-    if(cadena) cadenaNombre=cadena.nombre;
-  } catch (e) {
-    console.warn('No se pudo leer nombre cadena', cadenaId);
-  }
-
-  // Cabecera IDÉNTICA para todas las cadenas: aquí solo se gestiona estructura
-  // (crear/editar rutas y asignar clientes). Las revisiones se registran desde
-  // la pantalla "Revisiones", nunca desde Cadenas y Rutas.
-  main.innerHTML = `
-    <div class="page-header">
-      <div class="route-page-heading">
-        <nav class="breadcrumbs" aria-label="Ruta de navegación">
-          <button type="button" class="breadcrumb-link" onclick="navigateTo('revisionesProgramadas')">Revisiones Programadas</button>
-          <i class="fas fa-chevron-right" aria-hidden="true"></i>
-          <button type="button" class="breadcrumb-link" onclick="volverARevisionesCadena('${escapeHtml(cadenaId)}')">${escapeHtml(cadenaNombre)}</button>
-          <i class="fas fa-chevron-right" aria-hidden="true"></i>
-          <span aria-current="page">Rutas</span>
-        </nav>
-        <h2>🚗 Rutas</h2>
-      </div>
-      <div class="header-actions">
-        <button class="btn btn-primary" id="btn-nueva-ruta">+ Nueva Ruta</button>
-      </div>
-    </div>
-    <div id="rutas-lista">
-      <div class="spinner" style="margin:40px auto;text-align:center;">Cargando rutas...</div>
-    </div>`;
-
-  let rutas = [];
-  try {
-    rutas = await getAllRutas(cadenaId);
-  } catch (e) {
-    console.error('render_rutas getAllRutas falló:', e);
-  }
-
-  if (!rutas.length) {
-    document.getElementById('rutas-lista').innerHTML = `
-      <div class="empty-state">
-        <i class="fas fa-route"></i>
-        <p>No hay rutas para esta cadena.</p>
-        <button class="btn btn-outline" id="btn-primera-ruta" style="margin-top:16px;">+ Crear primera ruta</button>
-      </div>`;
-    document.getElementById('btn-primera-ruta').onclick = () => showRutaForm(null, cadenaId);
-    return;
-  }
-
-  const html = rutas.map(ruta => {
-    const rutaNormalizada = {
-      ...ruta,
-      proximaRevision: ruta.proximaRevision ?? ruta.proximarevision ?? null,
-      ultimaRevision: ruta.ultimaRevision ?? ruta.ultimorevision ?? null,
-      cadenaId: ruta.cadenaId ?? ruta.cadenaid ?? null,
-      frecuenciaMeses: ruta.frecuenciaMeses ?? ruta.frecuenciameses ?? 6
-    };
-    const proxima = rutaNormalizada.proximaRevision ? new Date(rutaNormalizada.proximaRevision).toLocaleDateString('es-ES') : '—';
-    const ultima = rutaNormalizada.ultimaRevision ? new Date(rutaNormalizada.ultimaRevision).toLocaleDateString('es-ES') : '—';
-
-    let dias = '—';
-    let badgeClass = '';
-    if (rutaNormalizada.proximaRevision) {
-      const diff = new Date(rutaNormalizada.proximaRevision).getTime() - Date.now();
-      dias = Math.ceil(diff / (1000 * 60 * 60 * 24));
-      if (dias < 0) badgeClass = 'badge-red';
-      else if (dias <= 30) badgeClass = 'badge-yellow';
-      else badgeClass = 'badge-green';
-    }
-
-    return `
-      <div class="card">
-        <div class="card-header">
-          <div style="display:flex;align-items:center;gap:10px;">
-            <strong>${escapeHtml(ruta.nombre)}</strong>
-            <span class="badge ${badgeClass}" style="font-size:11px;">${dias !== '—' ? dias + ' días' : dias}</span>
-          </div>
-          <span style="color:var(--text-muted);font-size:13px;">Orden: ${ruta.orden}</span>
-        </div>
-        <div class="card-body" style="padding:12px 20px;">
-          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;font-size:13px;color:var(--text-muted);">
-            <div><strong>ultima revisión:</strong> ${ultima}</div>
-            <div><strong>Próxima:</strong> ${proxima}</div>
-            <div><strong>Frecuencia:</strong> ${rutaNormalizada.frecuenciaMeses} meses</div>
-          </div>
-        </div>
-        <div style="padding:12px 20px;border-top:1px solid var(--border);display:flex;gap:8px;">
-          <button type="button" class="btn btn-sm btn-outline" onclick="showRutaForm('${escapeHtml(ruta.id)}')">✏️ Editar</button>
-          <button class="btn btn-sm btn-outline" onclick="render_clientes_ruta('${escapeHtml(ruta.id)}')">Clientes</button>
-          <button type="button" class="btn btn-sm btn-primary" onclick="optimizarRutaTiendas('${escapeHtml(ruta.id)}','${escapeHtml(cadenaId)}','${escapeAttr(ruta.nombre)}','')"><i class="fas fa-route"></i> Optimizar</button>
-          <button type="button" class="btn btn-sm btn-danger" onclick="deleteRuta('${escapeHtml(ruta.id)}','${escapeHtml(cadenaId)}')"><i class="fas fa-trash"></i> Borrar</button>
-        </div>
-      </div>`;
-  }).join('');
-
-  document.getElementById('rutas-lista').innerHTML = html;
-
-  // o. Botón Nueva Ruta
-  document.getElementById('btn-nueva-ruta').onclick = () => showRutaForm(null, cadenaId);
-}
-
-
-/**
- * render_clientes_ruta(rutaid) → carga y muestra clientes de esta ruta
- */
-async function render_clientes_ruta(rutaid) {
-  if (rutaid && typeof rutaid === 'object') {
-    rutaid = rutaid.target?.value ?? rutaid.value ?? null;
-  }
-
-  let clientes = [];
-  let ruta = null;
-  try {
-    ruta = await getRutaById(rutaid);
-    const todos = await dbGetAll('clientes');
-    clientes = ordenarTiendasRuta(todos.filter(c => String(c.rutaId ?? c.rutaid) === String(rutaid)));
-  } catch (e) {
-    console.error('render_clientes_ruta falló:', e);
-  }
-
-  const cadenaId = String(ruta?.cadenaId ?? ruta?.cadenaid ?? localStorage.getItem('cadenaId') ?? '');
-  if (cadenaId) localStorage.setItem('cadenaId', cadenaId);
-  const cadena = cadenaId ? await getCadenaById(cadenaId) : null;
-  const main = document.querySelector('.main-content');
-  // Misma disposición que la vista de tiendas de Revisiones: cabecera con botones
-  // arriba (header-actions) y rejilla de tarjetas stat-card debajo.
-  main.innerHTML = `
-    <div class="page-revisiones">
-      <div class="page-header">
-        <div>
-          <button class="btn btn-back btn-sm" onclick="render_rutas('${escapeHtml(cadenaId)}')"><i class="fas fa-arrow-left"></i> Volver a rutas</button>
-        </div>
-        <div>
-          <h2 class="page-revisiones-title"><i class="fas fa-store"></i> Tiendas · ${escapeHtml(ruta?.nombre || '')}</h2>
-          <p class="page-revisiones-subtitle">${clientes.length} tienda${clientes.length===1?'':'s'} en esta ruta</p>
-        </div>
-        <div class="header-actions">
-        </div>
-      </div>
-      <div id="clientes-ruta-lista" class="stats-grid">
-        ${clientes.length ? clientes.map((c, idx) => `
-          <div class="stat-card tienda-card" style="cursor:pointer;" onclick="showClienteForm('${escapeHtml(String(c.id))}')">
-            <div class="stat-icon" style="background:#dbeafe;color:#2563eb"><i class="fas fa-store"></i></div>
-            <div class="stat-info">
-              <h3>${idx + 1}. ${escapeHtml(c.nombre)}</h3>
-              <p>${escapeHtml(c.direccion || 'Sin dirección')}</p>
-            </div>
-            <div class="stat-actions">
-              <button class="btn btn-sm btn-outline" onclick="event.stopPropagation(); abrirGoogleMaps('${escapeAttr(c.direccion)}')"><i class="fas fa-map-marker-alt"></i> Maps</button>
-              <button class="btn btn-sm btn-primary" onclick="event.stopPropagation(); showClienteForm('${escapeHtml(String(c.id))}')"><i class="fas fa-pen"></i> Editar</button>
-            </div>
-          </div>
-        `).join('') : '<p style="text-align:center;color:var(--gray);grid-column:1/-1;">No hay clientes en esta ruta.</p>'}
-      </div>
-    </div>`;
-}
-
-window.volverARevisionesCadena=async function(chainId){
-  await navigateTo('revisionesProgramadas');
-  const group=document.querySelector('.revision-grupo[data-cadena-id="'+CSS.escape(String(chainId))+'"]');
-  if(!group) return;
-  const content=group.querySelector('.revision-content');
-  if(content) content.style.display='block';
-  group.scrollIntoView({behavior:'smooth',block:'start'});
-};
-
-window.showRutasForCadena = function(cadenaId) {
-  // Normalizar por si llega elemento/evento desde el router
-  if (cadenaId && typeof cadenaId === 'object') {
-    cadenaId = cadenaId.target?.value ?? cadenaId.value ?? null;
-  }
-  if (!cadenaId) { console.warn('showRutasForCadena: sin id'); return; }
-  const normalizedId = String(cadenaId);
-  window.setCurrentCadenId(normalizedId);
-  localStorage.setItem('cadenaId', normalizedId);
-  navigateTo('rutas', normalizedId);
-};
-window.deleteCadena = async function(cadenaId) {
-  if (!confirm('¿Eliminar esta cadena? Se borrarán también todas sus rutas.')) return;
-  try {
-    await deleteCadenaWithDependencies(cadenaId);
-    toast('Cadena eliminada');
-    navigateTo('cadenas');
-  } catch (err) {
-    console.error('Error al eliminar cadena:', err);
-    alert('Error al eliminar: ' + err.message);
-  }
-};
-// o. Puente con el router: navigateTo('cadenas') → render_cadenas
-
-/**
- * render_cadenas() → Promise<void>
- * Renderiza lista de cadenas en .main-content.
- * Actualizado: usa descripcion (no nota), abre render_rutas al hacer clic.
- */
-async function render_cadenas(main) {
-  if (!main) main = document.getElementById('mainContent');
-  main.innerHTML = `
-    <div class="chains-page">
-      <div class="page-header">
-        <h2><i class="fas fa-link" style="color:var(--primary);"></i> Cadenas</h2>
-        <button class="btn btn-primary" id="btn-new-cadena">+ Nueva cadena</button>
-      </div>
-      <div id="cadenas-list" class="chains-list"></div>
-    </div>`;
-  document.getElementById('btn-new-cadena').addEventListener('click', () => showCadenaForm());
-  await renderCadenasList();
-}
-// Importador de folio OCR """""""""""""""""
-
-// ═══ Exposición en window de funciones internas que otros módulos/onclick llaman ═══
-window.render_rutas = render_rutas;
-window.showRutaForm = showRutaForm;
-window.deleteRuta = deleteRuta;
-window.renderCadenasList = renderCadenasList;
-window.deleteCadenaWithDependencies = deleteCadenaWithDependencies;
-window.calcularKmJornada = calcularKmJornada;

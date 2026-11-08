@@ -1,25 +1,8 @@
 // ── App Shell ──────────────────────────────────────────────
 let currentPage = 'dashboard';
-let currentCadenId = null;   // ← cadena activa (la usan render_rutas / showRutaForm)
 let lastNavArg = null;
 let skipHistoryOnce = false;
-window.currentCadenId = null;
 window.currentPage = 'dashboard';
-
-function syncCurrentCadenaId(id = null) {
-  const resolvedId = id ?? currentCadenId ?? localStorage.getItem('cadenaId') ?? null;
-  const normalizedId = resolvedId === null || resolvedId === undefined || resolvedId === '' ? null : String(resolvedId);
-
-  currentCadenId = normalizedId;
-  window.currentCadenId = normalizedId;
-
-  if (normalizedId) localStorage.setItem('cadenaId', normalizedId);
-  else localStorage.removeItem('cadenaId');
-
-  return normalizedId;
-}
-window.getCurrentCadenId = () => syncCurrentCadenaId();
-window.setCurrentCadenId = (id) => syncCurrentCadenaId(id);
 
 // Suscribirse a cambios de cualquier store
 window.__onStoreChanged = (store, payload) => {
@@ -55,17 +38,18 @@ window.__onStoreChanged = (store, payload) => {
     'articulos': 'almacen',
     'ubicaciones': 'clientes',
     'puertas': 'clientes',
-    'cadenas': 'cadenas',
-    'rutas': 'rutas',
-    'revisiones': 'revisionesProgramadas',
+    'rutas': 'revisionesCliente',
+    'ubicaciones': 'clientes',
+    'revisiones': 'revisionesCliente',
     'tiposPuerta': 'configuracion',
     'informes': 'informesKms',
     'jornadas': 'informesKms'
   };
   const alsoRefresh = {
-    cadenas: ['revisionesProgramadas'],
-    rutas: ['revisionesProgramadas'],
-    puertas: ['revisionesProgramadas'],
+    clientes: ['revisionesCliente'],
+    ubicaciones: ['revisionesCliente'],
+    rutas: ['revisionesCliente'],
+    puertas: ['revisionesCliente'],
     revisiones: ['clientes']
   };
 
@@ -73,7 +57,7 @@ window.__onStoreChanged = (store, payload) => {
   const shouldRefresh = targetPage === page || (alsoRefresh[store] || []).includes(page);
   if (!shouldRefresh || !targetPage || typeof window['render_' + page] !== 'function') return;
 
-  const target = page === 'rutas' ? (window.getCurrentCadenId() || localStorage.getItem('cadenaId')) : document.getElementById('mainContent');
+  const target = document.getElementById('mainContent');
   if (target) window['render_' + page](target);
 };
 
@@ -452,13 +436,6 @@ function navigateTo(page, arg) {
     }
   }
 
-  if (page === 'rutas' && arg) {
-    window.setCurrentCadenId(arg);
-  } else if (page === 'rutas') {
-    const stored = window.getCurrentCadenId() || localStorage.getItem('cadenaId');
-    if (stored) window.setCurrentCadenId(stored);
-  }
-
   document.querySelectorAll('.nav-item').forEach(i =>
     i.classList.toggle('active', i.dataset.page === page));
 
@@ -521,6 +498,7 @@ function closeModal() {
   // Al cerrar un formulario de revisión se descarta su borrador pendiente
   if (window.__hiperberReviewDraft) window.__hiperberReviewDraft = null;
   if (window.__doticsVisitDraft) window.__doticsVisitDraft = null;
+  window.__doticsRoute = null;
 }
 window.closeModal = closeModal;
 window.openModal = openModal;
@@ -835,111 +813,7 @@ document.addEventListener('keydown', e => {
   if (e.key === 'Escape') closeAllModals();
 });
 
-// ==========================================
-// GESTIÓN DE UBICACIONES (Clientes)
-// ==========================================
-let ubicClienteActual = null;
-
-async function gestionarUbicaciones(clienteId) {
-  const cliente = await dbGet('clientes', clienteId);
-  if (!cliente) return alert('Cliente no encontrado');
-  ubicClienteActual = clienteId;
-  abrirModalUbicaciones(cliente);
-}
-
-function abrirModalUbicaciones(cliente) {
-  cerrarModalUbicaciones();
-
-  const overlay = document.createElement('div');
-  overlay.id = 'overlayUbicaciones';
-  overlay.dataset.cliente = cliente.id;
-  overlay.className = 'modal-overlay open';
-
-  overlay.innerHTML =
-    '<div class="modal modal-ubic">' +
-      '<div class="modal-header">' +
-        '<h3>Ubicaciones · ' + escapeHtml(cliente.nombre) + '</h3>' +
-        '<button class="modal-close" onclick="cerrarModalUbicaciones()">×</button>' +
-      '</div>' +
-      '<div class="modal-body">' +
-        '<div class="ubic-form">' +
-          '<input type="text" id="ub_denominacion" placeholder="Nombre (ej: Nave Alcalá)">' +
-          '<input type="text" id="ub_direccion" placeholder="Dirección completa">' +
-          '<input type="text" id="ub_notas" placeholder="Notas (acceso, horario...) opcional">' +
-          '<button class="btn btn-primary" onclick="guardarUbicacion()">+ Añadir ubicación</button>' +
-        '</div>' +
-        '<div id="listaUbicaciones" style="margin-top:16px"></div>' +
-      '</div>' +
-    '</div>';
-
-  document.body.appendChild(overlay);
-  overlay.querySelectorAll('input').forEach(inp => {
-    inp.addEventListener('keydown', e => { if (e.key === 'Enter') guardarUbicacion(); });
-  });
-
-  pintarListaUbicaciones();
-}
-
-function cerrarModalUbicaciones() {
-  document.getElementById('overlayUbicaciones')?.remove();
-  ubicClienteActual = null;
-}
-
-function getUbicClienteActual() {
-  return document.getElementById('overlayUbicaciones')?.dataset.cliente || ubicClienteActual;
-}
-
-async function pintarListaUbicaciones() {
-  const cont = document.getElementById('listaUbicaciones');
-  if (!cont) return;
-
-  const lista = await dbGetByIndex('ubicaciones', 'clienteId', getUbicClienteActual());
-
-  if (!lista.length) {
-    cont.innerHTML = '<p class="ubic-vacio">Este cliente aún no tiene ubicaciones. Añade la primera arriba.</p>';
-    return;
-  }
-
-  cont.innerHTML = lista.map(u => `
-    <div class="ubic-item">
-      <div>
-        <strong>${escapeHtml(u.denominacion)}</strong><br>
-        <small>${escapeHtml(u.direccion || '')}</small>
-        ${u.notas ? '<br><small style="color:var(--text-muted)">📝 ' + escapeHtml(u.notas) + '</small>' : ''}
-      </div>
-      <button class="btn btn-sm btn-danger" onclick="eliminarUbicacion('${u.id}')">Eliminar</button>
-    </div>
-  `).join('');
-}
-
-async function guardarUbicacion() {
-  const den  = document.getElementById('ub_denominacion').value.trim();
-  const dir  = document.getElementById('ub_direccion').value.trim();
-  const nota = document.getElementById('ub_notas').value.trim();
-
-  if (!den) return alert('El nombre de la ubicación es obligatorio');
-
-  await dbAdd('ubicaciones', {
-    id: 'UBI-' + Date.now(),
-    clienteId: getUbicClienteActual(),
-    denominacion: den,
-    direccion: dir,
-    notas: nota
-  });
-
-  document.getElementById('ub_denominacion').value = '';
-  document.getElementById('ub_direccion').value = '';
-  document.getElementById('ub_notas').value = '';
-  document.getElementById('ub_denominacion').focus();
-
-  pintarListaUbicaciones();
-}
-
-async function eliminarUbicacion(id) {
-  if (!confirm('¿Eliminar esta ubicación?')) return;
-  await dbDelete('ubicaciones', id);
-  pintarListaUbicaciones();
-}
+// Ubicaciones, puertas y rutas de un cliente: ver js/central.js
 
 // ==========================================
 // GESTIÓN DE PUERTAS (Clientes)
@@ -958,172 +832,6 @@ function diasHasta(fechaStr) {
   return Math.round((f - hoy) / (1000 * 60 * 60 * 24));
 }
 
-let puertaClienteActual = null;
-
-async function gestionarPuertas(clienteId) {
-  const cliente = await dbGet('clientes', clienteId);
-  if (!cliente) return alert('Cliente no encontrado');
-  puertaClienteActual = clienteId;
-  abrirModalPuertas(cliente);
-}
-
-function abrirModalPuertas(cliente) {
-  cerrarModalPuertas();
-
-  const opciones = Object.entries(TIPOS_PUERTA)
-    .map(([k, v]) => `<option value="${k}">${v.nombre}</option>`)
-    .join('');
-
-  const overlay = document.createElement('div');
-  overlay.id = 'overlayPuertas';
-  overlay.dataset.cliente = cliente.id;
-  overlay.className = 'modal-overlay open';
-
-  overlay.innerHTML =
-    '<div class="modal modal-ubic">' +
-      '<div class="modal-header">' +
-        '<h3>Puertas · ' + escapeHtml(cliente.nombre) + '</h3>' +
-        '<button class="modal-close" onclick="cerrarModalPuertas()">×</button>' +
-      '</div>' +
-      '<div class="modal-body">' +
-        '<div class="ubic-form">' +
-          '<input type="text" id="pu_nombre" placeholder="Nombre / matrícula (ej: Nave 1 - Acceso A)">' +
-          '<select id="pu_tipo">' + opciones + '</select>' +
-          '<input type="text" id="pu_marca" placeholder="Marca (opcional)">' +
-          '<input type="text" id="pu_serie" placeholder="Número de serie (opcional)">' +
-          '<select id="pu_estado">' +
-            '<option value="operativa">🟢 Operativa</option>' +
-            '<option value="averiada">🔴 Averiada</option>' +
-            '<option value="fuera_servicio">⚪ Fuera de servicio</option>' +
-          '</select>' +
-          '<select id="pu_ubicacion"><option value="">Sin ubicación</option></select>' +
-          '<input type="text" id="pu_notas" placeholder="Notas (opcional)">' +
-          '<button class="btn btn-primary" onclick="guardarPuerta()">+ Añadir puerta</button>' +
-        '</div>' +
-        '<div id="listaPuertas" style="margin-top:16px"></div>' +
-      '</div>' +
-    '</div>';
-
-  document.body.appendChild(overlay);
-  cargarUbicacionesEnSelect(cliente.id);
-  pintarListaPuertas();
-}
-
-function cerrarModalPuertas() {
-  document.getElementById('overlayPuertas')?.remove();
-  puertaClienteActual = null;
-}
-
-function getPuertaClienteActual() {
-  return document.getElementById('overlayPuertas')?.dataset.cliente || puertaClienteActual;
-}
-
-async function cargarUbicacionesEnSelect(clienteId) {
-  const sel = document.getElementById('pu_ubicacion');
-  if (!sel) return;
-  const ubs = await dbGetByIndex('ubicaciones', 'clienteId', clienteId);
-  sel.innerHTML = '<option value="">Sin ubicación</option>' +
-    ubs.map(u => `<option value="${u.id}">${escapeHtml(u.denominacion)}</option>`).join('');
-}
-
-async function pintarListaPuertas() {
-  const cont = document.getElementById('listaPuertas');
-  if (!cont) return;
-
-  const lista = await dbGetByIndex('puertas', 'clienteId', getPuertaClienteActual());
-
-  if (!lista.length) {
-    cont.innerHTML = '<p class="ubic-vacio">Este cliente aún no tiene puertas registradas.</p>';
-    return;
-  }
-
-  lista.sort((a, b) => (a.proximaRevision || '9999').localeCompare(b.proximaRevision || '9999'));
-
-  const estados = {
-    operativa: '🟢 Operativa',
-    averiada: '🔴 Averiada',
-    fuera_servicio: '⚪ Fuera de servicio'
-  };
-
-  cont.innerHTML = lista.map(p => {
-    const tipo = getTipoPuerta(p.tipo);
-    const dias = diasHasta(p.proximaRevision);
-    let aviso = '';
-    if (dias !== null) {
-      if (dias < 0)       aviso = ' <span style="color:#ef4444">🔴 Atrasada ' + Math.abs(dias) + 'd</span>';
-      else if (dias <= 3) aviso = ' <span style="color:#f97316">🟠 Revisar en ' + dias + 'd</span>';
-      else if (dias <= 7) aviso = ' <span style="color:#22c55e">🟢 Próxima en ' + dias + 'd</span>';
-    }
-    const marcaInfo = p.marca ? `<small>Marca: ${escapeHtml(p.marca)}</small><br>` : '';
-    const serieInfo = p.numeroSerie ? `<small>S/N: ${escapeHtml(p.numeroSerie)}</small><br>` : '';
-    return `
-    <div class="ubic-item">
-      <div>
-        <strong>${escapeHtml(p.nombre)}</strong>
-        <small>· ${tipo ? tipo.nombre : p.tipo}</small><br>
-        ${marcaInfo}
-        ${serieInfo}
-        <small>${estados[p.estado] || p.estado}</small><br>
-        <small>Próx. revisión: ${p.proximaRevision || '—'}${aviso}</small>
-      </div>
-      <div style="display:flex;gap:6px">
-        <button class="btn btn-sm btn-primary" onclick="abrirRevision('${p.id}')">🔧 Revisar</button>
-        <button class="btn btn-sm btn-outline" onclick="verHistoricoPuerta('${p.id}')"><i class="fas fa-clock-rotate-left"></i> Histórico</button>
-        <button class="btn btn-sm btn-danger" onclick="eliminarPuerta('${p.id}')">Eliminar</button>
-      </div>
-    </div>`;
-  }).join('');
-}
-
-async function guardarPuerta() {
-  const nombre = document.getElementById('pu_nombre').value.trim();
-  const tipo   = document.getElementById('pu_tipo').value;
-  const marca  = document.getElementById('pu_marca').value.trim();
-  const serie  = document.getElementById('pu_serie').value.trim();
-  const estado = document.getElementById('pu_estado').value;
-  const ubId   = document.getElementById('pu_ubicacion').value;
-  const notas  = document.getElementById('pu_notas').value.trim();
-
-  if (!nombre) return alert('El nombre de la puerta es obligatorio');
-
-  const hoy = new Date().toISOString().slice(0, 10);
-
-  try {
-    await dbAdd('puertas', {
-      id: 'PRT-' + Date.now(),
-      nombre,
-      tipo,
-      marca,
-      numeroSerie: serie,
-      clienteId: getPuertaClienteActual(),
-      ubicacionId: ubId || null,
-      estado,
-      notas,
-      ultimaRevision: null,
-      proximaRevision: calcularProximaRevisionPuerta(tipo, null),
-      createdAt: hoy
-    });
-  } catch (err) {
-    console.error('[guardarPuerta]', err);
-    showToast('No se pudo guardar la puerta: ' + (err?.message || err), 'error');
-    return;
-  }
-
-  document.getElementById('pu_nombre').value = '';
-  document.getElementById('pu_marca').value = '';
-  document.getElementById('pu_serie').value = '';
-  document.getElementById('pu_notas').value = '';
-  document.getElementById('pu_nombre').focus();
-
-  pintarListaPuertas();
-}
-
-async function eliminarPuerta(id) {
-  if (!confirm('¿Eliminar esta puerta? (No borra sus revisiones históricas)')) return;
-  await dbDelete('puertas', id);
-  pintarListaPuertas();
-}
-
 // ==========================================
 // REVISIONES DE PUERTAS
 // ==========================================
@@ -1134,10 +842,8 @@ async function abrirRevision(puertaId) {
   const puerta = await dbGet('puertas', puertaId);
   if (!puerta) return alert('Puerta no encontrada');
   const cliente=puerta.clienteId ? await dbGet('clientes',puerta.clienteId) : null;
-  const cadenaId=cliente?.cadenaId??cliente?.cadenaid;
-  const cadena=cadenaId ? await dbGet('cadenas',cadenaId) : null;
-  if(cadena?.nombre?.trim().toLocaleUpperCase()==='DOTICS'||cliente?.nombre?.trim().toLocaleUpperCase()==='DOTICS'){
-    return window.openDoticsMaintenanceForm(cadena?.id||cliente.id,puertaId);
+  if(String(cliente?.nombre||'').toLocaleUpperCase().includes('DOTICS')){
+    return window.abrirRevisionDotics({clienteId:cliente.id,puertaId,ubicacionIds:puerta.ubicacionId?[puerta.ubicacionId]:null});
   }
   revisionPuertaActual = puerta;
 
@@ -1171,7 +877,7 @@ async function abrirRevision(puertaId) {
     '<div class="modal modal-ubic">' +
       '<div class="modal-header">' +
         '<h3>🔧 Revisión · ' + escapeHtml(puerta.nombre) + ' (' + tipo.nombre + ')</h3>' +
-        '<button class="modal-close" onclick="cerrarRevision()">×</button>' +
+        '<button class="modal-close" onclick="cerrarRevision()"><i class="fas fa-times"></i></button>' +
       '</div>' +
       '<div class="modal-body">' +
         '<div class="ubic-form">' +
@@ -1239,12 +945,10 @@ async function guardarRevision() {
     ? (window.authState.employee ? [window.authState.employee] : [])
     : await dbGetAll('empleados');
   const tecnicoNombre = empleados.find(e => e.id === tecnicoId)?.nombre || null;
-  // Recuperar cliente y cadena para las notas estructuradas (fuera de scope en abrirRevision)
   const cliente = puerta.clienteId ? await dbGet('clientes', puerta.clienteId) : null;
-  const cadenaId = cliente?.cadenaId ?? cliente?.cadenaid;
-  const cadena = cadenaId ? await dbGet('cadenas', cadenaId) : null;
+  const ubicacion = puerta.ubicacionId ? await dbGet('ubicaciones', puerta.ubicacionId) : null;
 
-    const revision = {
+  const revision = {
     id: 'REV-' + Date.now(),
     puertaId: puerta.id,
     clienteId: puerta.clienteId,
@@ -1257,9 +961,13 @@ async function guardarRevision() {
     estadoTrasRevision: estadoFinal,
     notas: JSON.stringify({
       form: 'PUERTA_REVISION_V1',
-      cadenaId: cadena?.id ? String(cadena.id) : null,
-      cadena: cadena?.nombre || '',
+      clienteId: cliente?.id ? String(cliente.id) : null,
       cliente: cliente?.nombre || '',
+      ubicacionId: ubicacion?.id ? String(ubicacion.id) : null,
+      ubicacion: ubicacion?.denominacion || '',
+      // claves antiguas: las siguen leyendo el historial y los PDF
+      cadenaId: cliente?.central && cliente?.id ? String(cliente.id) : null,
+      cadena: cliente?.central ? (cliente?.nombre || '') : '',
       tecnicos: tecnicoNombre || '',
       observaciones: document.getElementById('rev_notas').value.trim()
     }),
@@ -1268,314 +976,24 @@ async function guardarRevision() {
 
   await dbAdd('revisiones', revision);
 
-  const puertaActualizada = {
-    ...puerta,
-    ultimaRevision: fecha,
-    estado: estadoFinal,
-    proximaRevision: null
-  };
-  if (window.isTechnician?.()) {
-    try {
-      const { data: nextRevision, error } = await window.supabaseDB.rpc('update_door_revision_schedule', {
-        p_id: String(puerta.id),
-        p_last_revision: fecha,
-        p_state: estadoFinal
-      });
-      if (error) throw error;
-      puertaActualizada.proximaRevision = nextRevision;
-    } catch (error) {
-      // El RPC puede fallar (offline, RPC no desplegado...). Fallback: calcular localmente.
-      console.error('update_door_revision_schedule falló, usando cálculo local:', error);
-      const client = puerta.clienteId ? await dbGet('clientes', puerta.clienteId) : null;
-      const routeId = client?.rutaId ?? client?.rutaid;
-      const route = routeId ? await dbGet('rutas', routeId) : null;
-      const frequency = Number(route?.frecuenciaMeses ?? route?.frecuenciameses) || 6;
-      puertaActualizada.proximaRevision = calcularProximaRevision(fecha, frequency);
-    }
-    await dbPut('puertas', puertaActualizada);
-  } else {
-    const client = puerta.clienteId ? await dbGet('clientes', puerta.clienteId) : null;
-    const routeId = client?.rutaId ?? client?.rutaid;
-    const route = routeId ? await dbGet('rutas', routeId) : null;
-    const frequency = Number(route?.frecuenciaMeses ?? route?.frecuenciameses) || 6;
-    puertaActualizada.proximaRevision = calcularProximaRevision(fecha, frequency);
-    await dbPut('puertas', puertaActualizada);
+  // La próxima revisión sale de la periodicidad de la puerta (tabla por uso/criterio)
+  let proxima = null;
+  try {
+    const act = await window.Central.reprogramarPuerta(puerta, fecha, estadoFinal);
+    proxima = act.proximaRevision;
+  } catch (error) {
+    console.error('No se pudo reprogramar la puerta:', error);
+    showToast(error.message || 'La revisión se guardó pero no se pudo reprogramar la puerta', 'warning');
   }
 
   cerrarRevision();
-  showToast('Revisión registrada · Próx.: ' + puertaActualizada.proximaRevision);
-  // Refrescar la página actual si es revisionesProgramadas o gestionarPuertas
-  if (currentPage === 'revisionesProgramadas') {
-    const main = document.getElementById('mainContent');
-    if (window.render_revisionesProgramadas) {
-      window.render_revisionesProgramadas(main);
-    }
-  } else {
-    pintarListaPuertas();
-  }
-}
-
-// ==========================================
-// RONDA DE REVISIONES (hoja de trabajo por ruta)
-// ==========================================
-
-let rondaPuertas = [];
-
-// ===== REEMPLAZO: abrirRondaRevisiones (2 niveles: Rutas → Detalle) =====
-// Reemplaza la función actual en pages.js / app.js (donde esté definida)
-
-async function abrirRondaRevisiones(rutaId = null) {
-  const hoy = new Date();
-  const puertas = await dbGetAll('puertas');
-  const clientes = await dbGetAll('clientes');
-  const rutas = await dbGetAll('rutas');
-
-  // Si NO viene rutaId → mostrar nivel 1 (listado de rutas)
-  if (rutaId === null) {
-    return renderNivel1Rutas(rutas, puertas, clientes);
-  }
-
-  // Si viene rutaId → mostrar nivel 2 (detalle de esa ruta)
-  return renderNivel2Detalle(rutaId, puertas, clientes, hoy);
-}
-
-// ── NIVEL 1: Listado de rutas clickeables ──
-function renderNivel1Rutas(rutas, puertas, clientes) {
-  const pendientes = puertas.filter(p => {
-    if (!p.proximaRevision) return false;
-    const treintaDias = new Date(); treintaDias.setDate(new Date().getDate() + 30);
-    return new Date(p.proximaRevision) <= treintaDias;
-  });
-
-  // Contar puertas pendientes por ruta
-  const conteoPorRuta = {};
-  pendientes.forEach(p => {
-    const cliente = clientes.find(c => c.id === p.clienteId);
-    const rutaId = cliente ? (cliente.rutaId || null) : null;
-    if (rutaId) {
-      conteoPorRuta[rutaId] = (conteoPorRuta[rutaId] || 0) + 1;
-    }
-  });
-
-  let html = `
-    <div class="review-header" style="display:flex;justify-content:space-between;align-items:center;margin:20px 0 24px 0;">
-      <h2 style="margin:0;font-size:1.4rem;color:#1e293b;">📋 Informe de Revisión</h2>
-      <button class="btn btn-back" onclick="goHome()">← Volver</button>
-    </div>
-    <p style="color:#64748b;font-size:0.9rem;margin-bottom:20px;">Selecciona una ruta para ver las puertas pendientes de revisión</p>
-    <div class="review-rutas-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px;">
-  `;
-
-  for (const ruta of rutas) {
-    const numPendientes = conteoPorRuta[ruta.id] || 0;
-    // Solo mostrar rutas con puertas pendientes (o todas si prefieres)
-    html += `
-      <div class="review-ruta-card" onclick="abrirRondaRevisiones('${ruta.id}')"
-           style="padding:16px;border:2px solid #e2e8f0;border-radius:12px;cursor:pointer;transition:all 0.2s;background:#fff;"
-           onmouseover="this.style.borderColor='#3b82f6';this.style.boxShadow='0 4px 12px rgba(59,130,246,0.15)'"
-           onmouseout="this.style.borderColor='#e2e8f0';this.style.boxShadow='none'">
-        <div style="font-size:1.05rem;font-weight:600;color:#1e293b;">🗺️ ${escapeHtml(ruta.nombre)}</div>
-        <div style="font-size:0.85rem;color:#64748b;margin-top:4px;">
-          ${numPendientes > 0
-            ? `<span style="color:#ef4444;font-weight:600;">⚠️ ${numPendientes} puerta(s) pendiente(s)</span>`
-            : '✅ Sin pendientes'}
-        </div>
-      </div>
-    `;
-  }
-
-  html += `</div>`;
-  document.getElementById('app').innerHTML = html;
-}
-
-// ── NIVEL 2: Detalle de una ruta (reutiliza tu tabla actual) ──
-async function renderNivel2Detalle(rutaId, puertas, clientes, hoy) {
-  const ruta = await dbGetAll('rutas').then(r => r.find(x => x.id === rutaId));
-  const clientesRuta = clientes.filter(c => c.rutaId === rutaId);
-  const clientesIds = new Set(clientesRuta.map(c => c.id));
-
-  // Puertas pendientes de esta ruta
-  const treintaDias = new Date(hoy); treintaDias.setDate(hoy.getDate() + 30);
-  const pendientes = puertas.filter(p => {
-    if (!p.proximaRevision) return false;
-    if (!clientesIds.has(p.clienteId)) return false;
-    return new Date(p.proximaRevision) <= treintaDias;
-  });
-
-  // Agrupar por cliente
-  const grupos = {};
-  pendientes.forEach(p => {
-    if (!grupos[p.clienteId]) grupos[p.clienteId] = [];
-    grupos[p.clienteId].push(p);
-  });
-
-  const numClientes = Object.keys(grupos).length;
-  if (numClientes === 0) {
-    showToast('✅ No hay revisiones pendientes para esta ruta.', 'info');
-    return renderNivel1Rutas(await dbGetAll('rutas'), puertas, clientes);
-  }
-
-  let html = `
-    <div class="review-header" style="display:flex;justify-content:space-between;align-items:center;margin:20px 0 24px 0;">
-      <h2 style="margin:0;font-size:1.3rem;color:#1e293b;">🗺️ ${escapeHtml(ruta?.nombre || 'Ruta')} <span style="font-size:0.9rem;color:#64748b;">(${pendientes.length} puerta(s))</span></h2>
-      <button class="btn btn-back" onclick="abrirRondaRevisiones()">← Volver a rutas</button>
-    </div>
-  `;
-
-  Object.entries(grupos).forEach(([clienteId, lista]) => {
-    const cliente = clientes.find(c => c.id === clienteId);
-    const nombreCliente = cliente ? cliente.nombre : 'Cliente desconocido';
-    const direccion = cliente ? (cliente.direccion || '') : '';
-    const lat = cliente?.lat;
-    const lng = cliente?.lng;
-    const mapUrl = (lat && lng)
-      ? `https://www.google.com/maps?q=${lat},${lng}`
-      : `https://www.google.com/maps/search/${encodeURIComponent(direccion || nombreCliente)}`;
-
-    html += `
-      <div class="rd-grupo" data-cliente="${clienteId}" style="margin-bottom:28px;">
-        <!-- Header del cliente con dirección y Maps -->
-        <h4 style="display:flex;align-items:center;gap:8px;margin:0 0 12px 0;color:#1e293b;">
-          <i class="fas fa-store" style="color:#3b82f6;"></i> ${escapeHtml(nombreCliente)}
-          <span class="badge" style="background:#dbeafe;color:#2563eb;">${lista.length} puerta(s)</span>
-        </h4>
-        <!-- Dirección con icono + botón Maps -->
-        <div style="display:flex;align-items:center;gap:6px;margin-bottom:12px;padding:8px 12px;background:#f8fafc;border-radius:8px;">
-          <span style="font-size:16px;flex-shrink:0;">📍</span>
-          <span style="font-size:0.85rem;color:#475569;">${escapeHtml(direccion || 'Sin dirección')}</span>
-          <span style="margin-left:auto;">
-            <a href="${mapUrl}" target="_blank" rel="noopener"
-               style="display:inline-flex;align-items:center;gap:4px;font-size:0.8rem;color:#3b82f6;text-decoration:none;padding:4px 10px;border:1px solid #3b82f6;border-radius:6px;cursor:pointer;transition:all 0.2s;"
-               onmouseover="this.style.background='#3b82f6';this.style.color='#fff'"
-               onmouseout="this.style.background='transparent';this.style.color='#3b82f6'">
-              🗺️ Maps
-            </a>
-          </span>
-        </div>
-        <!-- Tabla de puertas (tu código actual) -->
-        <table style="width:100%;border-collapse:collapse;font-size:0.9rem;">
-          <thead>
-            <tr style="background:#f1f5f9;border-bottom:2px solid #e2e8f0;">
-              <th style="text-align:left;padding:8px 10px;width:35%;">Puerta</th>
-              <th style="text-align:left;padding:8px 10px;">Tipo</th>
-              <th style="text-align:left;padding:8px 10px;">Últ. Revisión</th>
-              <th style="text-align:left;padding:8px 10px;">Próx. Revisión</th>
-              <th style="text-align:left;padding:8px 10px;">Estado</th>
-              <th style="text-align:center;padding:8px 10px;">Acción</th>
-            </tr>
-          </thead>
-          <tbody>
-    `;
-
-    lista.forEach((puerta, idx) => {
-      const diasRestantes = Math.ceil((new Date(puerta.proximaRevision) - hoy) / 86400000);
-      const estadoColor = diasRestantes < 0 ? '#ef4444' : diasRestantes <= 7 ? '#f59e0b' : '#22c55e';
-      const estadoTexto = diasRestantes < 0 ? `Vencida (${Math.abs(diasRestantes)}d)` :
-                          diasRestantes <= 7 ? `Próxima (${diasRestantes}d)` : `OK`;
-
-      html += `
-        <tr style="border-bottom:1px solid #f1f5f9;">
-          <td style="padding:8px 10px;">${escapeHtml(puerta.nombre || 'Puerta ' + puerta.id)}</td>
-          <td style="padding:8px 10px;color:#64748b;">${escapeHtml(puerta.tipo || '—')}</td>
-          <td style="padding:8px 10px;color:#64748b;">${puerta.ultimaRevision ? new Date(puerta.ultimaRevision).toLocaleDateString('es-ES') : '—'}</td>
-          <td style="padding:8px 10px;color:#64748b;">${puerta.proximaRevision ? new Date(puerta.proximaRevision).toLocaleDateString('es-ES') : '—'}</td>
-          <td style="padding:8px 10px;color:${estadoColor};font-weight:600;">${estadoTexto}</td>
-          <td style="text-align:center;padding:8px 10px;">
-            <button class="btn btn-outline btn-sm" onclick="abrirRevision('${puerta.id}')">
-              Revisar
-            </button>
-          </td>
-        </tr>
-      `;
-    });
-
-    html += `
-          </tbody>
-        </table>
-      </div>
-    `;
-  });
-
-  document.getElementById('app').innerHTML = html;
-}
-
-// ── Mostrar textarea si hallazgo está marcado ──
-window.rdToggleDetalle = function (checkbox) {
-  const fila = checkbox.closest('tr');
-  const textarea = fila.querySelector('.rd-detalle-input');
-  textarea.style.display = checkbox.checked ? 'block' : 'none';
-  rdValidar();
-};
-
-// ── Validar: activar final solo si TODAS las puertas tienen los 3 campos ──
-window.rdValidar = function () {
-  const checks = [...document.querySelectorAll('.rd-hallazgo-check')];
-  if (checks.length === 0) return;
-
-  let todasRevisadas = true;
-  checks.forEach(cb => {
-    const puerta = cb.dataset.puerta;
-    const correctivo = document.querySelector(`.rd-correctivo-check[data-puerta="${puerta}"]`);
-    const resultado = document.querySelector(`.rd-resultado-select[data-puerta="${puerta}"]`);
-    if (!cb.checked || !correctivo?.checked || !resultado?.value) todasRevisadas = false;
-  });
-
-  const final = document.getElementById('rd-check-final');
-  const btn = document.getElementById('rd-btn-guardar');
-  const label = document.getElementById('rd-final-label');
-  if (!final || !btn || !label) return;
-
-  final.disabled = !todasRevisadas;
-  label.style.opacity = todasRevisadas ? '1' : '.5';
-  label.style.color = todasRevisadas ? '#16a34a' : '#dc2626';
-  label.style.background = todasRevisadas ? '#f0fdf4' : '#fef2f2';
-  btn.disabled = !(todasRevisadas && final.checked);
-};
-
-window.cerrarModalRevision = function () {
-  document.getElementById('modal-revision-overlay')?.remove();
-};
-
-// ── Guardar: nueva fecha (+6 meses) + datos revisados ──
-window.guardarRondaRevision = async function () {
-  const checkFinal = document.getElementById('rd-check-final');
-  if (!checkFinal || !checkFinal.checked) {
-    showToast('⚠️ Debes marcar el checklist final para cerrar la revisión.', 'error');
-    return;
-  }
-
-  const detalles = {}, correctivos = {}, resultados = {};
-  document.querySelectorAll('.rd-correctivo-check').forEach(i => correctivos[i.dataset.puerta] = i.checked);
-  document.querySelectorAll('.rd-resultado-select').forEach(i => resultados[i.dataset.puerta] = i.value);
-  document.querySelectorAll('.rd-detalle-input').forEach(i => detalles[i.dataset.puerta] = i.value.trim());
-
-  const nuevaFecha = new Date();
-  nuevaFecha.setMonth(nuevaFecha.getMonth() + 6);
-  const iso = nuevaFecha.toISOString().slice(0, 10);
-  const hoy = new Date().toISOString().slice(0, 10);
-
-  const puertas = await dbGetAll('puertas');
-  const treintaDias = new Date(); treintaDias.setDate(treintaDias.getDate() + 30);
-  let actualizadas = 0;
-
-  for (const p of puertas) {
-    if (!p.proximaRevision || new Date(p.proximaRevision) > treintaDias) continue;
-    await dbPut('puertas', {
-      ...p,
-      proximaRevision: iso,
-      ultimaRevision: hoy,
-      hallazgo: detalles[p.id] ?? p.hallazgo,
-      correctivo: correctivos[p.id] ? 'Sí' : p.correctivo,
-      resultado: resultados[p.id] || p.resultado
-    });
-    actualizadas++;
-  }
-
-  console.log(`✅ ${actualizadas} puertas actualizadas. Próxima revisión: ${iso}`);
-  cerrarModalRevision();
-  showToast(`✅ ${actualizadas} puerta(s) cerradas · Próx.: ${iso}`, 'success');
+  showToast('Revisión registrada' + (proxima ? ' · Próx.: ' + proxima : ''));
   actualizarBadgeRevisiones();
-};
+  if (currentPage === 'revisionesProgramadas' || currentPage === 'revisionesCliente') {
+    const main = document.getElementById('mainContent');
+    if (window.render_revisionesCliente) window.render_revisionesCliente(main);
+  }
+}
 
 // ==========================================
 // HISTÓRICO DE PUERTAS Y REVISIONES (Cliente)
@@ -1588,6 +1006,7 @@ async function verHistoricoPuertas(clienteId) {
   const puertas = await dbGetByIndex('puertas', 'clienteId', clienteId);
   const todasRevs = await dbGetAll('revisiones');
   const empleados = await dbGetAll('empleados');
+  const ubicNombres = Object.fromEntries((await dbGetAll('ubicaciones')).map(u => [u.id, u.denominacion]));
 
   const nombreTecnico = id => {
     const e = empleados.find(x => x.id === id);
@@ -1637,7 +1056,7 @@ async function verHistoricoPuertas(clienteId) {
       return `
       <details style="border:1px solid rgba(148,163,184,.2); border-radius:8px; margin-bottom:8px; padding:10px 12px">
         <summary style="cursor:pointer; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:6px">
-          <span><strong>${escapeHtml(p.nombre)}</strong> <small style="color:var(--text-muted)">· ${tipo ? tipo.nombre : p.tipo}</small></span>
+          <span><strong>${escapeHtml(p.nombre)}</strong> <small style="color:var(--text-muted)">· ${tipo ? tipo.nombre : p.tipo}${p.ubicacionId && ubicNombres[p.ubicacionId] ? ' · 📍 ' + escapeHtml(ubicNombres[p.ubicacionId]) : ''}</small></span>
           <span style="font-size:13px">
             ${estadosIcon[p.estado] || ''} ${p.estado} · Próx: ${p.proximaRevision || '—'}${aviso}
             <small style="color:var(--text-muted)">(${revs.length} rev.)</small>
@@ -1663,8 +1082,6 @@ window.pages.setupNavigation = setupNavigation;
 window.pages.setupMobileMenu = setupMobileMenu;
 window.navigateTo = navigateTo;
 window.getCurrentPage = () => currentPage;
-window.getCurrentCadenId = () => syncCurrentCadenaId();
-window.setCurrentCadenId = (id) => syncCurrentCadenaId(id);
 window.showToast = showToast;
 window.diasHasta = diasHasta;
 window.closeAllModals = closeAllModals;

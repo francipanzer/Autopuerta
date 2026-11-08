@@ -4,6 +4,11 @@ let dashboardItvCountdownTimer=null;
 // Helpers compartidos con módulos diferidos (ver más abajo su definición completa)
 // kmEntreCoordenadasCore se define tras kmEntreCoordenadas y queda en window.
 
+// Stock bajo: solo artículos con stock controlado, no dados de baja y con un mínimo definido
+// (o con stock negativo). Evita marcar como «bajo» los miles de artículos importados de Sage sin mínimo.
+window.articuloStockBajo = a => !!a && a.controlStock !== false && !a.baja &&
+  ((Number(a.stockMinimo) > 0 && Number(a.stock) <= Number(a.stockMinimo)) || Number(a.stock) < 0);
+
 function diasHastaFechaITV(value){
   const match=String(value||'').slice(0,10).match(/^(\d{4})-(\d{2})-(\d{2})$/);
   if(!match) return null;
@@ -49,7 +54,7 @@ window.render_dashboard = async function(el){
   const vehiculos = await dbGetAll('vehiculos');
   const almacen = await dbGetAll('almacen');
 
-  // Banner Pendientes (revisión de rutas + clientes sin cadena + puertas sueltas)
+  // Banner Pendientes (clientes con mantenimiento: individuales y centrales)
   const pendientes = await getPendientesRevision();
   let bannerHTML = '';
   if (pendientes.length > 0) {
@@ -69,18 +74,15 @@ window.render_dashboard = async function(el){
               const col = p.dias <= 0 ? '#e11d48' : '#f59e0b';
               const cuando = p.dias < 0 ? `Vencida hace ${Math.abs(p.dias)} d` : p.dias === 0 ? '¡Vence HOY!' : `En ${p.dias} d`;
               // Título + destino según el tipo (fila clicable)
-              const titulo = p.tipo === 'ruta'
-                ? `<strong>${escapeHtml(p.cadenaNombre)}</strong> · ${escapeHtml(p.rutaNombre || '')}`
+              const titulo = p.tipo === 'central'
+                ? `<strong>${escapeHtml(p.nombre)}</strong> · ${escapeHtml(p.detalle || '')}`
                 : `<strong>${escapeHtml(p.nombre)}</strong>`;
-              const accion = p.tipo === 'ruta'
-                ? `verRutasDeCadena('${String(p.cadenaId || '').replace(/'/g, "")}')`
-                : p.tipo === 'cliente'
-                  ? `verTiendasDeCliente('${String(p.id || '').replace(/'/g, "")}')`
-                  : p.clienteId
-                    ? `gestionarPuertas('${String(p.clienteId).replace(/'/g, "")}')`
-                    : `navigateTo('revisionesProgramadas')`;
+              const idc = String(p.clienteId || p.id || '').replace(/'/g, "");
+              const accion = p.tipo === 'central'
+                ? (p.rutaId ? `verUbicacionesDeRuta('${idc}','${String(p.rutaId).replace(/'/g, "")}')` : `verRutasDeCliente('${idc}')`)
+                : `verPuertasDeCliente('${idc}')`;
               return `<div onclick="${accion}" title="Abrir revisión" style="cursor:pointer;display:flex;justify-content:space-between;align-items:center;gap:10px;padding:8px 12px;border-radius:8px;background:${col}14;border:1px solid ${col}40;">
-                <span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"><i class="fas fa-${p.tipo === 'ruta' ? 'route' : p.tipo === 'cliente' ? 'user' : 'door-open'}" style="color:${col};margin-right:8px;"></i>${titulo}</span>
+                <span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"><i class="fas fa-${p.tipo === 'central' ? 'sitemap' : 'user'}" style="color:${col};margin-right:8px;"></i>${titulo}</span>
                 <span style="color:${col};font-weight:700;font-size:12px;white-space:nowrap;">${cuando} <i class="fas fa-chevron-right" style="font-size:10px;margin-left:4px"></i></span>
               </div>`;
             }).join('')}
@@ -94,7 +96,7 @@ window.render_dashboard = async function(el){
   const totalPresupuesto = presupuestos.reduce((s,p)=>s+(p.total||0),0);
   const partesTotal = partes.length;
   const vehiculosEnRuta = vehiculos.filter(v=>v.estado==='en_ruta').length;
-  const stockBajoItems = almacen.filter(a=>a.stock<=a.stockMinimo);
+  const stockBajoItems = almacen.filter(window.articuloStockBajo);
 
   // Lógica de Alertas ITV
   let alertasHTML = '';
@@ -135,7 +137,8 @@ window.render_dashboard = async function(el){
   let revHTML = '';
   let numRev = 0;
 
-  const pendientesPuertas = puertas.filter(p => p.proximaRevision && diasHasta(p.proximaRevision) <= 7);
+  const conMantenimiento = new Set(clientes.filter(c => c.mantenimiento === true).map(c => String(c.id)));
+  const pendientesPuertas = puertas.filter(p => conMantenimiento.has(String(p.clienteId)) && p.proximaRevision && diasHasta(p.proximaRevision) <= 7);
   
   const grupos = {};
   pendientesPuertas.forEach(p => {
@@ -222,7 +225,7 @@ window.render_dashboard = async function(el){
     <div class="card" style="margin-top:20px; grid-column: 1 / -1;">
       <div class="card-header">
         <h3><i class="fas fa-door-open" style="color:#3b82f6; margin-right:8px;"></i>Próximas revisiones (${numRev})</h3>
-        <button class="btn btn-primary btn-sm" onclick="abrirRondaRevisiones()"><i class="fas fa-clipboard-check"></i> Ronda rápida</button>
+        <button class="btn btn-primary btn-sm" onclick="navigateTo('revisionesCliente')"><i class="fas fa-clipboard-check"></i> Ver revisiones</button>
       </div>
       <div style="padding: 15px;">
         ${revHTML}

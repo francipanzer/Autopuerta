@@ -20,7 +20,7 @@ window.renderEmpleados = async function(){
     '<td>'+escapeHtml(e.email||'—')+'</td>'+
     '<td class="actions-cell">'+
       '<button class="btn btn-outline btn-sm btn-icon" title="Editar" onclick="showEmpleadoForm(\''+e.id+'\')"><i class="fas fa-pen"></i></button>'+
-      '<button class="btn btn-outline btn-sm btn-icon" title="Eliminar" onclick="confirmDelete(\'Empleado '+escapeHtml(e.nombre)+'\', ()=>deleteEmpleado(\''+e.id+'\'))"><i class="fas fa-trash"></i></button>'+
+      '<button class="btn btn-danger btn-sm btn-icon" title="Eliminar" onclick="confirmDelete(\'Empleado '+escapeHtml(e.nombre)+'\', ()=>deleteEmpleado(\''+e.id+'\'))"><i class="fas fa-trash"></i></button>'+
     '</td></tr>'
   ).join('') || '<tr><td colspan="6" style="text-align:center;padding:30px;color:var(--text-muted)">Sin empleados</td></tr>';
 };

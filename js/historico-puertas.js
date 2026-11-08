@@ -72,8 +72,12 @@
     const body = document.getElementById('hist-puerta-body');
     if (!body) return;
 
+    const ubicacion = puerta?.ubicacionId ? await dbGet('ubicaciones', puerta.ubicacionId).catch(() => null) : null;
+    const per = window.Periodicidad ? window.Periodicidad.periodicidad(puerta || {}) : null;
     const ficha =
       '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:14px">' +
+      (ubicacion ? '<div><small style="color:var(--text-muted);display:block">Ubicación</small><div style="font-weight:600">' + esc(ubicacion.denominacion) + '</div></div>' : '') +
+      (per ? '<div><small style="color:var(--text-muted);display:block">Periodicidad</small><div style="font-weight:600">Cada ' + per.meses + ' meses</div></div>' : '') +
       '<div><small style="color:var(--text-muted);display:block">Cliente</small><div style="font-weight:600">' + esc(cliente?.nombre || '—') + '</div></div>' +
       '<div><small style="color:var(--text-muted);display:block">Tipo</small><div style="font-weight:600">' + esc(puerta?.tipo || '—') + '</div></div>' +
       '<div><small style="color:var(--text-muted);display:block">Nº de serie</small><div style="font-weight:600">' + esc(puerta?.numeroSerie || '—') + '</div></div>' +

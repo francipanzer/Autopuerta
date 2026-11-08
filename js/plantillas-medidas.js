@@ -294,7 +294,7 @@ window.PLANTILLAS_MEDIDAS = (function(){
         <span style="flex:1;font-size:12px;">${_esc(p.referencia||'Sin ref')} — ${_esc(p.fecha||'')}${p.fotoBase64?' · 📷':''}</span>
         <button class="btn btn-secondary btn-sm" data-cargar="${p.id}">Abrir</button>
         <button class="btn btn-secondary btn-sm" data-pdf="${p.id}">PDF</button>
-        <button class="btn btn-secondary btn-sm" data-borrar="${p.id}">🗑</button>
+        <button class="btn btn-danger btn-sm" data-borrar="${p.id}">🗑</button>
       </div>`).join('');
     cont.querySelectorAll('[data-cargar]').forEach(b=>b.addEventListener('click', ()=>{
       const p = listar().find(x=>x.id===b.dataset.cargar);

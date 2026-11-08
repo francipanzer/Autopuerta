@@ -950,14 +950,14 @@ window.generatePDF_dotics=async function(revision,metadata,{download=true}={}){
   doc.setFontSize(15);doc.setFont(undefined,'bold');doc.setTextColor(15,23,42);
   doc.text('INFORME VISITA DE MANTENIMIENTO',W/2,y+9,{align:'center'});
   doc.setFontSize(9);doc.setFont(undefined,'normal');doc.setTextColor(100,116,139);
-  doc.text(String(metadata.cliente||metadata.cadena||'DOTICS').toUpperCase(),W/2,y+15,{align:'center'});
+  doc.text(String(metadata.ubicacion||metadata.cliente||metadata.cadena||'DOTICS').toUpperCase(),W/2,y+15,{align:'center'});
   doc.setFontSize(8);doc.setTextColor(100,116,139);
   doc.text('Nº Revisión: '+String(revision.id||'—'),W-M,y+9,{align:'right'});
   y+=20;
 
   // Bloque de datos: Cliente / Nº contrato / Nº intervención / Técnico/s / Fecha
   const fields=[
-    ['Cliente',metadata.cliente||metadata.cadena||'—'],
+    ['Cliente',metadata.ubicacion||metadata.cliente||metadata.cadena||'—'],
     ['N.º contrato mantenimiento',metadata.contrato||'—'],
     ['N.º intervención',metadata.intervencion||'—'],
     ['Técnico/s',metadata.tecnicos||revision.tecnicoNombre||'—'],
@@ -983,20 +983,52 @@ window.generatePDF_dotics=async function(revision,metadata,{download=true}={}){
     item.tipoProducto||item.tipoPuerta||item.tipo||'—',
     item.denominacionCliente||item.concepto||'—',
     item.numeroSerie||'—',
-    item.estadoEquipo==='bueno'?'Bueno':item.estadoEquipo==='operativo'?'Operativo':item.estadoEquipo==='no_usar'?'No usar':(item.estadoEquipo||item.estado||'—'),
+    item.estadoEquipo==='bueno'||item.estadoEquipo==='operativo'||item.estadoEquipo==='no_usar'?'':(item.estadoEquipo||item.estado||'—'),
     item.observaciones||item.hallazgo||'',
     (item.fotos||[]).length?String(item.fotos.length)+' foto'+(item.fotos.length>1?'s':''):'—'
   ]);
   if(!body.length) body.push(['—','—','—','—','—','—']);
   const fotosPorFila=items.map(item=>item.fotos||[]);
   doc.autoTable(pdfTableStyle({
-    startY:y,margin:{left:M,right:M,bottom:34},
+    startY:y,margin:{left:M,right:M,bottom:46},
     head,body,
-    columnStyles:{0:{cellWidth:38},1:{cellWidth:62},2:{cellWidth:36},3:{cellWidth:28,halign:'center'},5:{cellWidth:26,halign:'center'}},
-    styles:{fontSize:8,cellPadding:2.2,valign:'middle'},
+    columnStyles:{0:{cellWidth:36},1:{cellWidth:58},2:{cellWidth:34},3:{cellWidth:36,halign:'center'},5:{cellWidth:26,halign:'center'}},
+    styles:{fontSize:8,cellPadding:2.2,valign:'middle',minCellHeight:9},
     headStyles:{fillColor:PDF_BRAND.primary,textColor:255,fontSize:8,fontStyle:'bold',cellPadding:2.5},
     bodyStyles:{fontSize:8,cellPadding:2.2,textColor:PDF_BRAND.text,overflow:'linebreak'},
+    didParseCell:data=>{
+      if(data.section==='head'&&data.column.index===3) data.cell.styles.halign='center';
+    },
     didDrawCell:data=>{
+      // Estado: los tres iconos (bueno / operativo / no usar), relleno el marcado
+      if(data.section==='body'&&data.column.index===3){
+        const e=items[data.row.index]?.estadoEquipo;
+        const cell=data.cell,r=2.7,gapI=2.4;
+        const total=3*r*2+2*gapI;
+        let cx=cell.x+(cell.width-total)/2+r;
+        const cy=cell.y+cell.height/2;
+        [['bueno',[22,163,74]],['operativo',[245,158,11]],['no_usar',[220,38,38]]].forEach(([k,c])=>{
+          const on=e===k;
+          const soft=c.map(v=>Math.round(v+(255-v)*.55));
+          doc.setLineWidth(.35);
+          doc.setDrawColor(...(on?c:soft));doc.setFillColor(...c);
+          if(k==='operativo'){
+            doc.triangle(cx,cy-r,cx+r*1.1,cy+r*.85,cx-r*1.1,cy+r*.85,on?'FD':'S');
+          }else{
+            doc.circle(cx,cy,r,on?'FD':'S');
+          }
+          const sym=on?[255,255,255]:soft;
+          doc.setDrawColor(...sym);doc.setFillColor(...sym);doc.setLineWidth(.55);
+          if(k==='bueno'){
+            doc.line(cx-1.4,cy+.1,cx-.4,cy+1.1);doc.line(cx-.4,cy+1.1,cx+1.5,cy-1.1);
+          }else if(k==='no_usar'){
+            doc.line(cx-1.3,cy-1.3,cx+1.3,cy+1.3);doc.line(cx+1.3,cy-1.3,cx-1.3,cy+1.3);
+          }else{
+            doc.line(cx,cy-.9,cx,cy+.35);doc.circle(cx,cy+1.05,.28,'F');
+          }
+          cx+=r*2+gapI;
+        });
+      }
       // Miniaturas embebidas en la celda de fotos (hasta 3, ~9 mm cada una)
       if(data.section==='body'&&data.column.index===5){
         const fotos=fotosPorFila[data.row.index]||[];
@@ -1026,41 +1058,27 @@ window.generatePDF_dotics=async function(revision,metadata,{download=true}={}){
       }
     }
   }));
-  y=(doc.lastAutoTable?.finalY||y)+8;
-
-  // Observaciones generales
-  if(metadata.observaciones){
-    const lines=doc.splitTextToSize(metadata.observaciones,contentW-12);
-    const h=Math.max(12,lines.length*4.6+9);
-    if(y+h>H-58){doc.addPage('a4','landscape');y=M;}
-    pdfBox(doc,M,y,contentW,h,PDF_BRAND.warn,PDF_BRAND.warnBorder);
-    doc.setFontSize(7);doc.setFont(undefined,'bold');doc.setTextColor(120,53,15);
-    doc.text('OBSERVACIONES GENERALES',M+5,y+5);
-    doc.setFontSize(8.5);doc.setFont(undefined,'normal');doc.setTextColor(15,23,42);
-    doc.text(lines,M+5,y+10);
-    y+=h+6;
-  }
+  y=(doc.lastAutoTable?.finalY||y)+4;
 
   // (Las fotos van embebidas en la columna «Fotos» de la tabla, dentro de cada fila)
 
-  // Pie: VºBº cliente + firma técnico + sello
-  const yPie=H-32;
-  const bw=(contentW-12)/3;
-  [[M,'VºBº CLIENTE'],[M+bw+6,'FIRMA TÉCNICO'],[M+(bw+6)*2,'SELLO']]
-    .forEach(([x,label])=>{
-      doc.setDrawColor(148,163,184);doc.setLineWidth(.35);
-      doc.rect(x,yPie,bw,22);
-      doc.setFontSize(7);doc.setFont(undefined,'normal');doc.setTextColor(100,116,139);
-      doc.text(label,x+3,yPie+5);
-    });
-  // Firma del técnico si la revisión la guarda
-  try{
-    const firma=metadata.firma||metadata.firmaTecnico||revision.firma;
-    if(firma&&String(firma).startsWith('data:image')){
-      pdfAddImageContain(doc,firma,M+bw+8,yPie+6,bw-4,14);
-    }
-  }catch(e){}
-
+  // Pie: VºBº del cliente (amplio, a la izquierda) + observaciones (pequeño, a la derecha). Sin firma del técnico
+  const gap=6,bwO=contentW*0.27,bwC=contentW-bwO-gap;
+  const obsLines=doc.splitTextToSize(String(metadata.observaciones||'').trim(),bwO-8).slice(0,14);
+  const pieH=Math.max(26,obsLines.length*3.9+11);
+  const yBase=H-16;                       // deja libre el pie de página
+  let yPie=yBase-pieH;
+  if(y>yPie){doc.addPage('a4','landscape');yPie=yBase-pieH;}
+  doc.setDrawColor(148,163,184);doc.setLineWidth(.35);
+  doc.rect(M,yPie,bwC,pieH);
+  doc.rect(M+bwC+gap,yPie,bwO,pieH);
+  doc.setFontSize(7);doc.setFont(undefined,'normal');doc.setTextColor(100,116,139);
+  doc.text('VºBº CLIENTE',M+3,yPie+5);
+  doc.text('OBSERVACIONES',M+bwC+gap+3,yPie+5);
+  if(obsLines.length){
+    doc.setFontSize(8);doc.setTextColor(15,23,42);
+    doc.text(obsLines,M+bwC+gap+3,yPie+10);
+  }
   addPDFFootersAllPages(doc);
   const filename='revision_dotics_'+String(revision.id||'').replace(/[^a-zA-Z0-9_-]/g,'_')+'.pdf';
   const blob=doc.output('blob');
@@ -1075,18 +1093,18 @@ window.generatePDF_revision=async function(revisionId,{download=true}={}){
   try{metadata=JSON.parse(revision.notas||'{}');}catch(error){metadata={observaciones:revision.notas||''};}
   // Las revisiones DOTICS salen en el formato del formulario físico
   // "INFORME VISITA DE MANTENIMIENTO" (modelo Assa Abloy en horizontal).
-  if(metadata.form==='DOTICS_VISITA_V1'||String(metadata.cadena||metadata.cliente||'').trim().toLocaleUpperCase()==='DOTICS'){
+  if(metadata.form==='DOTICS_VISITA_V1'||String(metadata.cadena||metadata.cliente||'').toLocaleUpperCase().includes('DOTICS')){
     return generatePDF_dotics(revision,metadata,{download});
   }
   const items=revision.items||[];
   const doc=await createBrandedPDF('Informe de Revisión','Revisión de equipos');
-  const chain=metadata.cadena||metadata.cliente||'—';
-  const stores=(metadata.supermercados||[]).map(store=>store.nombre).filter(Boolean).join(', ');
+  const chain=metadata.cliente||metadata.cadena||'—';
+  const stores=(metadata.ubicaciones||metadata.supermercados||[]).map(store=>store.nombre).filter(Boolean).join(', ');
   let y=pdfSectionTitle(doc,'Resumen de revisión',38);
   pdfBox(doc,14,y,182,30,PDF_BRAND.panel,PDF_BRAND.panelBorder);
   pdfField(doc,'Fecha',formatDate(revision.fecha),20,y+10,78);
-  pdfField(doc,'Cadena',chain,110,y+10,78);
-  pdfField(doc,'Cliente / supermercado',stores||metadata.cliente||'—',20,y+23,82);
+  pdfField(doc,'Cliente',chain,110,y+10,78);
+  pdfField(doc,'Ruta / ubicaciones',[metadata.rutaNombre,stores].filter(Boolean).join(' · ')||'—',20,y+23,82);
   pdfField(doc,'Técnico',metadata.tecnicos||revision.tecnicoNombre||revision.tecnicoId||'—',110,y+23,78);
   y+=38;
   let tableRows=items.map(item=>[
@@ -1149,7 +1167,7 @@ window.generatePDF_revision=async function(revisionId,{download=true}={}){
 };
 
 window.generatePDF_almacen = async function(){
-  const items = await dbGetAll('almacen');
+  const items = (await dbGetAll('almacen')).filter(a => !a.baja);
   if(!items.length){showToast('No hay artículos en el almacén','error');return}
   const doc = await createBrandedPDF('Inventario de Almacén','Control de stock');
   const tableStart=pdfSectionTitle(doc,'Existencias',38);
