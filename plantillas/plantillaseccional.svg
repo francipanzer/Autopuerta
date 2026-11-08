@@ -1,0 +1,48 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1654" height="1169" viewBox="0 0 1654 1169">
+  <rect width="1654" height="1169" fill="#ffffff"/>
+  <rect x="40" y="40" width="1574" height="1089" fill="none" stroke="#1e3a5f" stroke-width="4"/>
+  <text x="80" y="105" font-family="Arial" font-size="42" font-weight="bold" fill="#1e3a5f">HOJA DE MEDIDAS - PUERTA SECCIONAL</text>
+  <line x1="80" y1="125" x2="1574" y2="125" stroke="#1e3a5f" stroke-width="3"/>
+
+  <g transform="translate(120,220)">
+    <rect x="0" y="0" width="900" height="620" fill="#f8fafc" stroke="#1e3a5f" stroke-width="5"/>
+    <rect x="18" y="18" width="864" height="584" fill="#e8f0fa" stroke="#4a6fa5" stroke-width="3"/>
+    <line x1="18" y1="164" x2="882" y2="164" stroke="#4a6fa5" stroke-width="2"/>
+    <line x1="18" y1="310" x2="882" y2="310" stroke="#4a6fa5" stroke-width="2"/>
+    <line x1="18" y1="456" x2="882" y2="456" stroke="#4a6fa5" stroke-width="2"/>
+    <rect x="-28" y="0" width="28" height="620" fill="#cbd5e1" stroke="#1e3a5f" stroke-width="3"/>
+    <rect x="900" y="0" width="28" height="620" fill="#cbd5e1" stroke="#1e3a5f" stroke-width="3"/>
+    <circle cx="450" cy="-34" r="20" fill="#1e3a5f"/>
+    <rect x="380" y="-58" width="140" height="14" rx="7" fill="#334155"/>
+    <line x1="0" y1="680" x2="900" y2="680" stroke="#e11d48" stroke-width="4"/>
+    <polygon points="0,680 22,672 22,688" fill="#e11d48"/>
+    <polygon points="900,680 878,672 878,688" fill="#e11d48"/>
+    <text x="450" y="716" font-family="Arial" font-size="30" font-weight="bold" fill="#e11d48" text-anchor="middle">ANCHO HUECO</text>
+    <line x1="970" y1="0" x2="970" y2="620" stroke="#e11d48" stroke-width="4"/>
+    <polygon points="970,0 962,22 978,22" fill="#e11d48"/>
+    <polygon points="970,620 962,598 978,598" fill="#e11d48"/>
+    <text x="935" y="310" font-family="Arial" font-size="30" font-weight="bold" fill="#e11d48" transform="rotate(90 935 310)" text-anchor="middle">ALTO HUECO</text>
+    <line x1="18" y1="602" x2="882" y2="602" stroke="#0d9488" stroke-width="3" stroke-dasharray="14,9"/>
+    <text x="450" y="592" font-family="Arial" font-size="24" fill="#0d9488" text-anchor="middle">LUZ LIBRE</text>
+  </g>
+
+  <g transform="translate(1130,220)">
+    <text x="0" y="0" font-family="Arial" font-size="30" font-weight="bold" fill="#1e3a5f">DATOS</text>
+    <g font-family="Arial" font-size="26" fill="#0f172a">
+      <text x="0" y="60">ANCHO HUECO (mm)</text>
+      <rect x="290" y="32" width="190" height="42" fill="#eef6ff" stroke="#0284c7" stroke-width="3" rx="6"/>
+      <text x="0" y="140">ALTO HUECO (mm)</text>
+      <rect x="290" y="112" width="190" height="42" fill="#eef6ff" stroke="#0284c7" stroke-width="3" rx="6"/>
+      <text x="0" y="220">LUZ LIBRE (mm)</text>
+      <rect x="290" y="192" width="190" height="42" fill="#eef6ff" stroke="#0284c7" stroke-width="3" rx="6"/>
+      <text x="0" y="300">HIERRO GUIA (mm)</text>
+      <rect x="290" y="272" width="190" height="42" fill="#eef6ff" stroke="#0284c7" stroke-width="3" rx="6"/>
+      <text x="0" y="380">NUM. PANELES</text>
+      <rect x="290" y="352" width="190" height="42" fill="#eef6ff" stroke="#0284c7" stroke-width="3" rx="6"/>
+      <text x="0" y="460">OBSERVACIONES</text>
+      <rect x="0" y="480" width="460" height="120" fill="#eef6ff" stroke="#0284c7" stroke-width="3" rx="6"/>
+    </g>
+  </g>
+
+  <text x="80" y="1100" font-family="Arial" font-size="22" fill="#64748b">AutoPuerta Pro - Hoja de toma de medidas - Puerta Seccional</text>
+</svg>
